@@ -51,31 +51,17 @@ loadAccount();
 setInterval(loadAccount,60000);
 
 /* ------------------ CHART 24h ------------------ */
-async function fetchHistory24h(){
-  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
-  chartData = d.map(c=>+c[4]); // chiusura
-  chartLabels = d.map(c=>{
-    const date = new Date(c[0]);
-    return `${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}`;
-  });
-
-  price24hOpen = chartData[0];
-  price24hLow = Math.min(...chartData);
-  price24hHigh = Math.max(...chartData);
-  targetPrice = chartData.at(-1);
-
-  initChart24h();
+function generate24hLabels(){
+  const labels = [];
+  for(let h=0; h<24; h++){
+    labels.push(h.toString().padStart(2,'0')+":00");
+  }
+  return labels;
 }
 
-/* Gradient dinamico */
-function createGradient(ctx, price){
-  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
-  gradient.addColorStop(0, price>=price24hOpen?"rgba(34,197,94,0.2)":"rgba(239,68,68,0.2)");
-  gradient.addColorStop(1,"rgba(0,0,0,0)");
-  return gradient;
-}
+chartLabels = generate24hLabels();
+chartData = new Array(24).fill(null); // inizialmente vuoti
 
-/* Inizializza Chart.js con puntino sull’ultimo prezzo e rettangolo grigio */
 function initChart24h(){
   const ctx = $("priceChart").getContext("2d");
   chart = new Chart(ctx,{
@@ -85,53 +71,25 @@ function initChart24h(){
       datasets:[{
         data: chartData,
         borderColor:"#22c55e",
-        backgroundColor:createGradient(ctx, chartData.at(-1)),
+        backgroundColor:createGradient(ctx, chartData.filter(v=>v!==null).at(-1) || 0),
         fill:true,
         pointRadius:0,
         tension:0.3
-      },{
-        data:[chartData.at(-1)],
-        borderColor:"transparent",
-        backgroundColor:"#facc15",
-        pointRadius:6,
-        pointHoverRadius:6,
-        fill:false
       }]
     },
     options:{
       responsive:true,
       maintainAspectRatio:false,
       animation:false,
-      plugins:{ 
-        legend:{display:false},
-        tooltip:{enabled:false},
-        afterDraw: chart => {
-          // disegna il rettangolo grigio sull’ultimo prezzo
-          const ctx = chart.ctx;
-          const yScale = chart.scales['y'];
-          const xScale = chart.scales['x'];
-          const lastPrice = chart.data.datasets[0].data.at(-1);
-          const y = yScale.getPixelForValue(lastPrice);
-
-          ctx.save();
-          ctx.fillStyle = "rgba(107,114,128,0.2)";
-          ctx.fillRect(xScale.left, y-8, xScale.right-xScale.left, 16);
-          ctx.restore();
-        }
-      }
-      ,
+      plugins:{
+        legend:{display:false}
+      },
       scales:{
         x:{
           ticks:{
             color:"#9ca3af",
             autoSkip:false,
-            maxRotation:0,
-            callback:function(val,index){
-              const label = this.getLabelForValue(index);
-              const [h,m] = label.split(':').map(Number);
-              if(m===0) return label; // solo ore intere
-              return '';
-            }
+            maxRotation:0
           },
           grid:{color:"#374151"}
         },
@@ -141,27 +99,35 @@ function initChart24h(){
   });
 }
 
-/* Aggiorna grafico realtime */
+function createGradient(ctx, price){
+  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+  gradient.addColorStop(0, price>=price24hOpen?"rgba(34,197,94,0.2)":"rgba(239,68,68,0.2)");
+  gradient.addColorStop(1,"rgba(0,0,0,0)");
+  return gradient;
+}
+
+/* Aggiorna grafico in realtime rispetto all’ora corrente */
 function updateChartRealtime(price){
-  chartData.push(price);
   const now = new Date();
-  chartLabels.push(`${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`);
+  const hour = now.getHours();
+  chartData[hour] = price;
 
-  if(chartData.length>1440){ chartData.shift(); chartLabels.shift(); }
-
-  price24hHigh = Math.max(price24hHigh, price);
-  price24hLow = Math.min(price24hLow, price);
+  // Aggiorna valori max e min
+  const filtered = chartData.filter(v=>v!==null);
+  if(filtered.length>0){
+    price24hHigh = Math.max(...filtered);
+    price24hLow = Math.min(...filtered);
+  }
 
   chart.data.datasets[0].data = chartData;
   chart.data.datasets[0].borderColor = price>=price24hOpen?"#22c55e":"#ef4444";
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
-
-  // Aggiorna puntino sull’ultimo prezzo
-  chart.data.datasets[1].data = [price];
   chart.update("none");
+
+  targetPrice = price; // per animazioni dei valori
 }
 
-fetchHistory24h();
+initChart24h();
 
 /* ------------------ WEBSOCKET ------------------ */
 let ws;
@@ -171,7 +137,6 @@ function startWS(){
   ws.onopen = () => setConnectionStatus(true);
   ws.onmessage = e=>{
     const p=+JSON.parse(e.data).p;
-    targetPrice=p;
     updateChartRealtime(p);
   };
   ws.onclose = ()=>{ setConnectionStatus(false); setTimeout(startWS,3000); };
@@ -201,7 +166,6 @@ function updatePriceBar(){
 }
 
 function animate(){
-  // Prezzo
   const oldPrice=displayedPrice;
   displayedPrice=lerp(displayedPrice,targetPrice,0.1);
   colorNumber($("price"),displayedPrice,oldPrice,4);
