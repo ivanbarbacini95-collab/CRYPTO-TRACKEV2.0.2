@@ -6,14 +6,14 @@ let targetPrice = 0, price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f) => a + (b-a)*f;
 
-/* Funzione per colorare le cifre cambiate */
+/* Colorazione dinamica dei numeri */
 function colorNumber(el, n, o, d){
   const ns = n.toFixed(d);
   const os = o.toFixed(d);
   el.innerHTML = [...ns].map((c,i) => c!==os[i] ? `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>` : `<span style="color:#f9fafb">${c}</span>`).join("");
 }
 
-/* INPUT ADDRESS */
+/* Input address */
 $("addressInput").value = address;
 $("addressInput").onchange = e => {
   address = e.target.value.trim();
@@ -21,12 +21,13 @@ $("addressInput").onchange = e => {
   loadAccount();
 };
 
-/* ACCOUNT */
+/* Fetch JSON helper */
 async function fetchJSON(url){
   try { return await (await fetch(url)).json(); } 
   catch { return {}; }
 }
 
+/* Load account */
 async function loadAccount(){
   if(!address) return;
   const [b,s,r,i] = await Promise.all([
@@ -35,7 +36,6 @@ async function loadAccount(){
     fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
-
   availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
   stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
   const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
@@ -46,10 +46,10 @@ async function loadAccount(){
 loadAccount();
 setInterval(loadAccount,60000);
 
-/* ------------------- CHART ------------------- */
+/* ---------------- CHART 24H ---------------- */
 let chart, chartData=[], chartLabels=[];
 
-/* Popola etichette fisse 24h: 00:00, 01:00, ..., 23:00 */
+/* Genera labels fisse 00:00-23:00 */
 function generate24hLabels(){
   const labels = [];
   for(let h=0; h<24; h++){
@@ -59,10 +59,13 @@ function generate24hLabels(){
 }
 chartLabels = generate24hLabels();
 
-/* Fetch dati ultimi 24h da Binance (1m precisione) */
-async function fetchHistory24h(){
-  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
-  chartData = d.map(c=>+c[4]); // prezzo di chiusura
+/* Fetch storico da Binance */
+async function fetchHistoryToday(){
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+  const limit = Math.floor((Date.now()-startOfDay)/60000); // minuti dall'inizio della giornata
+  const d = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=${limit}`);
+  chartData = d.map(c=>+c[4]);
   price24hOpen = chartData[0];
   price24hLow = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
@@ -70,7 +73,7 @@ async function fetchHistory24h(){
   displayedPrice = targetPrice;
   initChart24h();
 }
-fetchHistory24h();
+fetchHistoryToday();
 
 /* Gradient dinamico */
 function createGradient(ctx, price){
@@ -88,7 +91,7 @@ function initChart24h(){
     data:{
       labels: chartLabels,
       datasets:[{
-        data: chartData.slice(-24*60), // ultimi 24h
+        data: chartData,
         borderColor: targetPrice>=price24hOpen?"#22c55e":"#ef4444",
         backgroundColor:createGradient(ctx,targetPrice),
         fill:true,
@@ -100,17 +103,12 @@ function initChart24h(){
       responsive:true,
       maintainAspectRatio:false,
       animation:false,
-      plugins:{
-        legend:{display:false}
-      },
+      plugins:{ legend:{display:false} },
       scales:{
         x:{
           ticks:{
             color:"#9ca3af",
-            autoSkip:false,
-            callback: function(val,index,ticks){
-              return index%60===0 ? this.getLabelForValue(index) : '';
-            }
+            autoSkip:false
           }
         },
         y:{ ticks:{color:"#9ca3af"} }
@@ -119,19 +117,19 @@ function initChart24h(){
   });
 }
 
-/* Aggiorna ultimo punto in realtime */
+/* Aggiorna grafico in realtime */
 function updateChartRealtime(price){
   chartData.push(price);
   if(chartData.length>1440) chartData.shift();
   price24hHigh = Math.max(price24hHigh,price);
   price24hLow = Math.min(price24hLow,price);
-  chart.data.datasets[0].data = chartData.slice(-24*60);
+  chart.data.datasets[0].data = chartData;
   chart.data.datasets[0].borderColor = price>=price24hOpen?"#22c55e":"#ef4444";
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx,price);
   chart.update("none");
 }
 
-/* ------------------- WEBSOCKET ------------------- */
+/* ---------------- WEBSOCKET ---------------- */
 let ws;
 function startWS(){
   if(ws) ws.close();
@@ -143,11 +141,11 @@ function startWS(){
     updateChartRealtime(p);
   };
   ws.onclose = ()=>{ setConnectionStatus(false); setTimeout(startWS,3000); };
-  ws.onerror = ()=>setConnectionStatus(false);
+  ws.onerror = ()=> setConnectionStatus(false);
 }
 startWS();
 
-/* ------------------- CONNECTION ------------------- */
+/* ---------------- CONNECTION ---------------- */
 const connectionStatus = $("connectionStatus");
 const statusDot = connectionStatus.querySelector(".status-dot");
 const statusText = connectionStatus.querySelector(".status-text");
@@ -156,7 +154,7 @@ function setConnectionStatus(online){
   statusText.textContent = online?"Online":"Offline";
 }
 
-/* ------------------- ANIMAZIONE VALORI ------------------- */
+/* ---------------- ANIMAZIONE VALORI ---------------- */
 function updatePriceBar(){
   const min=price24hLow, max=price24hHigh, open=price24hOpen, price=displayedPrice;
   let linePercent = price>=open? 50+((price-open)/(max-open)*50) : 50-((open-price)/(open-min)*50);
@@ -189,7 +187,7 @@ function animate(){
   colorNumber($("available"),displayedAvailable,oldAvailable,6);
   $("availableUsd").textContent=`≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
-  // Staked
+  // Stake
   const oldStake=displayedStake;
   displayedStake=lerp(displayedStake,stakeInj,0.1);
   colorNumber($("stake"),displayedStake,oldStake,4);
@@ -208,9 +206,16 @@ function animate(){
   // APR
   $("apr").textContent=apr.toFixed(2)+"%";
 
-  // Last update
   $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ---------------- RESET GIORNO SUCCESSIVO ---------------- */
+setInterval(()=>{
+  const now = new Date();
+  if(now.getHours()===0 && now.getMinutes()===0){
+    fetchHistoryToday(); // ricomincia grafico nuovo giorno
+  }
+},60000);
