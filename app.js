@@ -53,15 +53,10 @@ async function fetchHistory24h(){
   // Prendiamo 1440 punti (1 per minuto) da Binance
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
   chartData = d.map(c=>+c[4]);
-
-  // Generiamo labels solo per le ore, 0,3,6...21
-  chartLabels = Array(1440).fill("");
-  for(let i=0; i<1440; i++){
-    const date = new Date(d[i][0]);
-    if(date.getHours() % 3 === 0 && date.getMinutes() === 0){
-      chartLabels[i] = `${date.getHours().toString().padStart(2,'0')}:00`;
-    }
-  }
+  chartLabels = d.map(c=>{
+    const date = new Date(c[0]);
+    return `${date.getHours().toString().padStart(2,'0')}:00`;
+  });
 
   price24hOpen = chartData[0];
   price24hLow = Math.min(...chartData);
@@ -96,7 +91,8 @@ function initChart24h(){
         x:{
           ticks:{
             color:"#9ca3af",
-            autoSkip:false
+            autoSkip:false,
+            maxTicksLimit:24
           },
           grid:{color:"#1f2937"}
         },
@@ -120,8 +116,8 @@ function createGradient(ctx, price){
 
 function updateChartRealtime(price){
   chartData.push(price);
-  chartLabels.push(""); // Manteniamo le ore fisse
-
+  const now = new Date();
+  chartLabels.push(`${now.getHours().toString().padStart(2,'0')}:00`);
   if(chartData.length>1440){ chartData.shift(); chartLabels.shift(); }
 
   price24hHigh = Math.max(...chartData);
