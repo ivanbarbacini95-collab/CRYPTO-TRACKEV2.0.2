@@ -181,7 +181,8 @@ body {
 
 /* ================= CHART ================= */
 .chart-card {
-  height: 450px; /* aumentata da 350px */
+  /* Altezza responsive */
+  height: min(60vh, 550px); /* 60% dell’altezza viewport, max 550px */
   width: 100%;
 }
 
