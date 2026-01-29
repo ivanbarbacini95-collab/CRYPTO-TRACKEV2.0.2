@@ -46,12 +46,12 @@ async function loadAccount(){
 loadAccount();
 setInterval(loadAccount,60000);
 
-/* ---------------- CHART 24h ---------------- */
+/* ---------------- CHART ---------------- */
 let chart, chartData=[], chartLabels=[];
 
 async function fetchHistory24h(){
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
-  chartData = d.map(c=>+c[4]); // prezzo di chiusura
+  chartData = d.map(c=>+c[4]);
   chartLabels = d.map(c=>{
     const date = new Date(c[0]);
     return `${date.getHours().toString().padStart(2,'0')}:00`;
