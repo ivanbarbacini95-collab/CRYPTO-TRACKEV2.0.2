@@ -50,6 +50,7 @@ setInterval(loadAccount,60000);
 let chart, chartData=[], chartLabels=[];
 
 async function fetchHistory24h(){
+  // Prendiamo 1440 punti (1 per minuto) da Binance
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
   chartData = d.map(c=>+c[4]);
   chartLabels = d.map(c=>{
@@ -78,7 +79,7 @@ function initChart24h(){
         backgroundColor:createGradient(ctx, chartData.at(-1)),
         fill:true,
         pointRadius:0,
-        tension:0.3
+        tension:0.2
       }]
     },
     options:{
@@ -87,8 +88,20 @@ function initChart24h(){
       animation:false,
       plugins:{legend:{display:false}},
       scales:{
-        x:{ ticks:{color:"#9ca3af", autoSkip=false, maxTicksLimit:24} },
-        y:{ ticks:{color:"#9ca3af"} }
+        x:{
+          ticks:{
+            color:"#9ca3af",
+            autoSkip:false,
+            maxTicksLimit:24
+          },
+          grid:{color:"#1f2937"}
+        },
+        y:{
+          ticks:{color:"#9ca3af"},
+          grid:{color:"#1f2937"},
+          min:price24hLow*0.995,
+          max:price24hHigh*1.005
+        }
       }
     }
   });
@@ -158,9 +171,8 @@ function updatePriceBar(){
 }
 
 function animate(){
-  const oldPrice=displayedPrice;
   displayedPrice=lerp(displayedPrice,targetPrice,0.1);
-  colorNumber($("price"),displayedPrice,oldPrice,4);
+  colorNumber($("price"),displayedPrice,displayedPrice,4);
 
   const d=((displayedPrice-price24hOpen)/price24hOpen)*100;
   $("price24h").textContent=`${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
@@ -173,21 +185,18 @@ function animate(){
   updatePriceBar();
 
   // Available
-  const oldAvailable=displayedAvailable;
   displayedAvailable=lerp(displayedAvailable,availableInj,0.1);
-  colorNumber($("available"),displayedAvailable,oldAvailable,6);
+  colorNumber($("available"),displayedAvailable,displayedAvailable,6);
   $("availableUsd").textContent=`≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
   // Staked
-  const oldStake=displayedStake;
   displayedStake=lerp(displayedStake,stakeInj,0.1);
-  colorNumber($("stake"),displayedStake,oldStake,4);
+  colorNumber($("stake"),displayedStake,displayedStake,4);
   $("stakeUsd").textContent=`≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
   // Rewards
-  const oldRewards=displayedRewards;
   displayedRewards=lerp(displayedRewards,rewardsInj,0.1);
-  colorNumber($("rewards"),displayedRewards,oldRewards,7);
+  colorNumber($("rewards"),displayedRewards,displayedRewards,7);
   $("rewardsUsd").textContent=`≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
   $("rewardBar").style.background="linear-gradient(to right, #0ea5e9, #3b82f6)";
   $("rewardBar").style.width=Math.min(displayedRewards/0.05*100,100)+"%";
