@@ -181,14 +181,20 @@ body {
 
 /* ================= CHART ================= */
 .chart-card {
-  /* Altezza responsive */
+  /* Altezza responsive con padding incluso e overflow sicuro */
   height: min(60vh, 550px); /* 60% dell’altezza viewport, max 550px */
   width: 100%;
+  padding: 1rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 #priceChart {
   width: 100% !important;
   height: 100% !important;
+  flex: 1 1 auto; /* canvas riempie lo spazio disponibile */
 }
 
 /* ================= COLORS ================= */
