@@ -173,6 +173,7 @@ body {
   gap: 2rem;
   white-space: nowrap;
   align-items: center;
+  animation: scrollTicker linear infinite;
 }
 
 .ticker-item {
@@ -187,6 +188,12 @@ body {
   height:10px;
   border-radius:50%;
   background:#ef4444;
+}
+
+/* SCROLL ANIMATION */
+@keyframes scrollTicker {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
 }
 
 /* ===== MODAL ===== */
