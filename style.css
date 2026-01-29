@@ -1,13 +1,85 @@
-/* --- TUTTO IL TUO CSS ORIGINALE --- */
-/* (identico a quello che mi hai mandato, non lo ripeto per spazio) */
+/* ================== BASE ================== */
+body {
+  font-family: Inter, sans-serif;
+  background: #000;
+  color: #f9fafb;
+  margin: 0;
+  padding: 1rem;
+}
 
-/* ========== MARKET TICKER ========== */
+.container {
+  max-width: 900px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: relative;
+}
+
+/* ================== HEADER ================== */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  position: relative;
+}
+
+.header h1 {
+  font-size: 1.9rem;
+  font-weight: 800;
+  background: linear-gradient(90deg, #22c55e, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header .dot {
+  color: #9ca3af;
+  -webkit-text-fill-color: #9ca3af;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+  color: #9ca3af;
+}
+
+/* ================== CONNECTION STATUS ================== */
+.connection-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.8; }
+}
+
+.status-text {
+  color: #f9fafb;
+}
+
+/* ================== MARKET TICKER ================== */
 .market-ticker {
+  width: 100%;
   overflow: hidden;
   background: #020617;
   border-top: 1px solid #1e293b;
   border-bottom: 1px solid #1e293b;
-  padding: .4rem 0;
+  padding: 0.4rem 0;
 }
 
 .ticker-track {
@@ -24,13 +96,20 @@
 .ticker-item {
   display: flex;
   align-items: center;
-  gap: .4rem;
-  font-size: .85rem;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: bold;
   cursor: pointer;
 }
 
-.ticker-symbol { color: #9ca3af; }
-.ticker-price { color: #f9fafb; }
+.ticker-symbol {
+  color: #9ca3af;
+}
+
+.ticker-price {
+  color: #f9fafb;
+}
+
 .ticker-dot {
   width: 7px;
   height: 7px;
@@ -42,7 +121,135 @@
   to { transform: translateX(-100%); }
 }
 
-/* ========== MODAL MINI CHART ========== */
+/* ================== INPUT ================== */
+#addressInput {
+  padding: 0.8rem;
+  border-radius: 0.5rem;
+  border: 2px solid #4b5563;
+  background: #0a0f1f;
+  color: #f9fafb;
+  outline: none;
+}
+
+#addressInput:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+/* ================== CARDS ================== */
+.cards-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card {
+  background: linear-gradient(135deg, #111827, #1e293b);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+
+.value-row {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 1.4rem;
+  font-weight: bold;
+}
+
+.sub-row {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 0.9rem;
+  color: #9ca3af;
+}
+
+/* ================== PRICE BAR ================== */
+.price-bar-container {
+  position: relative;
+  height: 24px;
+  background: #111827;
+  border-radius: 0.3rem;
+  overflow: hidden;
+}
+
+.price-bar {
+  position: absolute;
+  height: 100%;
+  transition: width 0.3s ease, left 0.3s ease, background 0.3s ease;
+  border-radius: 0.3rem;
+}
+
+.price-line {
+  position: absolute;
+  width: 2px;
+  height: 100%;
+  background: #facc15;
+  transition: left 0.3s ease;
+}
+
+.price-values {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  position: relative;
+  height: 18px;
+}
+
+.price-extremes.left { position: absolute; left: 0; }
+.price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
+.price-extremes.right { position: absolute; right: 0; }
+
+/* ================== REWARD BAR ================== */
+.reward-bar-container {
+  position: relative;
+  height: 24px;
+  background: #111827;
+  border-radius: 0.3rem;
+  overflow: hidden;
+}
+
+.reward-bar {
+  height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 0.3rem;
+}
+
+.reward-percent {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.85rem;
+}
+
+/* ================== CHART ================== */
+.chart-card {
+  height: 300px;
+}
+
+#priceChart {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ================== STATES ================== */
+.up { color: #22c55e; }
+.down { color: #ef4444; }
+
+.last-update {
+  font-size: 0.8rem;
+  text-align: center;
+  color: #9ca3af;
+}
+
+/* ================== MODAL MINI CHART ================== */
 .modal {
   position: fixed;
   inset: 0;
@@ -53,11 +260,13 @@
   z-index: 50;
 }
 
-.hidden { display: none; }
+.hidden {
+  display: none;
+}
 
 .modal-content {
   background: #020617;
-  border-radius: .5rem;
+  border-radius: 0.5rem;
   padding: 1rem;
   width: 90%;
   max-width: 500px;
@@ -67,7 +276,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: .5rem;
+  margin-bottom: 0.5rem;
 }
 
 #closeModal {
@@ -79,13 +288,13 @@
 }
 
 .session-badge {
-  padding: .2rem .5rem;
-  border-radius: .4rem;
-  font-size: .7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.7rem;
   font-weight: bold;
 }
 
-/* ========== CONFIG PANEL ========== */
+/* ================== CONFIG PANEL ================== */
 .config-btn {
   position: fixed;
   bottom: 1rem;
@@ -93,8 +302,8 @@
   background: #1e293b;
   color: #f9fafb;
   border: none;
-  padding: .6rem .8rem;
-  border-radius: .5rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
   cursor: pointer;
 }
 
@@ -104,12 +313,18 @@
   right: 1rem;
   background: #020617;
   padding: 1rem;
-  border-radius: .5rem;
+  border-radius: 0.5rem;
   width: 200px;
+}
+
+.config-panel h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
 }
 
 .config-panel label {
   display: flex;
-  gap: .5rem;
-  font-size: .85rem;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
 }
