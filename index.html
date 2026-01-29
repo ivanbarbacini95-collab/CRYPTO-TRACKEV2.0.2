@@ -15,9 +15,12 @@
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
-    <div class="ticker-wrapper">
-      <div id="tickerTrack" class="ticker-track"></div>
+    
+    <!-- Ticker Indici -->
+    <div class="ticker-container">
+      <div class="ticker-track" id="tickerTrack"></div>
     </div>
+
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
     <!-- Connection Status -->
@@ -87,10 +90,11 @@
 
 </div>
 
-<!-- MINI CHART MODAL -->
-<div id="chartModal" class="chart-modal hidden">
+<!-- Modal Mini-Chart -->
+<div id="chartModal" class="modal hidden">
   <div class="modal-content">
-    <span id="closeModal" class="close-button">×</span>
+    <span id="closeModal" class="close">&times;</span>
+    <h3 id="miniChartTitle"></h3>
     <canvas id="miniChart"></canvas>
   </div>
 </div>
