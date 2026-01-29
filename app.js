@@ -13,10 +13,10 @@ let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f) => a + (b-a)*f;
 
-/* ===== Number coloring (REAL FIX) ===== */
-function colorNumber(el, newVal, oldVal, decimals){
-  const ns = newVal.toFixed(decimals);
-  const os = oldVal.toFixed(decimals);
+/* ===== Number coloring (per-digit, reale) ===== */
+function colorNumber(el, newVal, oldVal, d){
+  const ns = newVal.toFixed(d);
+  const os = oldVal.toFixed(d);
 
   el.innerHTML = [...ns].map((c,i)=>{
     if(os[i] === undefined || c === os[i])
@@ -65,7 +65,6 @@ setInterval(loadAccount, 2000);
 
 /* ================== CHART ================== */
 let chart, chartData = [];
-const chartDot = document.getElementById("chartDot");
 
 async function fetchHistory24h(){
   const d = await fetchJSON(
@@ -112,6 +111,7 @@ function initChart(){
       plugins:{
         legend:{display:false},
         annotation:{
+          drawTime:"afterDatasetsDraw",
           annotations:{
             ath:{
               type:"line",
@@ -123,7 +123,9 @@ function initChart(){
                 display:true,
                 content:()=>`ATH ${price24hHigh.toFixed(3)}`,
                 color:"#facc15",
-                position:"end"
+                backgroundColor:"rgba(0,0,0,0.6)",
+                position:"center",
+                padding:4
               }
             },
             atl:{
@@ -136,7 +138,9 @@ function initChart(){
                 display:true,
                 content:()=>`ATL ${price24hLow.toFixed(3)}`,
                 color:"#3b82f6",
-                position:"end"
+                backgroundColor:"rgba(0,0,0,0.6)",
+                position:"center",
+                padding:4
               }
             }
           }
@@ -147,7 +151,7 @@ function initChart(){
         y:{
           ticks:{color:"#9ca3af"},
           grid:{color:"#1f2937"},
-          min:price24hLow * .995,
+          min:price24hLow * 0.995,
           max:price24hHigh * 1.005
         }
       }
@@ -157,7 +161,7 @@ function initChart(){
 
 fetchHistory24h();
 
-/* ===== realtime update ===== */
+/* ===== realtime price update ===== */
 function updateChartRealtime(price){
   chartData.push(price);
   if(chartData.length > 1440) chartData.shift();
@@ -166,24 +170,15 @@ function updateChartRealtime(price){
   price24hLow  = Math.min(...chartData);
 
   chart.data.datasets[0].data = chartData;
-  chart.data.datasets[0].borderColor = price>=price24hOpen ? "#22c55e" : "#ef4444";
+  chart.data.datasets[0].borderColor =
+    price >= price24hOpen ? "#22c55e" : "#ef4444";
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
 
-  chart.options.plugins.annotation.annotations.ath.yMin =
-  chart.options.plugins.annotation.annotations.ath.yMax = price24hHigh;
-
-  chart.options.plugins.annotation.annotations.atl.yMin =
-  chart.options.plugins.annotation.annotations.atl.yMax = price24hLow;
+  const ann = chart.options.plugins.annotation.annotations;
+  ann.ath.yMin = ann.ath.yMax = price24hHigh;
+  ann.atl.yMin = ann.atl.yMax = price24hLow;
 
   chart.update("none");
-
-  const meta = chart.getDatasetMeta(0);
-  const last = meta.data.at(-1);
-  if(last){
-    const rect = chart.canvas.getBoundingClientRect();
-    chartDot.style.left = rect.left + last.x + "px";
-    chartDot.style.top  = rect.top  + last.y + "px";
-  }
 }
 
 /* ================== WEBSOCKET ================== */
