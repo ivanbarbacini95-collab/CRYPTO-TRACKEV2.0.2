@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Injective • Portfolio</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Injective • Portfolio</title>
 
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
-  <script src="app.js" defer></script>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+<script src="app.js" defer></script>
 </head>
 <body>
 
@@ -18,7 +18,7 @@
 
     <!-- Ticker Indici -->
     <div class="indices-ticker" id="indicesTicker">
-      <!-- Qui verranno inseriti gli indici dinamicamente -->
+      <div class="ticker-inner" id="tickerInner"></div>
     </div>
 
     <div class="subtitle">Realtime staking & rewards dashboard</div>
@@ -88,6 +88,15 @@
 
   <div id="updated" class="last-update">Last update: --:--</div>
 
+</div>
+
+<!-- Modal Mini Chart -->
+<div id="indexChartModal" class="modal">
+  <div class="modal-content">
+    <span class="close">&times;</span>
+    <h2 id="indexChartTitle"></h2>
+    <canvas id="indexChartCanvas"></canvas>
+  </div>
 </div>
 
 </body>
