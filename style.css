@@ -1,4 +1,3 @@
-/* ================= BODY ================= */
 body {
   font-family: Inter, sans-serif;
   background: #000;
@@ -15,7 +14,7 @@ body {
   gap: 1rem;
 }
 
-/* ================= HEADER ================= */
+/* HEADER */
 .header {
   display: flex;
   flex-direction: column;
@@ -41,7 +40,7 @@ body {
   color: #9ca3af;
 }
 
-/* ================= CONNECTION STATUS ================= */
+/* CONNECTION STATUS */
 .connection-status {
   position: absolute;
   top: 0;
@@ -71,7 +70,7 @@ body {
   color: #f9fafb;
 }
 
-/* ================= INPUT ================= */
+/* INPUT */
 #addressInput {
   padding: 0.8rem;
   border-radius: 0.5rem;
@@ -86,7 +85,7 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* ================= CARDS ================= */
+/* CARDS */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -121,7 +120,7 @@ body {
   color: #9ca3af;
 }
 
-/* ================= PRICE BAR ================= */
+/* PRICE BAR */
 .price-bar-container {
   position: relative;
   height: 24px;
@@ -156,7 +155,7 @@ body {
 .price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
 .price-extremes.right { position: absolute; right: 0; }
 
-/* ================= REWARD BAR ================= */
+/* REWARD BAR */
 .reward-bar-container {
   position: relative;
   height: 24px;
@@ -169,6 +168,7 @@ body {
   height: 100%;
   transition: width 0.3s ease;
   border-radius: 0.3rem;
+  background: linear-gradient(to right, #0ea5e9, #3b82f6);
 }
 
 .reward-percent {
@@ -179,45 +179,42 @@ body {
   font-size: 0.85rem;
 }
 
-/* ================= CHART ================= */
+/* CHART */
 .chart-card {
-  width: 100%;
-  padding: 1rem;
-  box-sizing: border-box;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  height: 400px;
+  position: relative;
 }
 
 #priceChart {
   width: 100% !important;
-  flex: 1 1 auto;
+  height: 100% !important;
 }
 
-/* ================= COLORS ================= */
-.up { color: #22c55e; }
-.down { color: #ef4444; }
-
-/* ================= LAST UPDATE ================= */
-.last-update {
-  font-size: 0.8rem;
-  text-align: center;
-  color: #9ca3af;
-}
-
-/* ================= PALLINO LAMPEGGIANTE ================= */
+/* PALLINO AZZURRO */
 .chart-dot {
   position: absolute;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #0ea5e9;
   box-shadow: 0 0 6px #0ea5e9;
   animation: blink 1s infinite;
   pointer-events: none;
+  z-index: 10;
+  transform: translate(-50%, -50%);
 }
 
 @keyframes blink {
-  0%, 50%, 100% { opacity: 1; }
-  25%, 75% { opacity: 0; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+/* MISC */
+.up { color: #22c55e; }
+.down { color: #ef4444; }
+
+.last-update {
+  font-size: 0.8rem;
+  text-align: center;
+  color: #9ca3af;
 }
