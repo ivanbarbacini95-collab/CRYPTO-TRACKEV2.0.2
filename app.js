@@ -75,7 +75,7 @@ function createGradient(ctx, price){
   return gradient;
 }
 
-/* Inizializza Chart.js con puntino sull’ultimo prezzo */
+/* Inizializza Chart.js con puntino sull’ultimo prezzo e rettangolo grigio */
 function initChart24h(){
   const ctx = $("priceChart").getContext("2d");
   chart = new Chart(ctx,{
@@ -102,7 +102,24 @@ function initChart24h(){
       responsive:true,
       maintainAspectRatio:false,
       animation:false,
-      plugins:{ legend:{display:false} },
+      plugins:{ 
+        legend:{display:false},
+        tooltip:{enabled:false},
+        afterDraw: chart => {
+          // disegna il rettangolo grigio sull’ultimo prezzo
+          const ctx = chart.ctx;
+          const yScale = chart.scales['y'];
+          const xScale = chart.scales['x'];
+          const lastPrice = chart.data.datasets[0].data.at(-1);
+          const y = yScale.getPixelForValue(lastPrice);
+
+          ctx.save();
+          ctx.fillStyle = "rgba(107,114,128,0.2)";
+          ctx.fillRect(xScale.left, y-8, xScale.right-xScale.left, 16);
+          ctx.restore();
+        }
+      }
+      ,
       scales:{
         x:{
           ticks:{
