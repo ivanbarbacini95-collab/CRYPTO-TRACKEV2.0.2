@@ -1,18 +1,10 @@
-let address = localStorage.getItem("inj_address") || "";
-let targetPrice = 0, displayedPrice = 0;
-let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
-let availableInj = 0, stakeInj = 0, rewardsInj = 0;
-let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
-let apr = 0;
-let chart, chartData = [], ws;
-
+/* ================= UTILS ================= */
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f)=>a+(b-a)*f;
 
-/* COLOR NUMBER */
+/* Color digits effect */
 function colorNumber(el, n, o, d){
-  const ns = n.toFixed(d);
-  const os = o.toFixed(d);
+  const ns = n.toFixed(d), os = o.toFixed(d);
   el.innerHTML = [...ns].map((c,i)=>{
     if(c!==os[i]){
       return `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>`;
@@ -20,21 +12,24 @@ function colorNumber(el, n, o, d){
   }).join("");
 }
 
-/* FETCH JSON */
+/* Fetch JSON safely */
 async function fetchJSON(url){
   try{ return await (await fetch(url)).json(); }
-  catch{ return {}; }
+  catch{return {};}
 }
 
-/* INPUT ADDRESS */
+/* ================= ACCOUNT INJ ================= */
+let address = localStorage.getItem("inj_address")||"";
+let availableInj=0, stakeInj=0, rewardsInj=0, apr=0;
+let displayedAvailable=0, displayedStake=0, displayedRewards=0;
+
 $("addressInput").value = address;
 $("addressInput").onchange = e=>{
-  address=e.target.value.trim();
-  localStorage.setItem("inj_address",address);
+  address = e.target.value.trim();
+  localStorage.setItem("inj_address", address);
   loadAccount();
 };
 
-/* LOAD ACCOUNT */
 async function loadAccount(){
   if(!address) return;
   const [b,s,r,i] = await Promise.all([
@@ -53,7 +48,7 @@ async function loadAccount(){
 loadAccount();
 setInterval(loadAccount,60000);
 
-/* REWARDS RAPIDO */
+/* Quick rewards update */
 setInterval(async()=>{
   if(!address) return;
   const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
@@ -61,7 +56,11 @@ setInterval(async()=>{
   if(newRewards>rewardsInj) rewardsInj=newRewards;
 },2000);
 
-/* CHART INJ */
+/* ================= INJ PRICE CHART ================= */
+let targetPrice=0, displayedPrice=0;
+let price24hOpen=0, price24hLow=0, price24hHigh=0;
+let chart, chartData=[];
+
 async function fetchHistory(){
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24");
   chartData = d.map(c=>+c[4]);
@@ -72,11 +71,12 @@ async function fetchHistory(){
   if(!chart) initChart();
 }
 fetchHistory();
+
 function initChart(){
-  const ctx=$("priceChart").getContext("2d");
-  chart=new Chart(ctx,{
+  const ctx = $("priceChart").getContext("2d");
+  chart = new Chart(ctx,{
     type:"line",
-    data:{labels:Array(chartData.length).fill(""),datasets:[{data:chartData,borderColor:"#22c55e",backgroundColor:"rgba(34,197,94,0.2)",fill:true,pointRadius:0,tension:0.3}]},
+    data:{labels:Array(chartData.length).fill(""), datasets:[{data:chartData,borderColor:"#22c55e",backgroundColor:"rgba(34,197,94,0.2)",fill:true,pointRadius:0,tension:0.3}]},
     options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{ticks:{color:"#9ca3af"}}}}
   });
 }
@@ -87,17 +87,17 @@ function updateChart(p){
   chart.update("none");
 }
 
-/* CONNECTION */
-const connectionStatus=$("connectionStatus");
-const statusDot=connectionStatus.querySelector(".status-dot");
-const statusText=connectionStatus.querySelector(".status-text");
+/* ================= WEBSOCKET ================= */
+const connectionStatus = $("connectionStatus");
+const statusDot = connectionStatus.querySelector(".status-dot");
+const statusText = connectionStatus.querySelector(".status-text");
 function setConnectionStatus(online){
   if(online){statusDot.style.background="#22c55e";statusText.textContent="Online";}
   else {statusDot.style.background="#ef4444";statusText.textContent="Offline";}
 }
 setConnectionStatus(false);
 
-/* BINANCE WS */
+let ws;
 function startWS(){
   if(ws) ws.close();
   ws=new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
@@ -109,30 +109,126 @@ function startWS(){
     price24hLow=Math.min(price24hLow,p);
     updateChart(p);
   };
-  ws.onclose=()=>{setConnectionStatus(false);setTimeout(startWS,3000);};
+  ws.onclose=()=>{setConnectionStatus(false);setTimeout(startWS,3000);}
   ws.onerror=()=>setConnectionStatus(false);
 }
 startWS();
 
-/* PRICE BAR */
+/* ================= PRICE BAR ================= */
 function updatePriceBar(){
   const min=price24hLow,max=price24hHigh,open=price24hOpen,price=displayedPrice;
-  let linePercent;
-  if(price>=open) linePercent=50+((price-open)/(max-open))*50;
-  else linePercent=50-((open-price)/(open-min))*50;
+  let linePercent = price>=open ? 50 + ((price-open)/(max-open))*50 : 50 - ((open-price)/(open-min))*50;
   linePercent=Math.max(0,Math.min(100,linePercent));
   $("priceLine").style.left=linePercent+"%";
   if(price>=open) $("priceBar").style.background="linear-gradient(to right, #22c55e, #10b981)";
   else $("priceBar").style.background="linear-gradient(to right, #ef4444, #f87171)";
   let barWidth,barLeft;
-  if(price>=open){barLeft=50;barWidth=linePercent-50;}
-  else{barLeft=linePercent;barWidth=50-linePercent;}
+  if(price>=open){barLeft=50;barWidth=linePercent-50;} else{barLeft=linePercent;barWidth=50-linePercent;}
   $("priceBar").style.left=barLeft+"%";
   $("priceBar").style.width=barWidth+"%";
 }
 
-/* ANIMATE LOOP */
+/* ================= INDICES ================= */
+const indices = [
+  {symbol:"DJI", name:"Dow Jones", timezone:"America/New_York", api:"^DJI"},
+  {symbol:"SPX", name:"S&P 500", timezone:"America/New_York", api:"^GSPC"},
+  {symbol:"NAS", name:"NASDAQ", timezone:"America/New_York", api:"^IXIC"},
+  {symbol:"FTSE", name:"FTSE 100", timezone:"Europe/London", api:"^FTSE"},
+  {symbol:"DAX", name:"DAX", timezone:"Europe/Berlin", api:"^GDAXI"},
+  {symbol:"N225", name:"Nikkei 225", timezone:"Asia/Tokyo", api:"^N225"},
+  {symbol:"HSI", name:"Hang Seng", timezone:"Asia/Hong_Kong", api:"^HSI"}
+];
+
+let indexData = {};
+const tickerEl = $("indicesTicker");
+
+async function fetchIndices(){
+  for(const idx of indices){
+    try{
+      const resp = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${idx.api}?interval=1d&range=7d`);
+      const result = resp.chart?.result?.[0];
+      if(result){
+        const close = result.indicators?.quote?.[0]?.close?.at(-1) || 0;
+        const prevClose = result.indicators?.quote?.[0]?.close?.at(-2) || close;
+        const history = result.indicators?.quote?.[0]?.close || [];
+        indexData[idx.symbol] = {current:close,prevClose,history,name:idx.name,timezone:idx.timezone};
+      }
+    }catch(e){console.log("Error fetching", idx.symbol);}
+  }
+  renderIndices();
+}
+fetchIndices();
+setInterval(fetchIndices, 60000);
+
+function renderIndices(){
+  tickerEl.innerHTML="";
+  const inner = document.createElement("div");
+  inner.className="ticker-inner";
+
+  for(const idx of indices){
+    const data = indexData[idx.symbol];
+    if(!data) continue;
+
+    const item = document.createElement("div");
+    item.className="index-item";
+
+    const dot = document.createElement("span");
+    dot.className="index-dot";
+
+    const now = new Date().toLocaleString("en-US", {timeZone:data.timezone});
+    const hour = new Date(now).getHours();
+    let marketOpen=false, preMarket=false;
+    if(hour>=9 && hour<16) marketOpen=true;
+    else if(hour>=8.5 && hour<9) preMarket=true;
+
+    if(marketOpen) dot.style.background="#22c55e";
+    else if(preMarket) dot.style.background="#facc15";
+    else dot.style.background="#ef4444";
+
+    const sym = document.createElement("span");
+    sym.className="index-symbol"; sym.textContent=idx.symbol;
+
+    const price = document.createElement("span");
+    price.className="index-price"; price.textContent=data.current.toFixed(2);
+
+    item.append(dot,sym,price);
+    item.onclick = ()=>showIndexChart(idx.symbol);
+
+    inner.appendChild(item);
+  }
+  tickerEl.appendChild(inner);
+}
+
+/* ================= INDEX MODAL ================= */
+const modal = $("indexModal");
+const closeModal = $("closeModal");
+const modalChartEl = $("modalChart");
+const modalIndexName = $("modalIndexName");
+let modalChart;
+
+closeModal.onclick = ()=>modal.style.display="none";
+
+function showIndexChart(symbol){
+  const data = indexData[symbol];
+  if(!data) return;
+  modal.style.display="flex";
+  modalIndexName.textContent=data.name;
+
+  const weeklyData = data.history.slice(-7);
+  const color = weeklyData.at(-1)>=weeklyData.at(0)?"#22c55e":"#ef4444";
+
+  if(modalChart) modalChart.destroy();
+
+  modalChart = new Chart(modalChartEl.getContext("2d"),{
+    type:"line",
+    data:{labels:weeklyData.map((_,i)=>i+1), datasets:[{data:weeklyData,borderColor:color,backgroundColor:"rgba(34,197,94,0.2)",fill:true,tension:0.3}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{display:true}},y:{display:true}}
+  });
+}
+
+/* ================= ANIMATION LOOP ================= */
 function animate(){
+  // INJ price
   const oldPrice=displayedPrice;
   displayedPrice=lerp(displayedPrice,targetPrice,0.1);
   colorNumber($("price"),displayedPrice,oldPrice,4);
@@ -142,5 +238,32 @@ function animate(){
   $("price24h").className="sub "+(d>0?"up":"down");
   $("priceMin").textContent=price24hLow.toFixed(3);
   $("priceOpen").textContent=price24hOpen.toFixed(3);
-  $("priceMax").textContent=price24h
-::contentReference[oaicite:0]{index=0}
+  $("priceMax").textContent=price24hHigh.toFixed(3);
+  updatePriceBar();
+
+  // Available
+  const oldAv=displayedAvailable;
+  displayedAvailable=lerp(displayedAvailable,availableInj,0.1);
+  colorNumber($("available"),displayedAvailable,oldAv,6);
+  $("availableUsd").textContent=`≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
+
+  // Staked
+  const oldSt=displayedStake;
+  displayedStake=lerp(displayedStake,stakeInj,0.1);
+  colorNumber($("stake"),displayedStake,oldSt,4);
+  $("stakeUsd").textContent=`≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
+
+  // Rewards
+  const oldRw=displayedRewards;
+  displayedRewards=lerp(displayedRewards,rewardsInj,0.1);
+  colorNumber($("rewards"),displayedRewards,oldRw,7);
+  $("rewardsUsd").textContent=`≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+
+  // APR
+  $("apr").textContent=apr.toFixed(2)+"%";
+
+  $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
+
+  requestAnimationFrame(animate);
+}
+animate();
