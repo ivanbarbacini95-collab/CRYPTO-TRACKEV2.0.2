@@ -1,37 +1,32 @@
 let address = localStorage.getItem("inj_address") || "";
-let availableInj=0, stakeInj=0, rewardsInj=0, apr=0;
-let displayedPrice=0, displayedAvailable=0, displayedStake=0, displayedRewards=0;
-let targetPrice=0, price24hOpen=0, price24hLow=0, price24hHigh=0;
-
-let chart, chartData=[], chartLabels=[];
+let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
+let displayedPrice = 0, displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
+let targetPrice = 0, price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
 
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f) => a + (b-a)*f;
 
-/* Colore cifre cambiate */
+/* Funzione per colorare le cifre cambiate */
 function colorNumber(el, n, o, d){
   const ns = n.toFixed(d);
   const os = o.toFixed(d);
-  el.innerHTML = [...ns].map((c,i) =>
-    c!==os[i] ? `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>` : `<span style="color:#f9fafb">${c}</span>`
-  ).join("");
+  el.innerHTML = [...ns].map((c,i) => c!==os[i] ? `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>` : `<span style="color:#f9fafb">${c}</span>`).join("");
 }
 
 /* INPUT ADDRESS */
 $("addressInput").value = address;
 $("addressInput").onchange = e => {
-  address=e.target.value.trim();
+  address = e.target.value.trim();
   localStorage.setItem("inj_address", address);
   loadAccount();
 };
 
-/* FETCH JSON */
+/* ACCOUNT */
 async function fetchJSON(url){
   try { return await (await fetch(url)).json(); } 
   catch { return {}; }
 }
 
-/* ACCOUNT */
 async function loadAccount(){
   if(!address) return;
   const [b,s,r,i] = await Promise.all([
@@ -47,10 +42,14 @@ async function loadAccount(){
   if(newRewards>rewardsInj) rewardsInj=newRewards;
   apr = Number(i.inflation||0)*100;
 }
+
 loadAccount();
 setInterval(loadAccount,60000);
 
-/* ------------------ CHART 24h ------------------ */
+/* ------------------- CHART ------------------- */
+let chart, chartData=[], chartLabels=[];
+
+/* Popola etichette fisse 24h: 00:00, 01:00, ..., 23:00 */
 function generate24hLabels(){
   const labels = [];
   for(let h=0; h<24; h++){
@@ -58,31 +57,28 @@ function generate24hLabels(){
   }
   return labels;
 }
-
 chartLabels = generate24hLabels();
-chartData = new Array(24).fill(0);
 
-/* Fetch ultime 24h da Binance e popola subito il grafico */
+/* Fetch dati ultimi 24h da Binance (1m precisione) */
 async function fetchHistory24h(){
-  try {
-    const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24");
-    if(d.length===0) return;
-
-    chartData = d.map(c=>+c[4]); // prezzo di chiusura
-    chartLabels = d.map(c=>{
-      const date = new Date(c[0]);
-      return `${date.getHours().toString().padStart(2,'0')}:00`;
-    });
-
-    price24hOpen = +d[0][1];
-    price24hLow = Math.min(...chartData);
-    price24hHigh = Math.max(...chartData);
-    targetPrice = chartData.at(-1);
-
-    initChart24h();
-  } catch(e){ console.error(e); }
+  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
+  chartData = d.map(c=>+c[4]); // prezzo di chiusura
+  price24hOpen = chartData[0];
+  price24hLow = Math.min(...chartData);
+  price24hHigh = Math.max(...chartData);
+  targetPrice = chartData.at(-1);
+  displayedPrice = targetPrice;
+  initChart24h();
 }
 fetchHistory24h();
+
+/* Gradient dinamico */
+function createGradient(ctx, price){
+  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+  gradient.addColorStop(0, price>=price24hOpen?"rgba(34,197,94,0.2)":"rgba(239,68,68,0.2)");
+  gradient.addColorStop(1,"rgba(0,0,0,0)");
+  return gradient;
+}
 
 /* Inizializza Chart.js */
 function initChart24h(){
@@ -92,9 +88,9 @@ function initChart24h(){
     data:{
       labels: chartLabels,
       datasets:[{
-        data: chartData,
-        borderColor:"#22c55e",
-        backgroundColor:createGradient(ctx, chartData.at(-1)),
+        data: chartData.slice(-24*60), // ultimi 24h
+        borderColor: targetPrice>=price24hOpen?"#22c55e":"#ef4444",
+        backgroundColor:createGradient(ctx,targetPrice),
         fill:true,
         pointRadius:0,
         tension:0.3
@@ -104,61 +100,54 @@ function initChart24h(){
       responsive:true,
       maintainAspectRatio:false,
       animation:false,
-      plugins:{ legend:{display:false} },
+      plugins:{
+        legend:{display:false}
+      },
       scales:{
         x:{
-          ticks:{color:"#9ca3af", autoSkip:false, maxRotation:0},
-          grid:{color:"#374151"}
+          ticks:{
+            color:"#9ca3af",
+            autoSkip:false,
+            callback: function(val,index,ticks){
+              return index%60===0 ? this.getLabelForValue(index) : '';
+            }
+          }
         },
-        y:{ ticks:{color:"#9ca3af"}, grid:{color:"#374151"} }
+        y:{ ticks:{color:"#9ca3af"} }
       }
     }
   });
 }
 
-function createGradient(ctx, price){
-  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
-  gradient.addColorStop(0, price>=price24hOpen?"rgba(34,197,94,0.2)":"rgba(239,68,68,0.2)");
-  gradient.addColorStop(1,"rgba(0,0,0,0)");
-  return gradient;
-}
-
-/* Aggiorna grafico in realtime solo ultima ora */
+/* Aggiorna ultimo punto in realtime */
 function updateChartRealtime(price){
-  const now = new Date();
-  const hour = now.getHours();
-  chartData[hour] = price;
-
-  const filtered = chartData.filter(v=>v>0);
-  if(filtered.length>0){
-    price24hHigh = Math.max(...filtered);
-    price24hLow = Math.min(...filtered);
-  }
-
-  chart.data.datasets[0].data = chartData;
+  chartData.push(price);
+  if(chartData.length>1440) chartData.shift();
+  price24hHigh = Math.max(price24hHigh,price);
+  price24hLow = Math.min(price24hLow,price);
+  chart.data.datasets[0].data = chartData.slice(-24*60);
   chart.data.datasets[0].borderColor = price>=price24hOpen?"#22c55e":"#ef4444";
-  chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
+  chart.data.datasets[0].backgroundColor = createGradient(chart.ctx,price);
   chart.update("none");
-
-  targetPrice = price;
 }
 
-/* ------------------ WEBSOCKET ------------------ */
+/* ------------------- WEBSOCKET ------------------- */
 let ws;
 function startWS(){
   if(ws) ws.close();
   ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
-  ws.onopen = () => setConnectionStatus(true);
+  ws.onopen = ()=>setConnectionStatus(true);
   ws.onmessage = e=>{
     const p=+JSON.parse(e.data).p;
+    targetPrice = p;
     updateChartRealtime(p);
   };
   ws.onclose = ()=>{ setConnectionStatus(false); setTimeout(startWS,3000); };
-  ws.onerror = ()=> setConnectionStatus(false);
+  ws.onerror = ()=>setConnectionStatus(false);
 }
 startWS();
 
-/* ------------------ CONNECTION STATUS ------------------ */
+/* ------------------- CONNECTION ------------------- */
 const connectionStatus = $("connectionStatus");
 const statusDot = connectionStatus.querySelector(".status-dot");
 const statusText = connectionStatus.querySelector(".status-text");
@@ -167,7 +156,7 @@ function setConnectionStatus(online){
   statusText.textContent = online?"Online":"Offline";
 }
 
-/* ------------------ ANIMAZIONE VALORI ------------------ */
+/* ------------------- ANIMAZIONE VALORI ------------------- */
 function updatePriceBar(){
   const min=price24hLow, max=price24hHigh, open=price24hOpen, price=displayedPrice;
   let linePercent = price>=open? 50+((price-open)/(max-open)*50) : 50-((open-price)/(open-min)*50);
