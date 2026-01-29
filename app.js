@@ -60,17 +60,29 @@ function generate24hLabels(){
 }
 
 chartLabels = generate24hLabels();
-chartData = new Array(24).fill(0); // inizializziamo a 0
+chartData = new Array(24).fill(0);
 
-/* Fetch prezzo attuale di apertura giornata da Binance */
-async function fetchOpenPrice(){
-  const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const d = await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&startTime=${start}&limit=1`);
-  if(d[0]) price24hOpen = +d[0][1];
-  for(let i=0; i<24; i++) chartData[i] = price24hOpen; // riempi tutta la giornata inizialmente
+/* Fetch ultime 24h da Binance e popola subito il grafico */
+async function fetchHistory24h(){
+  try {
+    const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24");
+    if(d.length===0) return;
+
+    chartData = d.map(c=>+c[4]); // prezzo di chiusura
+    chartLabels = d.map(c=>{
+      const date = new Date(c[0]);
+      return `${date.getHours().toString().padStart(2,'0')}:00`;
+    });
+
+    price24hOpen = +d[0][1];
+    price24hLow = Math.min(...chartData);
+    price24hHigh = Math.max(...chartData);
+    targetPrice = chartData.at(-1);
+
+    initChart24h();
+  } catch(e){ console.error(e); }
 }
-fetchOpenPrice();
+fetchHistory24h();
 
 /* Inizializza Chart.js */
 function initChart24h(){
@@ -82,7 +94,7 @@ function initChart24h(){
       datasets:[{
         data: chartData,
         borderColor:"#22c55e",
-        backgroundColor:createGradient(ctx, chartData[0]),
+        backgroundColor:createGradient(ctx, chartData.at(-1)),
         fill:true,
         pointRadius:0,
         tension:0.3
@@ -111,11 +123,11 @@ function createGradient(ctx, price){
   return gradient;
 }
 
-/* Aggiorna grafico in realtime all'ora corrente */
+/* Aggiorna grafico in realtime solo ultima ora */
 function updateChartRealtime(price){
   const now = new Date();
   const hour = now.getHours();
-  chartData[hour] = price; // aggiorna prezzo ora corrente
+  chartData[hour] = price;
 
   const filtered = chartData.filter(v=>v>0);
   if(filtered.length>0){
@@ -128,10 +140,8 @@ function updateChartRealtime(price){
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
   chart.update("none");
 
-  targetPrice = price; // per animazione valori
+  targetPrice = price;
 }
-
-initChart24h();
 
 /* ------------------ WEBSOCKET ------------------ */
 let ws;
