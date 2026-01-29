@@ -3,7 +3,7 @@ let availableInj=0, stakeInj=0, rewardsInj=0, apr=0;
 let displayedPrice=0, displayedAvailable=0, displayedStake=0, displayedRewards=0;
 let targetPrice=0, price24hOpen=0, price24hLow=0, price24hHigh=0;
 
-let chart, chartData=[], chartLabels=[], chartDot;
+let chart, chartData=[], chartLabels=[];
 
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f) => a + (b-a)*f;
@@ -51,8 +51,6 @@ loadAccount();
 setInterval(loadAccount,60000);
 
 /* ------------------ CHART 24h ------------------ */
-
-/* Fetch ultimi 24h da Binance (1m) */
 async function fetchHistory24h(){
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
   chartData = d.map(c=>+c[4]); // chiusura
@@ -68,7 +66,6 @@ async function fetchHistory24h(){
 
   initChart24h();
 }
-fetchHistory24h();
 
 /* Gradient dinamico */
 function createGradient(ctx, price){
@@ -78,7 +75,7 @@ function createGradient(ctx, price){
   return gradient;
 }
 
-/* Inizializza Chart.js */
+/* Inizializza Chart.js con puntino sull’ultimo prezzo */
 function initChart24h(){
   const ctx = $("priceChart").getContext("2d");
   chart = new Chart(ctx,{
@@ -92,6 +89,13 @@ function initChart24h(){
         fill:true,
         pointRadius:0,
         tension:0.3
+      },{
+        data:[chartData.at(-1)],
+        borderColor:"transparent",
+        backgroundColor:"#facc15",
+        pointRadius:6,
+        pointHoverRadius:6,
+        fill:false
       }]
     },
     options:{
@@ -105,10 +109,10 @@ function initChart24h(){
             color:"#9ca3af",
             autoSkip:false,
             maxRotation:0,
-            callback: function(val,index){
+            callback:function(val,index){
               const label = this.getLabelForValue(index);
               const [h,m] = label.split(':').map(Number);
-              if(m===0 || m===30) return label;
+              if(m===0) return label; // solo ore intere
               return '';
             }
           },
@@ -118,34 +122,6 @@ function initChart24h(){
       }
     }
   });
-
-  // crea pallino giallo lampeggiante
-  chartDot = document.createElement("div");
-  chartDot.className="chart-dot";
-  Object.assign(chartDot.style,{
-    position:'absolute',
-    width:'10px',
-    height:'10px',
-    borderRadius:'50%',
-    background:'#facc15',
-    pointerEvents:'none',
-    transform:'translate(-50%, -50%)',
-    animation:'pulse 1s infinite'
-  });
-  $("priceChart").parentElement.appendChild(chartDot);
-  updatePallino();
-}
-
-/* Posiziona pallino sull'ultimo punto */
-function updatePallino(){
-  if(!chart || !chartDot) return;
-  const meta = chart.getDatasetMeta(0);
-  const lastPoint = meta.data[meta.data.length-1];
-  if(lastPoint){
-    const pos = lastPoint.getProps(['x','y'],true); 
-    chartDot.style.left = pos.x + "px";
-    chartDot.style.top = pos.y + "px";
-  }
 }
 
 /* Aggiorna grafico realtime */
@@ -162,10 +138,13 @@ function updateChartRealtime(price){
   chart.data.datasets[0].data = chartData;
   chart.data.datasets[0].borderColor = price>=price24hOpen?"#22c55e":"#ef4444";
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
-  chart.update("none");
 
-  updatePallino();
+  // Aggiorna puntino sull’ultimo prezzo
+  chart.data.datasets[1].data = [price];
+  chart.update("none");
 }
+
+fetchHistory24h();
 
 /* ------------------ WEBSOCKET ------------------ */
 let ws;
