@@ -98,26 +98,26 @@ body {
   padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem; /* mantiene il gap originale */
-  min-height: 110px; /* uniforme per tutte le card tranne grafico */
+  gap: 0.5rem;
+  min-height: 110px; /* uniforma altezza card */
 }
 
 .label {
-  font-size: 1.1rem; /* come versione originale */
+  font-size: 1.1rem;
   font-weight: bold;
 }
 
 .value-row {
   display: flex;
   justify-content: flex-end;
-  font-size: 1.4rem; /* come versione originale */
+  font-size: 1.4rem;
   font-weight: bold;
 }
 
 .sub-row {
   display: flex;
   justify-content: flex-end;
-  font-size: 0.9rem; /* come versione originale */
+  font-size: 0.9rem;
   color: #9ca3af;
 }
 
@@ -181,7 +181,7 @@ body {
 
 /* CHART */
 .chart-card {
-  height: 400px; /* più alto per evitare overflow */
+  height: 400px; /* più alto per numeri e valori */
 }
 
 #priceChart {
