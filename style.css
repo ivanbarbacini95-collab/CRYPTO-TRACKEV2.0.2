@@ -45,8 +45,19 @@ body {
 .reward-percent { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:0.85rem; }
 
 /* CHART */
-.chart-card { height:300px; position:relative; }
-#priceChart { width:100% !important; height:100% !important; }
+.card-chart {
+  width: 100%;          /* prende tutta la larghezza disponibile */
+  max-width: 800px;     /* limite massimo per desktop */
+  padding: 10px;        /* spazio interno */
+  margin: 0 auto;       /* centrata */
+  box-sizing: border-box;
+}
+
+#priceChart {
+  width: 100% !important;
+  height: 250px;         /* altezza sufficiente per mobile */
+}
+
 
 /* MISC */
 .up { color:#22c55e; }
