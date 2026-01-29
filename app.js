@@ -182,22 +182,12 @@ function animate(){
   // --- APR ---
   $("apr").textContent = apr.toFixed(2)+"%";
 
-  // --- CHART (fedelissimo al prezzo animato, max/min ottimizzati) ---
-  if(chart){
-    chartData.push(displayedPrice);
-    chartLabels.push(new Date().toLocaleTimeString().slice(0,5));
-    if(chartData.length>1440){
-      const removed = chartData.shift();
-      chartLabels.shift();
-      // solo se il vecchio era max/min
-      if(removed >= price24hHigh || removed <= price24hLow){
-        price24hHigh = Math.max(...chartData);
-        price24hLow = Math.min(...chartData);
-      }
-    }
+  // --- CHART (asse X fisso, aggiorna solo ultimo punto) ---
+  if(chart && chartData.length > 0){
+    chartData[chartData.length-1] = displayedPrice;
 
-    if(displayedPrice > price24hHigh) price24hHigh = displayedPrice;
-    if(displayedPrice < price24hLow) price24hLow = displayedPrice;
+    price24hHigh = Math.max(...chartData);
+    price24hLow = Math.min(...chartData);
 
     chart.data.datasets[0].data = chartData;
     chart.data.datasets[0].borderColor = displayedPrice >= price24hOpen ? "#22c55e" : "#ef4444";
