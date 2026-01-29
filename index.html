@@ -6,7 +6,7 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -32,10 +32,10 @@
 
   <div class="cards-wrapper">
 
-    <div class="card price-card">
+    <div class="card">
       <div class="label">INJ Price</div>
       <div class="value-row"><span id="price">0.0000</span></div>
-      <div class="sub-row"><span id="price24h" class="sub">±0.00%</span></div>
+      <div class="sub-row"><span id="price24h">±0.00%</span></div>
 
       <div class="price-bar-container">
         <div id="priceBar" class="price-bar"></div>
@@ -43,28 +43,28 @@
       </div>
 
       <div class="price-values">
-        <span id="priceMin" class="price-extremes left">0.000</span>
-        <span id="priceOpen" class="price-extremes center">0.000</span>
-        <span id="priceMax" class="price-extremes right">0.000</span>
+        <span id="priceMin" class="price-extremes left">0</span>
+        <span id="priceOpen" class="price-extremes center">0</span>
+        <span id="priceMax" class="price-extremes right">0</span>
       </div>
     </div>
 
     <div class="card">
       <div class="label">Available</div>
-      <div class="value-row"><span id="available">0.000000</span></div>
-      <div class="sub-row"><span id="availableUsd">≈ $0.00</span></div>
+      <div class="value-row"><span id="available">0</span></div>
+      <div class="sub-row"><span id="availableUsd">≈ $0</span></div>
     </div>
 
     <div class="card">
       <div class="label">Staked</div>
-      <div class="value-row"><span id="stake">0.0000</span></div>
-      <div class="sub-row"><span id="stakeUsd">≈ $0.00</span></div>
+      <div class="value-row"><span id="stake">0</span></div>
+      <div class="sub-row"><span id="stakeUsd">≈ $0</span></div>
     </div>
 
     <div class="card">
       <div class="label">Rewards</div>
-      <div class="value-row"><span id="rewards">0.0000000</span></div>
-      <div class="sub-row"><span id="rewardsUsd">≈ $0.00</span></div>
+      <div class="value-row"><span id="rewards">0</span></div>
+      <div class="sub-row"><span id="rewardsUsd">≈ $0</span></div>
 
       <div class="reward-bar-container">
         <div id="rewardBar" class="reward-bar"></div>
@@ -91,7 +91,7 @@
 <div class="modal hidden" id="chartModal">
   <div class="modal-content">
     <div class="modal-header">
-      <span id="modalTitle">Index</span>
+      <span id="modalTitle"></span>
       <span class="session-badge" id="sessionBadge"></span>
       <button id="closeModal">✕</button>
     </div>
