@@ -79,57 +79,7 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* TICKER INDICI */
-.indices-ticker {
-  display: flex;
-  overflow: hidden;
-  height: 32px;
-  border-radius: 0.5rem;
-  background: #111827;
-  padding: 0 0.5rem;
-  gap: 2rem;
-  align-items: center;
-  white-space: nowrap;
-  position: relative;
-}
-
-.index-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  min-width: 100px;
-}
-
-.index-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ef4444;
-}
-
-.index-symbol {
-  font-weight: bold;
-}
-
-.index-price {
-  min-width: 60px;
-  text-align: right;
-}
-
-/* SCORRIMENTO */
-@keyframes scrollLeft {
-  0% { transform: translateX(100%); }
-  100% { transform: translateX(-100%); }
-}
-
-.ticker-inner {
-  display: inline-flex;
-  gap: 2rem;
-  animation: scrollLeft linear infinite;
-}
-
-/* CARDS */
+/* CARDS - verticali */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -227,38 +177,45 @@ body {
   height: 300px;
 }
 
-#priceChart {
+#priceChart, #modalChart {
   width: 100% !important;
   height: 100% !important;
 }
 
-/* MODAL GRAFICO INDICE */
-.index-modal {
-  display: none;
-  position: fixed;
-  z-index: 100;
-  left: 0;
-  top: 0;
+/* INDICES TICKER */
+.indices-ticker {
   width: 100%;
-  height: 100%;
-  background: rgba(0,0,0,0.8);
-  justify-content: center;
+  overflow: hidden;
+  height: 32px;
+  position: relative;
+  display: flex;
   align-items: center;
 }
 
-.modal-content {
-  background: #111827;
-  border-radius: 0.5rem;
-  padding: 1rem;
-  max-width: 600px;
-  width: 90%;
+.ticker-inner {
+  display: flex;
+  gap: 2rem;
+  white-space: nowrap;
+  position: absolute;
 }
 
-.close {
-  color: #f9fafb;
-  float: right;
-  font-size: 1.5rem;
+.index-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.index-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.index-price {
+  min-width: 50px;
+  text-align: right;
 }
 
 /* MISC */
@@ -269,4 +226,32 @@ body {
   font-size: 0.8rem;
   text-align: center;
   color: #9ca3af;
+}
+
+/* MODAL */
+.modal {
+  display: none;
+  position: fixed;
+  top:0;left:0;width:100%;height:100%;
+  background: rgba(0,0,0,0.8);
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background: #111827;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  width: 90%;
+  max-width: 600px;
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.close {
+  align-self: flex-end;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #f9fafb;
 }
