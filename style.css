@@ -173,7 +173,7 @@ body {
   gap: 2rem;
   white-space: nowrap;
   align-items: center;
-  animation: scrollTicker linear infinite;
+  position: relative;
 }
 
 .ticker-item {
@@ -190,11 +190,7 @@ body {
   background:#ef4444;
 }
 
-/* SCROLL ANIMATION */
-@keyframes scrollTicker {
-  0% { transform: translateX(100%); }
-  100% { transform: translateX(-100%); }
-}
+.ticker-price { min-width:40px; display:inline-block; text-align:right; }
 
 /* ===== MODAL ===== */
 .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.6); justify-content:center; align-items:center; }
