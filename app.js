@@ -60,7 +60,7 @@ function generate24hLabels(){
 }
 
 chartLabels = generate24hLabels();
-chartData = new Array(24).fill(null); // inizialmente vuoti
+chartData = new Array(24).fill(0); // inizializza a zero per avere linea visibile
 
 function initChart24h(){
   const ctx = $("priceChart").getContext("2d");
@@ -71,7 +71,7 @@ function initChart24h(){
       datasets:[{
         data: chartData,
         borderColor:"#22c55e",
-        backgroundColor:createGradient(ctx, chartData.filter(v=>v!==null).at(-1) || 0),
+        backgroundColor:createGradient(ctx, chartData.at(-1)),
         fill:true,
         pointRadius:0,
         tension:0.3
@@ -81,16 +81,10 @@ function initChart24h(){
       responsive:true,
       maintainAspectRatio:false,
       animation:false,
-      plugins:{
-        legend:{display:false}
-      },
+      plugins:{ legend:{display:false} },
       scales:{
         x:{
-          ticks:{
-            color:"#9ca3af",
-            autoSkip:false,
-            maxRotation:0
-          },
+          ticks:{color:"#9ca3af", autoSkip:false, maxRotation:0},
           grid:{color:"#374151"}
         },
         y:{ ticks:{color:"#9ca3af"}, grid:{color:"#374151"} }
@@ -110,10 +104,10 @@ function createGradient(ctx, price){
 function updateChartRealtime(price){
   const now = new Date();
   const hour = now.getHours();
-  chartData[hour] = price;
+  chartData[hour] = price; // aggiorna l’ora corrente
 
-  // Aggiorna valori max e min
-  const filtered = chartData.filter(v=>v!==null);
+  // Aggiorna min e max
+  const filtered = chartData.filter(v=>v>0);
   if(filtered.length>0){
     price24hHigh = Math.max(...filtered);
     price24hLow = Math.min(...filtered);
@@ -124,7 +118,7 @@ function updateChartRealtime(price){
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
   chart.update("none");
 
-  targetPrice = price; // per animazioni dei valori
+  targetPrice = price; // per animazioni valori
 }
 
 initChart24h();
