@@ -1,13 +1,12 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Injective • Portfolio</title>
-
-<link rel="stylesheet" href="style.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
-<script src="app.js" defer></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Injective • Portfolio</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
 
@@ -15,10 +14,10 @@
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
-
-    <!-- Ticker Indici -->
-    <div class="indices-ticker" id="indicesTicker">
-      <div class="ticker-inner" id="tickerInner"></div>
+    
+    <!-- TICKER BARRA -->
+    <div id="tickerBar">
+      <div id="tickerInner"></div>
     </div>
 
     <div class="subtitle">Realtime staking & rewards dashboard</div>
@@ -90,11 +89,11 @@
 
 </div>
 
-<!-- Modal Mini Chart -->
+<!-- MODAL MINI CHART -->
 <div id="indexChartModal" class="modal">
   <div class="modal-content">
     <span class="close">&times;</span>
-    <h2 id="indexChartTitle"></h2>
+    <h3 id="indexChartTitle"></h3>
     <canvas id="indexChartCanvas"></canvas>
   </div>
 </div>
