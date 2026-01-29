@@ -181,8 +181,6 @@ body {
 
 /* ================= CHART ================= */
 .chart-card {
-  /* Altezza responsive con padding incluso e overflow sicuro */
-  height: min(60vh, 550px); /* 60% dell’altezza viewport, max 550px */
   width: 100%;
   padding: 1rem;
   box-sizing: border-box;
@@ -193,8 +191,7 @@ body {
 
 #priceChart {
   width: 100% !important;
-  height: 100% !important;
-  flex: 1 1 auto; /* canvas riempie lo spazio disponibile */
+  flex: 1 1 auto;
 }
 
 /* ================= COLORS ================= */
@@ -206,4 +203,21 @@ body {
   font-size: 0.8rem;
   text-align: center;
   color: #9ca3af;
+}
+
+/* ================= PALLINO LAMPEGGIANTE ================= */
+.chart-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  box-shadow: 0 0 6px #0ea5e9;
+  animation: blink 1s infinite;
+  pointer-events: none;
+}
+
+@keyframes blink {
+  0%, 50%, 100% { opacity: 1; }
+  25%, 75% { opacity: 0; }
 }
