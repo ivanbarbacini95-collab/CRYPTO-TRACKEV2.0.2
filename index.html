@@ -15,10 +15,7 @@
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
-
-    <!-- Ticker indici -->
-    <div class="indices-ticker" id="indicesTicker"></div>
-
+    <div id="indicesTicker" class="indices-ticker"></div>
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
     <!-- Connection Status -->
@@ -86,15 +83,15 @@
 
   <div id="updated" class="last-update">Last update: --:--</div>
 
-  <!-- Modal grafico indice -->
-  <div id="indexModal" class="index-modal">
-    <div class="modal-content">
-      <span id="closeModal" class="close">&times;</span>
-      <h3 id="modalIndexName"></h3>
-      <canvas id="modalChart"></canvas>
-    </div>
-  </div>
+</div>
 
+<!-- Modal grafico indice -->
+<div id="indexModal" class="modal">
+  <div class="modal-content">
+    <span id="closeModal" class="close">&times;</span>
+    <h2 id="modalIndexName"></h2>
+    <canvas id="modalChart"></canvas>
+  </div>
 </div>
 
 </body>
