@@ -15,12 +15,9 @@
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
-    
-    <!-- Ticker scorrevole -->
-    <div class="ticker-container">
-      <div class="ticker-track" id="tickerTrack"></div>
+    <div class="ticker-wrapper">
+      <div id="tickerTrack" class="ticker-track"></div>
     </div>
-
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
     <!-- Connection Status -->
@@ -30,7 +27,6 @@
     </div>
   </div>
 
-  <!-- Input indirizzo -->
   <input id="addressInput" placeholder="Inserisci indirizzo Injective (inj...)" />
 
   <div class="cards-wrapper">
@@ -91,10 +87,10 @@
 
 </div>
 
-<!-- Modal mini chart -->
+<!-- MINI CHART MODAL -->
 <div id="chartModal" class="chart-modal hidden">
   <div class="modal-content">
-    <span id="closeModal" class="close-btn">&times;</span>
+    <span id="closeModal" class="close-button">×</span>
     <canvas id="miniChart"></canvas>
   </div>
 </div>
