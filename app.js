@@ -3,32 +3,29 @@ let availableInj=0, stakeInj=0, rewardsInj=0, apr=0;
 let displayedPrice=0, displayedAvailable=0, displayedStake=0, displayedRewards=0;
 let targetPrice=0, price24hOpen=0, price24hLow=0, price24hHigh=0;
 
-let ATH = 0, ATL = Infinity;
-
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f) => a + (b-a)*f;
 
-/* NUMERI COLORATI */
 function colorNumber(el, n, o, d){
   const ns = n.toFixed(d);
   const os = o.toFixed(d);
-  el.innerHTML = [...ns].map((c,i)=>c!==os[i]?`<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>`:`<span style="color:#f9fafb">${c}</span>`).join("");
+  el.innerHTML = [...ns].map((c,i) => c!==os[i] ? `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>` : `<span style="color:#f9fafb">${c}</span>`).join("");
 }
 
 /* INPUT ADDRESS */
 $("addressInput").value = address;
 $("addressInput").onchange = e => {
-  address = e.target.value.trim();
+  address=e.target.value.trim();
   localStorage.setItem("inj_address", address);
   loadAccount();
 };
 
-/* FETCH JSON */
+/* ACCOUNT */
 async function fetchJSON(url){
-  try { return await (await fetch(url)).json(); } catch { return {}; }
+  try { return await (await fetch(url)).json(); } 
+  catch { return {}; }
 }
 
-/* LOAD ACCOUNT */
 async function loadAccount(){
   if(!address) return;
   const [b,s,r,i] = await Promise.all([
@@ -46,25 +43,28 @@ async function loadAccount(){
 }
 
 /* ---------------- CHART ---------------- */
-let chart, chartData=[], chartLabels=[];
+let chart, chartData=[], chartLabels=[], chartATH=0, chartATL=Infinity;
 
-/* Fetch 24h history */
 async function fetchHistory24h(){
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
   chartData = d.map(c=>+c[4]);
-  chartLabels = d.map((c,i)=>i); // asse fisso numerico
-  
+  chartLabels = new Array(chartData.length).fill("");
   price24hOpen = chartData[0];
   price24hLow = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
+  chartATH = price24hHigh;
+  chartATL = price24hLow;
   targetPrice = chartData.at(-1);
-  
-  ATH = Math.max(...chartData);
-  ATL = Math.min(...chartData);
-
   initChart24h();
 }
 fetchHistory24h();
+
+function createGradient(ctx, price){
+  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+  gradient.addColorStop(0, price>=price24hOpen?"rgba(34,197,94,0.2)":"rgba(239,68,68,0.2)");
+  gradient.addColorStop(1,"rgba(0,0,0,0)");
+  return gradient;
+}
 
 function initChart24h(){
   const ctx = $("priceChart").getContext("2d");
@@ -85,45 +85,47 @@ function initChart24h(){
       responsive:true,
       maintainAspectRatio:false,
       animation:false,
-      plugins:{legend:{display:false}},
+      plugins:{
+        legend:{display:false},
+        annotation:{
+          annotations:{
+            athLine:{type:'line',yMin:chartATH,yMax:chartATH,borderColor:'#facc15',borderWidth:1,label:{display:true,content:'ATH: '+chartATH.toFixed(2),position:'start'}},
+            atlLine:{type:'line',yMin:chartATL,yMax:chartATL,borderColor:'#3b82f6',borderWidth:1,label:{display:true,content:'ATL: '+chartATL.toFixed(2),position:'start'}}
+          }
+        }
+      },
       scales:{
         x:{ticks:{display:false}, grid:{color:"#1f2937"}},
-        y:{ticks:{color:"#9ca3af"}, grid:{color:"#1f2937"}}
+        y:{ticks:{color:"#9ca3af"}, grid:{color:"#1f2937"}, min:price24hLow*0.995, max:price24hHigh*1.005}
       }
-    },
-    plugins: [{
-      id: 'ath_atl',
-      afterDraw: chart=>{
-        const yScale = chart.scales.y;
-        const ctx = chart.ctx;
-
-        [ATH, ATL].forEach((v, idx)=>{
-          const y = yScale.getPixelForValue(v);
-          ctx.save();
-          ctx.strokeStyle = "#888";
-          ctx.lineWidth = 1;
-          ctx.setLineDash([4,4]);
-          ctx.beginPath();
-          ctx.moveTo(chart.chartArea.left, y);
-          ctx.lineTo(chart.chartArea.right, y);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = "#9ca3af";
-          ctx.font = "12px sans-serif";
-          ctx.fillText(v.toFixed(3), chart.chartArea.right-50, y-4);
-          ctx.restore();
-        });
-      }
-    }]
+    }
   });
 }
 
-/* Gradient */
-function createGradient(ctx, price){
-  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
-  gradient.addColorStop(0, price>=price24hOpen?"rgba(34,197,94,0.2)":"rgba(239,68,68,0.2)");
-  gradient.addColorStop(1,"rgba(0,0,0,0)");
-  return gradient;
+/* Pallino azzurro */
+let chartDot = document.createElement("div");
+chartDot.className = "chart-dot";
+document.querySelector(".chart-card").appendChild(chartDot);
+
+function updateChartRealtime(price){
+  chartData.push(price);
+  if(chartData.length>1440) chartData.shift();
+  price24hHigh = Math.max(...chartData);
+  price24hLow = Math.min(...chartData);
+
+  const color = price>=price24hOpen ? "#22c55e" : "#ef4444";
+  chart.data.datasets[0].data = chartData;
+  chart.data.datasets[0].borderColor = color;
+  chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
+  chart.update("none");
+
+  const meta = chart.getDatasetMeta(0);
+  const lastPoint = meta.data[meta.data.length-1];
+  if(lastPoint){
+    const pos = lastPoint.getProps(['x','y'],true);
+    chartDot.style.left = pos.x + "px";
+    chartDot.style.top = pos.y + "px";
+  }
 }
 
 /* ---------------- WEBSOCKET ---------------- */
@@ -135,6 +137,7 @@ function startWS(){
   ws.onmessage = e=>{
     const p=+JSON.parse(e.data).p;
     targetPrice=p;
+    updateChartRealtime(p);
   };
   ws.onclose = ()=>{ setConnectionStatus(false); setTimeout(startWS,3000); };
   ws.onerror = ()=> setConnectionStatus(false);
@@ -162,7 +165,6 @@ function updatePriceBar(){
   $("priceBar").style.left=barLeft+"%"; $("priceBar").style.width=barWidth+"%";
 }
 
-/* ANIMAZIONE */
 function animate(){
   displayedPrice=lerp(displayedPrice,targetPrice,0.1);
   colorNumber($("price"),displayedPrice,displayedPrice,4);
@@ -188,11 +190,11 @@ function animate(){
   displayedRewards=lerp(displayedRewards,rewardsInj,0.1);
   colorNumber($("rewards"),displayedRewards,displayedRewards,7);
   $("rewardsUsd").textContent=`≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+
   $("rewardBar").style.width=Math.min(displayedRewards/0.05*100,100)+"%";
   $("rewardPercent").textContent=(displayedRewards/0.05*100).toFixed(1)+"%";
 
   $("apr").textContent=apr.toFixed(2)+"%";
-
   $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
