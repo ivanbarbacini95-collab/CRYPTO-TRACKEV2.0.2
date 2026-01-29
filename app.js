@@ -3,7 +3,7 @@ let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 let displayedPrice = 0, displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
 let targetPrice = 0, price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
 
-let prevPrice = 0, prevAvailable = 0, prevStake = 0, prevRewards = 0;
+let prevAvailable = 0, prevStake = 0, prevRewards = 0;
 
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f) => a + (b-a)*f;
@@ -20,7 +20,7 @@ $("addressInput").value = address;
 $("addressInput").onchange = e => {
   address = e.target.value.trim();
   localStorage.setItem("inj_address", address);
-  loadAccount();
+  updateAccountData(); // aggiorna subito
 };
 
 /* ACCOUNT */
@@ -41,12 +41,16 @@ async function loadAccount(){
   availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
   stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
   const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
-  if(newRewards > rewardsInj) rewardsInj = newRewards;
+  if(newRewards>rewardsInj) rewardsInj=newRewards;
   apr = Number(i.inflation||0)*100;
 }
 
-loadAccount();
-setInterval(loadAccount,60000);
+/* Aggiornamento dati account ogni 2 secondi */
+async function updateAccountData(){
+  await loadAccount();
+}
+updateAccountData();
+setInterval(updateAccountData, 2000);
 
 /* ---------------- CHART ---------------- */
 let chart, chartData = [], chartLabels = [];
@@ -142,21 +146,6 @@ function updatePriceBar(){
 
 /* ---------------- ANIMATE ---------------- */
 function animate(){
-  // --- PREZZO ---
-  prevPrice = displayedPrice;
-  displayedPrice = lerp(displayedPrice, targetPrice, 0.1);
-  colorNumber($("price"), displayedPrice, prevPrice, 4);
-
-  const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
-  $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
-  $("price24h").className = "sub "+(d>0?"up":"down");
-
-  $("priceMin").textContent = price24hLow.toFixed(3);
-  $("priceOpen").textContent = price24hOpen.toFixed(3);
-  $("priceMax").textContent = price24hHigh.toFixed(3);
-
-  updatePriceBar();
-
   // --- AVAILABLE ---
   prevAvailable = displayedAvailable;
   displayedAvailable = lerp(displayedAvailable, availableInj, 0.1);
@@ -182,7 +171,22 @@ function animate(){
   // --- APR ---
   $("apr").textContent = apr.toFixed(2)+"%";
 
-  // --- CHART (asse X fisso, aggiorna solo ultimo punto) ---
+  // --- PRICE ---
+  prevPrice = displayedPrice;
+  displayedPrice = lerp(displayedPrice, targetPrice, 0.1);
+  colorNumber($("price"), displayedPrice, prevPrice, 4);
+
+  const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
+  $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
+  $("price24h").className = "sub "+(d>0?"up":"down");
+
+  $("priceMin").textContent = price24hLow.toFixed(3);
+  $("priceOpen").textContent = price24hOpen.toFixed(3);
+  $("priceMax").textContent = price24hHigh.toFixed(3);
+
+  updatePriceBar();
+
+  // --- CHART ---
   if(chart && chartData.length > 0){
     chartData[chartData.length-1] = displayedPrice;
 
