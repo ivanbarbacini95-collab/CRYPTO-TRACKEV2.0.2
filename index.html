@@ -6,7 +6,7 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -15,27 +15,30 @@
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
+    
+    <!-- Ticker scorrevole -->
+    <div class="ticker-container">
+      <div class="ticker-track" id="tickerTrack"></div>
+    </div>
+
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
+    <!-- Connection Status -->
     <div class="connection-status" id="connectionStatus">
       <span class="status-dot"></span>
       <span class="status-text">Offline</span>
     </div>
   </div>
 
-  <!-- MARKET TICKER -->
-  <div class="market-ticker">
-    <div class="ticker-track" id="tickerTrack"></div>
-  </div>
-
+  <!-- Input indirizzo -->
   <input id="addressInput" placeholder="Inserisci indirizzo Injective (inj...)" />
 
   <div class="cards-wrapper">
 
-    <div class="card">
+    <div class="card price-card">
       <div class="label">INJ Price</div>
       <div class="value-row"><span id="price">0.0000</span></div>
-      <div class="sub-row"><span id="price24h">±0.00%</span></div>
+      <div class="sub-row"><span id="price24h" class="sub">±0.00%</span></div>
 
       <div class="price-bar-container">
         <div id="priceBar" class="price-bar"></div>
@@ -43,28 +46,28 @@
       </div>
 
       <div class="price-values">
-        <span id="priceMin" class="price-extremes left">0</span>
-        <span id="priceOpen" class="price-extremes center">0</span>
-        <span id="priceMax" class="price-extremes right">0</span>
+        <span id="priceMin" class="price-extremes left">0.000</span>
+        <span id="priceOpen" class="price-extremes center">0.000</span>
+        <span id="priceMax" class="price-extremes right">0.000</span>
       </div>
     </div>
 
     <div class="card">
       <div class="label">Available</div>
-      <div class="value-row"><span id="available">0</span></div>
-      <div class="sub-row"><span id="availableUsd">≈ $0</span></div>
+      <div class="value-row"><span id="available">0.000000</span></div>
+      <div class="sub-row"><span id="availableUsd">≈ $0.00</span></div>
     </div>
 
     <div class="card">
       <div class="label">Staked</div>
-      <div class="value-row"><span id="stake">0</span></div>
-      <div class="sub-row"><span id="stakeUsd">≈ $0</span></div>
+      <div class="value-row"><span id="stake">0.0000</span></div>
+      <div class="sub-row"><span id="stakeUsd">≈ $0.00</span></div>
     </div>
 
     <div class="card">
       <div class="label">Rewards</div>
-      <div class="value-row"><span id="rewards">0</span></div>
-      <div class="sub-row"><span id="rewardsUsd">≈ $0</span></div>
+      <div class="value-row"><span id="rewards">0.0000000</span></div>
+      <div class="sub-row"><span id="rewardsUsd">≈ $0.00</span></div>
 
       <div class="reward-bar-container">
         <div id="rewardBar" class="reward-bar"></div>
@@ -85,24 +88,15 @@
   </div>
 
   <div id="updated" class="last-update">Last update: --:--</div>
+
 </div>
 
-<!-- MINI CHART MODAL -->
-<div class="modal hidden" id="chartModal">
+<!-- Modal mini chart -->
+<div id="chartModal" class="chart-modal hidden">
   <div class="modal-content">
-    <div class="modal-header">
-      <span id="modalTitle"></span>
-      <span class="session-badge" id="sessionBadge"></span>
-      <button id="closeModal">✕</button>
-    </div>
+    <span id="closeModal" class="close-btn">&times;</span>
     <canvas id="miniChart"></canvas>
   </div>
-</div>
-
-<button class="config-btn" id="configBtn">⚙ Indici</button>
-<div class="config-panel hidden" id="configPanel">
-  <h3>Indici visibili</h3>
-  <div id="indicesConfig"></div>
 </div>
 
 </body>
