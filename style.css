@@ -182,7 +182,6 @@ body {
 /* CHART */
 .chart-card {
   height: 300px;
-  position: relative;
 }
 
 #priceChart {
