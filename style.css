@@ -57,7 +57,7 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #ef4444; /* offline iniziale */
+  background: #ef4444;
   animation: pulse 1.5s infinite;
 }
 
@@ -86,7 +86,7 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* CARDS - verticali */
+/* CARDS */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -182,6 +182,7 @@ body {
 /* CHART */
 .chart-card {
   height: 300px;
+  position: relative;
 }
 
 #priceChart {
