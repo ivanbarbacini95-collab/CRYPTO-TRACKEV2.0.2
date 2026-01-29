@@ -1,22 +1,24 @@
 let address = localStorage.getItem("inj_address") || "";
 
 let targetPrice = 0, displayedPrice = 0;
-let price24hOpen = 0, price24hLow = Infinity, price24hHigh = 0;
+let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0;
 let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
 let apr = 0;
 
-let chart, chartData = [], timeLabels = [], ws;
+let chart, chartData = [], timeLabels = [];
+let ws;
 let chartDot, currentLine;
 
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f)=>a+(b-a)*f;
 
-/* ====== HELPER ====== */
+/* Funzione per colorare solo le cifre cambiate */
 function colorNumber(el, n, o, d){
   const ns = n.toFixed(d);
   const os = o.toFixed(d);
+
   el.innerHTML = [...ns].map((c,i) => {
     if(c !== os[i]){
       return `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>`;
@@ -27,21 +29,22 @@ function colorNumber(el, n, o, d){
 }
 
 async function fetchJSON(url){
-  try { return await (await fetch(url)).json(); }
-  catch { return {}; }
+  try{ return await (await fetch(url)).json(); }
+  catch{ return {}; }
 }
 
-/* ====== INPUT ADDRESS ====== */
+/* INPUT ADDRESS */
 $("addressInput").value = address;
 $("addressInput").onchange = e=>{
-  address = e.target.value.trim();
-  localStorage.setItem("inj_address", address);
+  address=e.target.value.trim();
+  localStorage.setItem("inj_address",address);
   loadAccount();
 };
 
-/* ====== ACCOUNT DATA ====== */
+/* ACCOUNT COMPLETO */
 async function loadAccount(){
   if(!address) return;
+
   const [b,s,r,i] = await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
@@ -53,75 +56,54 @@ async function loadAccount(){
   stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
 
   const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
-  if(newRewards > rewardsInj) rewardsInj = newRewards;
+  if(newRewards > rewardsInj){
+    rewardsInj = newRewards;
+  }
 
   apr = Number(i.inflation||0)*100;
 }
 
+/* Aggiornamenti */
 loadAccount();
-setInterval(loadAccount, 60000); // refresh account completo
+setInterval(loadAccount, 60000); // account completo ogni 60s
+
+/* Aggiornamento solo rewards ogni 2s */
 setInterval(async ()=>{
   if(!address) return;
   const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
   const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
-  if(newRewards > rewardsInj) rewardsInj = newRewards;
+  if(newRewards > rewardsInj){
+    rewardsInj = newRewards;
+  }
 }, 2000);
 
-/* ====== CONNECTION STATUS ====== */
-const connectionStatus = $("connectionStatus");
-const statusDot = connectionStatus.querySelector(".status-dot");
-const statusText = connectionStatus.querySelector(".status-text");
-
-function setConnectionStatus(online){
-  statusDot.style.background = online ? "#22c55e" : "#ef4444";
-  statusText.textContent = online ? "Online" : "Offline";
-}
-setConnectionStatus(false);
-
-/* ====== WEBSOCKET ====== */
-function startWS(){
-  if(ws) ws.close();
-  ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
-
-  ws.onopen = () => setConnectionStatus(true);
-  ws.onmessage = e => {
-    const p = +JSON.parse(e.data).p;
-    targetPrice = p;
-    price24hHigh = Math.max(price24hHigh,p);
-    price24hLow = Math.min(price24hLow,p);
-
-    // Aggiorna grafico
-    addPriceTick(p);
-  };
-  ws.onclose = ()=> {
-    setConnectionStatus(false);
-    setTimeout(startWS,3000);
-  };
-  ws.onerror = ()=> setConnectionStatus(false);
-}
-startWS();
-
-/* ====== PRICE HISTORY 24H ====== */
+/* HISTORY 24h */
 async function fetchHistory(){
-  let d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24");
+  const d = await fetchJSON(
+    "https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24"
+  );
   chartData = d.map(c=>+c[4]);
-  timeLabels = d.map((c,i)=>{ 
-    let dt = new Date(+c[0]);
-    return dt.getHours().toString().padStart(2,'0')+":00";
-  });
-
   price24hOpen = +d[0][1];
   price24hLow = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
   targetPrice = chartData.at(-1);
-
-  initChart();
+  initChart24hClock();
 }
 fetchHistory();
 
-/* ====== CHART INIT ====== */
-function initChart(){
+/* ====== CHART 24H CLOCK ====== */
+function initChart24hClock(){
   const ctx = $("priceChart").getContext("2d");
+
+  // Labels: 24 ore
+  timeLabels = [];
+  for(let h=0; h<24; h++){
+    timeLabels.push(h.toString().padStart(2,'0')+":00");
+  }
+
+  // ChartData iniziale null se non già presente
+  chartData = Array(24).fill(null);
+
   chart = new Chart(ctx, {
     type: "line",
     data: {
@@ -144,8 +126,8 @@ function initChart(){
         tooltip: {
           enabled: true,
           callbacks: {
-            label: (ctx)=>`${ctx.parsed.y.toFixed(4)} USDT`,
-            title: (ctx)=>`Time: ${ctx[0].label}`
+            label: ctx => ctx.parsed.y!==null ? `${ctx.parsed.y.toFixed(4)} USDT` : '',
+            title: ctx => `Time: ${ctx[0].label}`
           }
         }
       },
@@ -156,80 +138,134 @@ function initChart(){
     }
   });
 
-  // Puntino lampeggiante
+  // Crea puntino lampeggiante e linea verticale
   chartDot = document.createElement("div");
-  chartDot.className = "chart-dot";
-  $("priceChart").parentNode.appendChild(chartDot);
+  chartDot.style.position = "absolute";
+  chartDot.style.width = "8px";
+  chartDot.style.height = "8px";
+  chartDot.style.borderRadius = "50%";
+  chartDot.style.background = "#facc15";
+  chartDot.style.pointerEvents = "none";
+  chartDot.style.transition = "left 0.2s, top 0.2s";
+  chartDot.style.animation = "blink 1s infinite";
+  chartDot.style.zIndex = 10;
+  document.querySelector(".chart-card").appendChild(chartDot);
 
-  // Linea ora corrente
   currentLine = document.createElement("div");
-  currentLine.className = "current-time-line";
-  $("priceChart").parentNode.appendChild(currentLine);
+  currentLine.style.position = "absolute";
+  currentLine.style.width = "2px";
+  currentLine.style.height = "100%";
+  currentLine.style.background = "#facc15";
+  currentLine.style.pointerEvents = "none";
+  currentLine.style.zIndex = 5;
+  document.querySelector(".chart-card").appendChild(currentLine);
+
+  // Keyframe blink
+  const styleSheet = document.styleSheets[0];
+  styleSheet.insertRule(`@keyframes blink{0%,50%,100%{opacity:1}25%,75%{opacity:0}}`, styleSheet.cssRules.length);
 }
 
-/* ====== AGGIORNA CHART ====== */
-function addPriceTick(p){
+/* Aggiorna grafico con prezzo attuale */
+function addPriceTickClock(p){
   if(!chart) return;
 
-  // Mantieni array 24 ore (o più piccolo se vuoi)
-  if(chartData.length >= 24){
-    chartData.shift();
-    timeLabels.shift();
-  }
-  let now = new Date();
-  chartData.push(p);
-  timeLabels.push(now.getHours().toString().padStart(2,'0')+":"+now.getMinutes().toString().padStart(2,'0'));
+  const now = new Date();
+  const hour = now.getHours();
 
-  chart.data.labels = timeLabels;
-  chart.data.datasets[0].data = chartData;
+  chartData[hour] = p;
 
   // Aggiorna colore linea/area
   let gradient = chart.ctx.createLinearGradient(0,0,0,300);
   gradient.addColorStop(0, p >= price24hOpen ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)");
   gradient.addColorStop(1, "rgba(0,0,0,0)");
   chart.data.datasets[0].backgroundColor = gradient;
-
   chart.data.datasets[0].borderColor = p >= price24hOpen ? "#22c55e" : "#ef4444";
 
+  chart.data.datasets[0].data = chartData;
   chart.update("none");
 
-  // Aggiorna puntino lampeggiante
-  const chartRect = chart.canvas.getBoundingClientRect();
-  const xPos = chart.scales.x.getPixelForValue(timeLabels.length-1);
+  // Puntino lampeggiante
+  const xPos = chart.scales.x.getPixelForValue(hour);
   const yPos = chart.scales.y.getPixelForValue(p);
   chartDot.style.left = xPos + "px";
   chartDot.style.top = yPos + "px";
 
-  // Aggiorna linea ora corrente
-  const nowX = chart.scales.x.getPixelForValue(timeLabels.length-1);
-  currentLine.style.left = nowX + "px";
+  // Linea verticale ora corrente
+  currentLine.style.left = xPos + "px";
 }
 
-/* ====== PRICE BAR & ANIMATION ====== */
+/* CONNECTION STATUS */
+const connectionStatus = $("connectionStatus");
+const statusDot = connectionStatus.querySelector(".status-dot");
+const statusText = connectionStatus.querySelector(".status-text");
+
+function setConnectionStatus(online){
+  if(online){
+    statusDot.style.background = "#22c55e";
+    statusText.textContent = "Online";
+  } else {
+    statusDot.style.background = "#ef4444";
+    statusText.textContent = "Offline";
+  }
+}
+setConnectionStatus(false);
+
+/* WEBSOCKET */
+function startWS(){
+  if(ws) ws.close();
+  ws=new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  
+  ws.onopen = () => setConnectionStatus(true);
+  ws.onmessage = e=>{
+    const p=+JSON.parse(e.data).p;
+    targetPrice=p;
+    price24hHigh=Math.max(price24hHigh,p);
+    price24hLow=Math.min(price24hLow,p);
+    addPriceTickClock(p);
+  };
+  ws.onclose=()=> {
+    setConnectionStatus(false);
+    setTimeout(startWS,3000);
+  };
+  ws.onerror = ()=> setConnectionStatus(false);
+}
+startWS();
+
+/* PRICE BAR */
 function updatePriceBar() {
   const min = price24hLow;
   const max = price24hHigh;
   const open = price24hOpen;
   const price = displayedPrice;
 
-  let linePercent = price >= open 
-    ? 50 + ((price - open)/(max - open))*50
-    : 50 - ((open - price)/(open - min))*50;
-
+  let linePercent;
+  if(price >= open){
+    linePercent = 50 + ((price - open)/(max - open))*50;
+  } else {
+    linePercent = 50 - ((open - price)/(open - min))*50;
+  }
   linePercent = Math.max(0,Math.min(100,linePercent));
   $("priceLine").style.left = linePercent + "%";
 
-  $("priceBar").style.background = price>=open 
-    ? "linear-gradient(to right, #22c55e, #10b981)" 
-    : "linear-gradient(to right, #ef4444, #f87171)";
+  if(price >= open){
+    $("priceBar").style.background = "linear-gradient(to right, #22c55e, #10b981)";
+  } else {
+    $("priceBar").style.background = "linear-gradient(to right, #ef4444, #f87171)";
+  }
 
-  let barLeft = price>=open?50:linePercent;
-  let barWidth = price>=open?linePercent-50:50-linePercent;
+  let barWidth, barLeft;
+  if(price >= open){
+    barLeft = 50;
+    barWidth = linePercent - 50;
+  } else {
+    barLeft = linePercent;
+    barWidth = 50 - linePercent;
+  }
   $("priceBar").style.left = barLeft + "%";
   $("priceBar").style.width = barWidth + "%";
 }
 
-/* ====== MAIN ANIMATION LOOP ====== */
+/* ANIMATION LOOP */
 function animate(){
   // PRICE
   const oldPrice = displayedPrice;
