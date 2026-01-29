@@ -2,28 +2,32 @@ let address = localStorage.getItem("inj_address") || "";
 let availableInj=0, stakeInj=0, rewardsInj=0, apr=0;
 let displayedPrice=0, displayedAvailable=0, displayedStake=0, displayedRewards=0;
 let targetPrice=0, price24hOpen=0, price24hLow=0, price24hHigh=0;
+let chartATH=0, chartATL=Infinity;
 
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f) => a + (b-a)*f;
 
-function colorNumber(el, n, o, d){
-  const ns = n.toFixed(d);
-  const os = o.toFixed(d);
-  el.innerHTML = [...ns].map((c,i) => c!==os[i] ? `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>` : `<span style="color:#f9fafb">${c}</span>`).join("");
+/* COLORAZIONE NUMERI SOLO CIFRE CAMBIATE */
+function colorNumber(el, newValue, oldValue, decimals){
+  const ns = newValue.toFixed(decimals);
+  const os = oldValue.toFixed(decimals);
+  el.innerHTML = [...ns].map((c,i)=>{
+    if(i>=os.length) return `<span style="color:#f9fafb">${c}</span>`;
+    return c!==os[i] ? `<span style="color:${newValue>oldValue?'#22c55e':'#ef4444'}">${c}</span>` : `<span style="color:#f9fafb">${c}</span>`;
+  }).join("");
 }
 
 /* INPUT ADDRESS */
 $("addressInput").value = address;
-$("addressInput").onchange = e => {
-  address=e.target.value.trim();
+$("addressInput").onchange = e=>{
+  address = e.target.value.trim();
   localStorage.setItem("inj_address", address);
   loadAccount();
 };
 
-/* ACCOUNT */
+/* FETCH ACCOUNT */
 async function fetchJSON(url){
-  try { return await (await fetch(url)).json(); } 
-  catch { return {}; }
+  try{ return await (await fetch(url)).json(); } catch{return {};}
 }
 
 async function loadAccount(){
@@ -43,12 +47,12 @@ async function loadAccount(){
 }
 
 /* ---------------- CHART ---------------- */
-let chart, chartData=[], chartLabels=[], chartATH=0, chartATL=Infinity;
+let chart, chartData=[], chartLabels=[];
 
 async function fetchHistory24h(){
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
   chartData = d.map(c=>+c[4]);
-  chartLabels = new Array(chartData.length).fill("");
+  chartLabels = new Array(chartData.length).fill(""); // X fisso, niente ore
   price24hOpen = chartData[0];
   price24hLow = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
@@ -89,8 +93,16 @@ function initChart24h(){
         legend:{display:false},
         annotation:{
           annotations:{
-            athLine:{type:'line',yMin:chartATH,yMax:chartATH,borderColor:'#facc15',borderWidth:1,label:{display:true,content:'ATH: '+chartATH.toFixed(2),position:'start'}},
-            atlLine:{type:'line',yMin:chartATL,yMax:chartATL,borderColor:'#3b82f6',borderWidth:1,label:{display:true,content:'ATL: '+chartATL.toFixed(2),position:'start'}}
+            athLine:{
+              type:'line', yMin:chartATH, yMax:chartATH,
+              borderColor:'#facc15', borderWidth:1,
+              label:{display:true, content:'ATH: '+chartATH.toFixed(3), position:'end', color:'#facc15'}
+            },
+            atlLine:{
+              type:'line', yMin:chartATL, yMax:chartATL,
+              borderColor:'#3b82f6', borderWidth:1,
+              label:{display:true, content:'ATL: '+chartATL.toFixed(3), position:'end', color:'#3b82f6'}
+            }
           }
         }
       },
@@ -102,7 +114,7 @@ function initChart24h(){
   });
 }
 
-/* Pallino azzurro */
+/* ---------------- PALLINO AZZURRO ---------------- */
 let chartDot = document.createElement("div");
 chartDot.className = "chart-dot";
 document.querySelector(".chart-card").appendChild(chartDot);
@@ -119,6 +131,7 @@ function updateChartRealtime(price){
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, price);
   chart.update("none");
 
+  // Pallino segue ultimo punto
   const meta = chart.getDatasetMeta(0);
   const lastPoint = meta.data[meta.data.length-1];
   if(lastPoint){
@@ -166,7 +179,7 @@ function updatePriceBar(){
 }
 
 function animate(){
-  displayedPrice=lerp(displayedPrice,targetPrice,0.1);
+  displayedPrice = lerp(displayedPrice,targetPrice,0.1);
   colorNumber($("price"),displayedPrice,displayedPrice,4);
 
   const d=((displayedPrice-price24hOpen)/price24hOpen)*100;
@@ -179,15 +192,15 @@ function animate(){
 
   updatePriceBar();
 
-  displayedAvailable=lerp(displayedAvailable,availableInj,0.1);
+  displayedAvailable = lerp(displayedAvailable,availableInj,0.1);
   colorNumber($("available"),displayedAvailable,displayedAvailable,6);
   $("availableUsd").textContent=`≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
-  displayedStake=lerp(displayedStake,stakeInj,0.1);
+  displayedStake = lerp(displayedStake,stakeInj,0.1);
   colorNumber($("stake"),displayedStake,displayedStake,4);
   $("stakeUsd").textContent=`≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
-  displayedRewards=lerp(displayedRewards,rewardsInj,0.1);
+  displayedRewards = lerp(displayedRewards,rewardsInj,0.1);
   colorNumber($("rewards"),displayedRewards,displayedRewards,7);
   $("rewardsUsd").textContent=`≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
 
@@ -203,19 +216,3 @@ animate();
 
 /* ---------------- UPDATE ACCOUNT EVERY 2 SEC ---------------- */
 setInterval(loadAccount,2000);
-
-/* ---------------- CHART CARD HEIGHT ---------------- */
-function resizeChartCard(){
-  const card = document.querySelector(".chart-card");
-  const windowHeight = window.innerHeight;
-  const headerHeight = document.querySelector(".header").offsetHeight;
-  const inputHeight = $("addressInput").offsetHeight;
-  const otherCardsHeight = [...document.querySelectorAll(".cards-wrapper > .card:not(.chart-card)")]
-                            .reduce((sum,c)=>sum+c.offsetHeight,0);
-  const gap = 16*5;
-  const availableHeight = windowHeight - headerHeight - inputHeight - otherCardsHeight - gap -32;
-  card.style.height = Math.max(300,Math.min(availableHeight,650))+"px";
-  if(chart) chart.resize();
-}
-window.addEventListener("load", resizeChartCard);
-window.addEventListener("resize", resizeChartCard);
