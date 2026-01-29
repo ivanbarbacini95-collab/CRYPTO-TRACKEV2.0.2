@@ -58,10 +58,7 @@ let chart, chartData = [], chartLabels = [];
 async function fetchHistory24h(){
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
   chartData = d.map(c => +c[4]);
-  chartLabels = d.map(c => {
-    const date = new Date(c[0]);
-    return `${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}`;
-  });
+  chartLabels = d.map(_ => ""); // tutte le etichette vuote
 
   price24hOpen = chartData[0];
   price24hLow = Math.min(...chartData);
@@ -94,7 +91,7 @@ function initChart24h(){
       animation:false,
       plugins:{legend:{display:false}},
       scales:{
-        x:{ticks:{color:"#9ca3af",autoSkip:false,maxTicksLimit:24}, grid:{color:"#1f2937"}},
+        x:{ticks:{display:false}, grid:{color:"#1f2937"}},
         y:{ticks:{color:"#9ca3af"}, grid:{color:"#1f2937"}, min:price24hLow*0.995, max:price24hHigh*1.005}
       }
     }
