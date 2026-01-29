@@ -16,7 +16,7 @@ function colorNumber(el,n,o,d){
 
 async function fetchJSON(url){
   try{ return await (await fetch(url)).json(); }
-  catch{ return {}; }
+  catch{return {}; }
 }
 
 function nowInTZ(offsetHours){
@@ -185,7 +185,7 @@ function animate(){
 }
 animate();
 
-// ====== GLOBAL INDICES TICKER ======
+// ====== INDICES TICKER ======
 const indices = [
   {symbol:"^GSPC", name:"S&P500", tz:-5},
   {symbol:"^DJI", name:"Dow Jones", tz:-5},
@@ -197,86 +197,90 @@ const indices = [
 ];
 
 const tickerInner = $("tickerInner");
+tickerInner.style.width="100%";
+tickerInner.style.display="flex";
+tickerInner.style.gap="2rem";
 
 // Crea elementi ticker
 indices.forEach(idx=>{
   const item = document.createElement("div");
   item.className="ticker-item";
-  item.dataset.symbol = idx.symbol;
-  const dot = document.createElement("div");
+  item.dataset.symbol=idx.symbol;
+  const dot=document.createElement("div");
   dot.className="ticker-dot";
   item.appendChild(dot);
-  const text = document.createElement("span");
-  text.textContent = `${idx.symbol} 0.00`;
+  const text=document.createElement("span");
+  text.textContent=`${idx.symbol} 0.00`;
   item.appendChild(text);
   tickerInner.appendChild(item);
 
-  // Click mostra mini chart
-  item.onclick = ()=>showIndexChart(idx.symbol, idx.name);
+  item.onclick=()=>showIndexChart(idx.symbol,idx.name);
 });
 
-// Aggiorna ticker con dati reali
-async function updateIndicesTicker(){
+// Animazione scorrimento ticker
+let tickerPos = 0;
+function animateTicker(){
+  tickerPos -= 1; // 1px per frame
+  if(tickerPos<-tickerInner.scrollWidth/2) tickerPos=0;
+  tickerInner.style.transform=`translateX(${tickerPos}px)`;
+  requestAnimationFrame(animateTicker);
+}
+animateTicker();
+
+// Aggiorna dati indici
+async function updateIndices(){
   for(let i=0;i<indices.length;i++){
     const idx=indices[i];
-    const item = tickerInner.children[i];
-    const text = item.querySelector("span");
-    const dot = item.querySelector(".ticker-dot");
+    const item=tickerInner.children[i];
+    const dot=item.querySelector(".ticker-dot");
+    const text=item.querySelector("span");
 
-    // Stati mercati (chiuso 0, premarket 1, aperto 2)
     const d = nowInTZ(idx.tz);
     const h=d.getHours(), m=d.getMinutes();
     let state=0;
-    if(h>=9 && h<16) state=2;           // mercato aperto
-    else if(h===8 && m>=50) state=1;     // premarket 10min
-    else state=0;                        // chiuso
+    if(h>=9 && h<16) state=2;
+    else if(h===8 && m>=50) state=1;
+    else state=0;
+    dot.style.background=state===0?"#ef4444":state===1?"#facc15":"#22c55e";
 
-    // Pallino
-    dot.style.background = state===0?"#ef4444":state===1?"#facc15":"#22c55e";
-
-    // Fetch prezzo solo aperto o pre-market
     if(state>0){
       const url=`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${idx.symbol}`;
-      const data = await fetchJSON(url);
-      const price = data.quoteResponse?.result?.[0]?.regularMarketPrice || 0;
-      const open = data.quoteResponse?.result?.[0]?.regularMarketOpen || price;
-      const dText = ((price-open)/open*100).toFixed(2);
+      const data=await fetchJSON(url);
+      const price=data.quoteResponse?.result?.[0]?.regularMarketPrice || 0;
+      const open=data.quoteResponse?.result?.[0]?.regularMarketOpen || price;
       text.innerHTML=`${idx.symbol} <span style="color:${price>=open?'#22c55e':'#ef4444'}">${price.toFixed(2)}</span>`;
     }
   }
 }
-updateIndicesTicker();
-setInterval(updateIndicesTicker,60000);
+updateIndices();
+setInterval(updateIndices,60000);
 
 // ====== MINI CHART ======
-let indexChartModal = $("indexChartModal");
-let indexChartCanvas = $("indexChartCanvas");
-let indexChartTitle = $("indexChartTitle");
+let indexChartModal=$("indexChartModal");
+let indexChartCanvas=$("indexChartCanvas");
+let indexChartTitle=$("indexChartTitle");
 let indexChartObj=null;
 
 async function showIndexChart(symbol,name){
   indexChartTitle.textContent=name;
   indexChartModal.style.display="block";
 
-  // Fetch dati settimanali
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=7d&interval=1d`;
-  const data = await fetchJSON(url);
-  const timestamps = data.chart.result[0].timestamp.map(t=>new Date(t*1000).toLocaleDateString());
-  const prices = data.chart.result[0].indicators.quote[0].close;
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=7d&interval=1d`;
+  const data=await fetchJSON(url);
+  const timestamps=data.chart.result[0].timestamp.map(t=>new Date(t*1000).toLocaleDateString());
+  const prices=data.chart.result[0].indicators.quote[0].close;
 
   if(indexChartObj){
     indexChartObj.data.labels=timestamps;
     indexChartObj.data.datasets[0].data=prices;
     indexChartObj.update();
-  } else {
-    indexChartObj = new Chart(indexChartCanvas.getContext("2d"),{
+  }else{
+    indexChartObj=new Chart(indexChartCanvas.getContext("2d"),{
       type:"line",
       data:{labels:timestamps,datasets:[{data:prices,borderColor:"#22c55e",backgroundColor:"rgba(34,197,94,0.2)",fill:true,pointRadius:0,tension:0.3}]},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:"#9ca3af"}},x:{ticks:{color:"#9ca3af"}}}}
     });
   }
 }
-
-// Chiudi modal
 indexChartModal.querySelector(".close").onclick=()=>{indexChartModal.style.display="none";};
-window.onclick=e=>{if(e.target===indexChartModal) indexChartModal.style.display="none";};
+window.onclick=e=>{if(e.target===indexChartModal) indexChartModal.style.display="none";}
