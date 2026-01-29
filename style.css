@@ -79,7 +79,45 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* CARDS */
+/* INDICES TICKER */
+.indices-ticker {
+  display: flex;
+  overflow: hidden;
+  background: #111827;
+  border-radius: 0.5rem;
+  padding: 0.3rem 0;
+  position: relative;
+  height: 50px;
+}
+
+.ticker-inner {
+  display: flex;
+  gap: 1rem;
+  position: absolute;
+  white-space: nowrap;
+  animation: scrollTicker 20s linear infinite;
+}
+
+@keyframes scrollTicker {
+  from { transform: translateX(100%); }
+  to { transform: translateX(-100%); }
+}
+
+.ticker-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.ticker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* CARDS - verticali */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -180,73 +218,6 @@ body {
 #priceChart {
   width: 100% !important;
   height: 100% !important;
-}
-
-/* TICKER */
-.ticker-container {
-  overflow: hidden;
-  width: 100%;
-  background: #111827;
-  border-radius: 0.5rem;
-  padding: 0.5rem 0;
-  margin-bottom: 0.3rem;
-}
-
-.ticker-track {
-  display: flex;
-  gap: 2rem;
-  white-space: nowrap;
-  animation: tickerScroll 20s linear infinite;
-}
-
-.ticker-item {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  cursor: pointer;
-}
-
-.ticker-item span {
-  display: inline-block;
-}
-
-.ticker-price {
-  min-width: 60px;
-  text-align: right;
-}
-
-/* SCROLL ANIMATION */
-@keyframes tickerScroll {
-  0% { transform: translateX(100%); }
-  100% { transform: translateX(-100%); }
-}
-
-/* MODAL MINI-CHART */
-.modal {
-  position: fixed;
-  top:0; left:0;
-  width:100%; height:100%;
-  background: rgba(0,0,0,0.7);
-  display:flex; justify-content:center; align-items:center;
-  z-index:1000;
-}
-
-.modal.hidden { display:none; }
-
-.modal-content {
-  background:#111827;
-  padding:1rem;
-  border-radius:0.5rem;
-  width:80%;
-  max-width:600px;
-  position:relative;
-}
-
-.close {
-  position:absolute; top:0.5rem; right:0.5rem;
-  cursor:pointer;
-  font-size:1.5rem;
-  color:#f9fafb;
 }
 
 /* MISC */
