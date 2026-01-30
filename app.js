@@ -34,12 +34,13 @@ $("addressInput").onchange = e=>{
   loadAccount();
 };
 
-/* FETCH ACCOUNT DATA */
+/* FETCH JSON UTILITY */
 async function fetchJSON(url){
   try{ return await (await fetch(url)).json(); }
   catch{ return {}; }
 }
 
+/* LOAD ACCOUNT DATA */
 async function loadAccount(){
   if(!address) return;
 
@@ -54,19 +55,28 @@ async function loadAccount(){
   stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
 
   const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
-  if(newRewards > rewardsInj) rewardsInJ = newRewards;
+  if(newRewards > rewardsInj) rewardsInj = newRewards;
 
   apr = Number(i.inflation||0)*100;
 }
 
+/* AUTO REFRESH ACCOUNT */
 loadAccount();
-setInterval(loadAccount, 60000);
+setInterval(loadAccount, 60000); // completo ogni 60s
 
-/* FETCH CHART HISTORY */
+/* AGGIORNAMENTO SOLO REWARDS OGNI 2s */
+setInterval(async ()=>{
+  if(!address) return;
+  const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
+  const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+  if(newRewards > rewardsInj) rewardsInj = newRewards;
+}, 2000);
+
+/* FETCH 24h HISTORY */
 async function fetchHistory24h(){
-  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
+  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24");
   chartData = d.map(c=>+c[4]);
-  price24hOpen = chartData[0];
+  price24hOpen = +d[0][1];
   price24hLow = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
   targetPrice = chartData.at(-1);
@@ -82,13 +92,12 @@ function initChart(){
     data: {
       labels: Array(chartData.length).fill(""),
       datasets: [{
-        label: "Price",
         data: chartData,
         borderColor: "#22c55e",
-        backgroundColor: ctx.createLinearGradient(0,0,0,300),
+        backgroundColor: "rgba(34,197,94,0.2)",
         fill: true,
         pointRadius: 0,
-        tension: 0.2
+        tension: 0.3
       }]
     },
     options: {
@@ -162,10 +171,12 @@ function updatePriceBar() {
   $("priceBar").style.background = price >= open ? "linear-gradient(to right, #22c55e, #10b981)" : "linear-gradient(to right, #ef4444, #f87171)";
 }
 
-/* ANIMATION LOOP */
+/* ANIMATION LOOP COMPLETO */
 function animate(){
+  // PRICE
+  const oldPrice = displayedPrice;
   displayedPrice = lerp(displayedPrice, targetPrice, 0.1);
-  colorNumber($("price"), displayedPrice, displayedPrice, 4);
+  colorNumber($("price"), displayedPrice, oldPrice, 4);
   const d=((displayedPrice-price24hOpen)/price24hOpen)*100;
   $("price24h").textContent=`${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
   $("price24h").className="sub "+(d>0?"up":"down");
@@ -173,6 +184,34 @@ function animate(){
   $("priceOpen").textContent = price24hOpen.toFixed(3);
   $("priceMax").textContent = price24hHigh.toFixed(3);
   updatePriceBar();
+
+  // AVAILABLE
+  const oldAvailable = displayedAvailable;
+  displayedAvailable = lerp(displayedAvailable, availableInj, 0.1);
+  colorNumber($("available"), displayedAvailable, oldAvailable, 6);
+  $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
+
+  // STAKE
+  const oldStake = displayedStake;
+  displayedStake = lerp(displayedStake, stakeInj, 0.1);
+  colorNumber($("stake"), displayedStake, oldStake, 4);
+  $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
+
+  // REWARDS
+  const oldRewards = displayedRewards;
+  displayedRewards = lerp(displayedRewards, rewardsInj, 0.1);
+  colorNumber($("rewards"), displayedRewards, oldRewards, 7);
+  $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+
+  $("rewardBar").style.width = Math.min(displayedRewards/0.05*100,100)+"%";
+  $("rewardBar").style.background = "linear-gradient(to right, #0ea5e9, #3b82f6)";
+  $("rewardPercent").textContent = (displayedRewards/0.05*100).toFixed(1)+"%";
+
+  // APR
+  $("apr").textContent = apr.toFixed(2)+"%";
+
+  // LAST UPDATE
+  $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
 }
