@@ -269,6 +269,9 @@ function animateBoxes() {
     $("rewardBar").style.width = rewardPct + "%";
     $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
     $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
+
+    // aggiorna **controvalore USD**
+    $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
   }
 
   // APR
