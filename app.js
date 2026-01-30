@@ -12,12 +12,12 @@ let priceHigh = 0;
 
 let availableInj = 0;
 let stakeInj = 0;
-let rewardsInj = 0;
+let rewardsInj = 0;   // Valore reale dei rewards
 let apr = 0;
 
 let displayedAvailable = 0;
 let displayedStake = 0;
-let displayedRewards = 0;
+let displayedRewards = 0; // Valore visualizzato
 
 let chart;
 let chartData = [];
@@ -33,7 +33,7 @@ let firstLoad = true;
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f)=>a+(b-a)*f;
 
-/* Animazione cifra-per-cifra solo sui numeri cambiati */
+// Animazione cifra-per-cifra solo sui numeri cambiati
 function colorNumber(el, current, previous, decimals=2){
   if(!el) return;
 
@@ -74,19 +74,14 @@ $("addressInput").onchange = e=>{
 async function loadAccount(){
   if(!address) return;
 
-  const [b,s,r,i]=await Promise.all([
+  const [b,s,i]=await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
-    fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
   availableInj=(b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
   stakeInj=(s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
-
-  rewardsInj=(r.rewards||[]).reduce(
-    (a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0
-  )/1e18;
 
   apr=Number(i.inflation||0)*100;
 }
@@ -273,20 +268,17 @@ function updateBoxes() {
 }
 
 /* ======================
-   UPDATE REWARDS OGNI 2.5 SECONDI
+   UPDATE REWARDS OGNI 2.5 SECONDI (SOLO VALORE REALE)
 ====================== */
-setInterval(()=>{
-  const oldRewards = displayedRewards;
-  displayedRewards = lerp(displayedRewards, rewardsInj, 0.03);
+setInterval(async ()=>{
+  if(!address) return;
 
-  if(Math.abs(displayedRewards - oldRewards) > 0.0000001){
-    colorNumber($("rewards"), displayedRewards, oldRewards, 7);
+  const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
+  const newRewards = (r.rewards||[]).reduce(
+    (a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0
+  )/1e18;
 
-    const rewardPct = Math.min(displayedRewards/0.05*100,100);
-    $("rewardBar").style.width = rewardPct + "%";
-    $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
-    $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
-  }
+  if(newRewards !== rewardsInj) rewardsInj = newRewards; // animate() farà scorrere fluido
 }, 2500);
 
 /* ======================
@@ -308,6 +300,19 @@ function animate(){
 
   // Box available/stake/apr in real time
   updateBoxes();
+
+  // Rewards: animazione fluida
+  const oldRewards = displayedRewards;
+  displayedRewards = lerp(displayedRewards, rewardsInj, 0.05);
+
+  if(Math.abs(displayedRewards - oldRewards) > 0.0000001){
+    colorNumber($("rewards"), displayedRewards, oldRewards, 7);
+
+    const rewardPct = Math.min(displayedRewards/0.05*100,100);
+    $("rewardBar").style.width = rewardPct + "%";
+    $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
+    $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
+  }
 
   requestAnimationFrame(animate);
 }
