@@ -1,91 +1,80 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Injective • Portfolio</title>
-
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
-  <script src="app.js" defer></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Injective Dashboard</title>
+<link href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css" rel="stylesheet">
+<style>
+  body { font-family: Arial, sans-serif; background: #111827; color: #f3f4f6; margin:0; padding:20px; }
+  .card { background:#1f2937; border-radius:8px; padding:15px; margin-bottom:20px; }
+  input { padding:5px; border-radius:4px; border:none; width:100%; margin-bottom:10px; }
+  .status-dot { width:12px; height:12px; border-radius:50%; display:inline-block; margin-right:5px; }
+  .price-section { display:flex; align-items:center; font-size:24px; }
+  .price-section span { margin-left:5px; font-size:18px; }
+  #priceTrend { margin-left:10px; font-weight:bold; }
+  .price-bar-container { position:relative; height:10px; background:#374151; border-radius:5px; margin-top:10px; }
+  #priceBar { position:absolute; height:100%; border-radius:5px; }
+  #priceLine { position:absolute; width:2px; height:100%; background:#facc15; top:0; }
+  .account-box { display:flex; justify-content:space-between; margin-top:10px; font-size:16px; }
+  .reward-bar-container { background:#374151; border-radius:5px; height:10px; margin-top:5px; }
+  #rewardBar { height:100%; border-radius:5px; }
+  canvas { width:100%; height:200px; margin-top:10px; }
+  .updated { font-size:12px; margin-top:5px; color:#9ca3af; }
+</style>
 </head>
 <body>
 
-<div class="container">
-
-  <div class="header">
-    <h1>Injective <span class="dot">•</span> Portfolio</h1>
-    <div class="subtitle">Realtime staking & rewards dashboard</div>
-
-    <!-- Connection Status -->
-    <div class="connection-status" id="connectionStatus">
-      <span class="status-dot"></span>
-      <span class="status-text">Offline</span>
-    </div>
+<div class="card">
+  <input id="addressInput" placeholder="Inserisci indirizzo Injective">
+  <div id="connectionStatus">
+    <span class="status-dot"></span><span class="status-text">Offline</span>
   </div>
-
-  <input id="addressInput" placeholder="Inserisci indirizzo Injective (inj...)" />
-
-  <div class="cards-wrapper">
-
-    <div class="card price-card">
-      <div class="label">INJ Price</div>
-      <div class="value-row">
-        <span id="price">0.0000</span>
-        <span id="priceTrend"></span>
-      </div>
-      <div class="sub-row"><span id="pricePercent">0.00%</span></div>
-
-      <div class="price-bar-container">
-        <div id="priceBar" class="price-bar"></div>
-        <div id="priceLine" class="price-line"></div>
-      </div>
-
-      <div class="price-values">
-        <span id="priceMin" class="price-extremes left">0.000</span>
-        <span id="priceOpen" class="price-extremes center">0.000</span>
-        <span id="priceMax" class="price-extremes right">0.000</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="label">Available</div>
-      <div class="value-row"><span id="available">0.000000</span></div>
-      <div class="sub-row"><span id="availableUsd">≈ $0.00</span></div>
-    </div>
-
-    <div class="card">
-      <div class="label">Staked</div>
-      <div class="value-row"><span id="stake">0.0000</span></div>
-      <div class="sub-row"><span id="stakeUsd">≈ $0.00</span></div>
-    </div>
-
-    <div class="card">
-      <div class="label">Rewards</div>
-      <div class="value-row"><span id="rewards">0.0000000</span></div>
-      <div class="sub-row"><span id="rewardsUsd">≈ $0.00</span></div>
-
-      <div class="reward-bar-container">
-        <div id="rewardBar" class="reward-bar"></div>
-        <span id="rewardPercent" class="reward-percent">0%</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="label">APR</div>
-      <div class="value-row"><span id="apr">0%</span></div>
-    </div>
-
-    <div class="card chart-card">
-      <div class="label">24h Price Chart</div>
-      <canvas id="priceChart"></canvas>
-    </div>
-
-  </div>
-
-  <div id="updated" class="last-update">Last update: --:--</div>
-
 </div>
+
+<div class="card">
+  <div class="price-section">
+    <div id="price">0.0000</div>
+    <div id="priceTrend">–</div>
+    <span id="pricePercent">0.00%</span>
+  </div>
+  <div class="price-bar-container">
+    <div id="priceBar"></div>
+    <div id="priceLine"></div>
+  </div>
+  <div style="display:flex; justify-content:space-between; font-size:12px; margin-top:3px;">
+    <div id="priceMin">0.000</div>
+    <div id="priceOpen">0.000</div>
+    <div id="priceMax">0.000</div>
+  </div>
+  <canvas id="priceChart"></canvas>
+</div>
+
+<div class="card">
+  <div class="account-box">
+    <div>Available: <span id="available">0.000000</span> INJ</div>
+    <div id="availableUsd">≈ $0.00</div>
+  </div>
+  <div class="account-box">
+    <div>Staked: <span id="stake">0.0000</span> INJ</div>
+    <div id="stakeUsd">≈ $0.00</div>
+  </div>
+  <div class="account-box">
+    <div>Rewards: <span id="rewards">0.0000000</span> INJ</div>
+    <div id="rewardsUsd">≈ $0.00</div>
+  </div>
+  <div class="reward-bar-container">
+    <div id="rewardBar"></div>
+    <span id="rewardPercent" style="position:absolute; right:5px; top:-18px; font-size:12px;">0%</span>
+  </div>
+  <div class="account-box">
+    <div>APR: <span id="apr">0.00</span>%</div>
+  </div>
+  <div class="updated" id="updated">Last update: --:--:--</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
 
 </body>
 </html>
