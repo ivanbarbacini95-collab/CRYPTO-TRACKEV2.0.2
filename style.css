@@ -15,7 +15,6 @@ body {
   position: relative;
 }
 
-/* HEADER */
 .header {
   display: flex;
   flex-direction: column;
@@ -41,7 +40,6 @@ body {
   color: #9ca3af;
 }
 
-/* CONNECTION STATUS */
 .connection-status {
   position: absolute;
   top: 0;
@@ -67,11 +65,8 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
-.status-text {
-  color: #f9fafb;
-}
+.status-text { color: #f9fafb; }
 
-/* INPUT */
 #addressInput {
   padding: 0.8rem;
   border-radius: 0.5rem;
@@ -86,7 +81,6 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* CARDS */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -121,7 +115,6 @@ body {
   color: #9ca3af;
 }
 
-/* PRICE BAR */
 .price-bar-container {
   position: relative;
   height: 24px;
@@ -133,7 +126,7 @@ body {
 .price-bar {
   position: absolute;
   height: 100%;
-  transition: width 0.2s linear, left 0.2s linear, background 0.2s linear;
+  transition: width 0.2s ease, left 0.2s ease, background 0.2s ease;
   border-radius: 0.3rem;
 }
 
@@ -142,7 +135,7 @@ body {
   width: 2px;
   height: 100%;
   background: #facc15;
-  transition: left 0.2s linear;
+  transition: left 0.2s ease;
 }
 
 .price-values {
@@ -156,7 +149,6 @@ body {
 .price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
 .price-extremes.right { position: absolute; right: 0; }
 
-/* REWARD BAR */
 .reward-bar-container {
   position: relative;
   height: 24px;
@@ -179,17 +171,10 @@ body {
   font-size: 0.85rem;
 }
 
-/* CHART */
-.chart-card {
-  height: 300px;
-}
+.chart-card { height: 300px; }
 
-#priceChart {
-  width: 100% !important;
-  height: 100% !important;
-}
+#priceChart { width: 100% !important; height: 100% !important; }
 
-/* MISC */
 .up { color: #22c55e; }
 .down { color: #ef4444; }
 
