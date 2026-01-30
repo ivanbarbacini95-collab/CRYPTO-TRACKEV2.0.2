@@ -138,8 +138,9 @@ async function fetchDayHistory(){
    CHART
 ====================== */
 function createGradient(ctx,price){
+  const color = price>=priceOpen ? "rgba(34,197,94,.25)" : "rgba(239,68,68,.25)";
   const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height);
-  g.addColorStop(0,price>=priceOpen?"rgba(34,197,94,.25)":"rgba(239,68,68,.25)");
+  g.addColorStop(0,color);
   g.addColorStop(1,"rgba(0,0,0,0)");
   return g;
 }
@@ -168,18 +169,6 @@ function initChart(){
   });
 }
 
-function updateChartRealtime(p){
-  if(!chart) return;
-  const idx=Math.floor((Date.now()-midnight())/60000);
-  chartData[idx]=p;
-  chart.data.datasets[0].data=chartData.map(v=>v??NaN);
-  chart.data.datasets[0].backgroundColor=createGradient(chart.ctx,p);
-  chart.update("none");
-
-  priceLow=Math.min(priceLow,p);
-  priceHigh=Math.max(priceHigh,p);
-}
-
 /* ======================
    WEBSOCKET
 ====================== */
@@ -196,8 +185,29 @@ function startWS(){
 }
 
 /* ======================
-   PRICE BAR
+   UPDATE CHART & PRICE BAR
 ====================== */
+function updateChartRealtime(p){
+  if(!chart) return;
+  
+  const idx = Math.floor((Date.now()-midnight())/60000);
+  chartData[idx] = p;
+
+  // Aggiorna colore del grafico in base al prezzo vs apertura
+  const color = p >= priceOpen ? "#22c55e" : "#ef4444";
+  chart.data.datasets[0].borderColor = color;
+  chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, p);
+
+  chart.data.datasets[0].data = chartData.map(v => v??NaN);
+  chart.update("none");
+
+  // Aggiorna min/max per barra prezzo
+  priceLow = Math.min(priceLow, p);
+  priceHigh = Math.max(priceHigh, p);
+
+  updatePriceBar();
+}
+
 function updatePriceBar(){
   if(!dataReady || priceHigh===priceLow) return;
 
@@ -208,18 +218,20 @@ function updatePriceBar(){
 
   pct = Math.max(0, Math.min(100, pct));
 
-  // linea prezzo
   $("priceLine").style.left = pct+"%";
 
-  // barra con gradiente dinamico
+  const barColor = price>=priceOpen
+    ? "linear-gradient(to right,#22c55e,#10b981)"
+    : "linear-gradient(to right,#ef4444,#f87171)";
+
+  $("priceBar").style.background = barColor;
+
   if(price>=priceOpen){
     $("priceBar").style.left = "50%";
     $("priceBar").style.width = (pct-50)+"%";
-    $("priceBar").style.background = "linear-gradient(to right,#22c55e,#10b981)";
   } else {
     $("priceBar").style.left = pct+"%";
     $("priceBar").style.width = (50-pct)+"%";
-    $("priceBar").style.background = "linear-gradient(to right,#ef4444,#f87171)";
   }
 }
 
