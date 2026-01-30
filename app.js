@@ -26,7 +26,6 @@ let chartLabels = [];
 
 let ws;
 let dataReady = false;
-let firstLoad = true;
 
 let price24hChange = 0;
 
@@ -66,7 +65,6 @@ $("addressInput").onchange = e=>{
   address=e.target.value.trim();
   localStorage.setItem("inj_address",address);
   loadAccount();
-  firstLoad = true;
 };
 
 /* ======================
@@ -75,19 +73,25 @@ $("addressInput").onchange = e=>{
 async function loadAccount(){
   if(!address) return;
 
-  const [b,s,i]=await Promise.all([
+  const [b,s,r,i]=await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
+    fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
+  // Available INJ
   availableInj=(b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
+
+  // Staked INJ
   stakeInj=(s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
+
+  // Rewards
+  rewardsInj=(r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+
+  // APR
   apr=Number(i.inflation||0)*100;
 }
-
-loadAccount();
-setInterval(loadAccount,60000);
 
 /* ======================
    CONNECTION STATUS
@@ -182,33 +186,14 @@ function startWS(){
   ws.onopen=()=>setStatus(true);
   ws.onmessage=e=>{
     targetPrice=+JSON.parse(e.data).p;
-    updateChartRealtime(targetPrice);
   };
   ws.onclose=()=>setTimeout(startWS,3000);
   ws.onerror=()=>setStatus(false);
 }
 
 /* ======================
-   UPDATE CHART & PRICE BAR
+   PRICE & CHART UPDATE
 ====================== */
-function updateChartRealtime(p){
-  if(!chart) return;
-
-  const idx = Math.floor((Date.now()-midnight())/60000);
-  chartData[idx] = p;
-
-  const color = p >= priceOpen ? "#22c55e" : "#ef4444";
-  chart.data.datasets[0].borderColor = color;
-  chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, p);
-  chart.data.datasets[0].data = chartData.map(v => v??NaN);
-  chart.update("none");
-
-  priceLow = Math.min(priceLow, p);
-  priceHigh = Math.max(priceHigh, p);
-
-  updatePriceBar();
-}
-
 function updatePriceBar(){
   if(!dataReady || priceHigh===priceLow) return;
 
@@ -224,7 +209,6 @@ function updatePriceBar(){
   const barColor = price>=priceOpen
     ? "linear-gradient(to right,#22c55e,#10b981)"
     : "linear-gradient(to right,#ef4444,#f87171)";
-
   $("priceBar").style.background = barColor;
 
   if(price>=priceOpen){
@@ -240,44 +224,16 @@ function updatePriceBar(){
   $("priceMax").textContent = priceHigh.toFixed(3);
 }
 
-/* ======================
-   ACCOUNT BOXES & REWARDS
-====================== */
-function animateBoxes() {
-  if(Math.abs(displayedAvailable-availableInj)>0.000001){
-    const old = displayedAvailable;
-    displayedAvailable = lerp(displayedAvailable, availableInj, 0.05);
-    colorNumber($("available"), displayedAvailable, old, 6);
-    $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
-  }
-
-  if(Math.abs(displayedStake-stakeInj)>0.000001){
-    const old = displayedStake;
-    displayedStake = lerp(displayedStake, stakeInj, 0.05);
-    colorNumber($("stake"), displayedStake, old, 4);
-    $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
-  }
-
-  if(Math.abs(displayedRewards-rewardsInj)>0.0000001){
-    const old = displayedRewards;
-    displayedRewards = lerp(displayedRewards, rewardsInj, 0.05);
-    colorNumber($("rewards"), displayedRewards, old, 7);
-    $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
-
-    const rewardPct = Math.min(displayedRewards/0.05*100,100);
-    $("rewardBar").style.width = rewardPct+"%";
-    $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
-  }
-
-  if(Math.abs(displayedApr-apr)>0.0001){
-    const old = displayedApr;
-    displayedApr = lerp(displayedApr, apr, 0.05);
-    colorNumber($("apr"), displayedApr, old, 2);
-  }
+async function fetch24hChange(){
+  const data = await fetchJSON("https://api.binance.com/api/v3/ticker/24hr?symbol=INJUSDT");
+  if(!data) return;
+  price24hChange=parseFloat(data.priceChangePercent);
+  $("pricePercent").textContent = (price24hChange>=0?"+":"")+price24hChange.toFixed(2)+"%";
+  $("pricePercent").style.color = price24hChange>=0?"#22c55e":"#ef4444";
 }
 
 /* ======================
-   MAIN ANIMATION LOOP
+   ANIMATION LOOP
 ====================== */
 function animate(){
   if(!dataReady){ requestAnimationFrame(animate); return; }
@@ -285,17 +241,66 @@ function animate(){
   const oldPrice = displayedPrice;
   displayedPrice = lerp(displayedPrice, targetPrice, 0.05);
   colorNumber($("price"), displayedPrice, oldPrice, 4);
-
   updatePriceBar();
-  animateBoxes();
 
-  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+  // Trend arrow
+  const trendEl = $("priceTrend");
+  if(displayedPrice>oldPrice){
+    trendEl.textContent="▲";
+    trendEl.style.color="#22c55e";
+  } else if(displayedPrice<oldPrice){
+    trendEl.textContent="▼";
+    trendEl.style.color="#ef4444";
+  } else {
+    trendEl.textContent="–";
+    trendEl.style.color="#9ca3af";
+  }
+
+  // Animate boxes
+  if(Math.abs(displayedAvailable-availableInj)>0.000001){
+    const old=displayedAvailable;
+    displayedAvailable=lerp(displayedAvailable, availableInj, 0.05);
+    colorNumber($("available"), displayedAvailable, old, 6);
+    $("availableUsd").textContent=`≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
+  }
+
+  if(Math.abs(displayedStake-stakeInj)>0.000001){
+    const old=displayedStake;
+    displayedStake=lerp(displayedStake, stakeInj, 0.05);
+    colorNumber($("stake"), displayedStake, old, 4);
+    $("stakeUsd").textContent=`≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
+  }
+
+  if(Math.abs(displayedRewards-rewardsInj)>0.0000001){
+    const old=displayedRewards;
+    displayedRewards=lerp(displayedRewards, rewardsInj, 0.05);
+    colorNumber($("rewards"), displayedRewards, old, 7);
+    $("rewardsUsd").textContent=`≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+    $("rewardPercent").textContent=(Math.min(displayedRewards/0.05*100,100)).toFixed(1)+"%";
+    $("rewardBar").style.width=(Math.min(displayedRewards/0.05*100,100))+"%";
+  }
+
+  if(Math.abs(displayedApr-apr)>0.0001){
+    const old=displayedApr;
+    displayedApr=lerp(displayedApr, apr, 0.05);
+    colorNumber($("apr"), displayedApr, old, 2);
+  }
+
+  $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
 }
 
 /* ======================
-   INIT
+   DAILY RESET
+====================== */
+setInterval(()=>{
+  const n=new Date();
+  if(n.getHours()===0 && n.getMinutes()===0) fetchDayHistory();
+},60000);
+
+/* ======================
+   START
 ====================== */
 fetchDayHistory();
 startWS();
