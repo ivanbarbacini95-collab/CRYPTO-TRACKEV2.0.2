@@ -15,7 +15,6 @@ body {
   position: relative;
 }
 
-/* HEADER */
 .header {
   display: flex;
   flex-direction: column;
@@ -41,7 +40,6 @@ body {
   color: #9ca3af;
 }
 
-/* CONNECTION STATUS */
 .connection-status {
   position: absolute;
   top: 0;
@@ -71,7 +69,6 @@ body {
   color: #f9fafb;
 }
 
-/* INPUT */
 #addressInput {
   padding: 0.8rem;
   border-radius: 0.5rem;
@@ -86,7 +83,6 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* CARDS */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -121,22 +117,8 @@ body {
   color: #9ca3af;
 }
 
-/* PRICE TREND & PERCENT */
-#priceTrend {
-  font-size: 1.2rem;
-  margin-left: 0.5rem;
-}
-
-#pricePercent {
-  font-size: 0.8rem;
-  margin-top: 2px;
-  display: inline-block;
-  text-align: right;
-  width: 100%;
-}
-
-/* PRICE BAR */
-.price-bar-container {
+.price-bar-container,
+.reward-bar-container {
   position: relative;
   height: 24px;
   background: #111827;
@@ -144,7 +126,7 @@ body {
   overflow: hidden;
 }
 
-.price-bar {
+.price-bar, .reward-bar {
   position: absolute;
   height: 100%;
   transition: width 0.3s ease, left 0.3s ease, background 0.3s ease;
@@ -170,22 +152,6 @@ body {
 .price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
 .price-extremes.right { position: absolute; right: 0; }
 
-/* REWARD BAR */
-.reward-bar-container {
-  position: relative;
-  height: 24px;
-  background: #111827;
-  border-radius: 0.3rem;
-  overflow: hidden;
-}
-
-.reward-bar {
-  height: 100%;
-  transition: width 0.3s ease;
-  border-radius: 0.3rem;
-  background: linear-gradient(to right,#0ea5e9,#3b82f6);
-}
-
 .reward-percent {
   position: absolute;
   top: 50%;
@@ -194,7 +160,6 @@ body {
   font-size: 0.85rem;
 }
 
-/* CHART */
 .chart-card {
   height: 300px;
 }
@@ -204,7 +169,6 @@ body {
   height: 100% !important;
 }
 
-/* MISC */
 .up { color: #22c55e; }
 .down { color: #ef4444; }
 
