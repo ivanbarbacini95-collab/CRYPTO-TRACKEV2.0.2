@@ -21,8 +21,8 @@ let displayedRewards = 0;
 let displayedApr = 0;
 
 let chart;
-let chartData = new Array(1440).fill(null);
-let chartLabels = Array.from({length:1440},(_,i)=>`${Math.floor(i/60).toString().padStart(2,'0')}:${(i%60).toString().padStart(2,'0')}`);
+let chartData = [];
+let chartLabels = [];
 
 let ws;
 let dataReady = false;
@@ -57,8 +57,6 @@ async function fetchJSON(url){
   catch{ return {}; }
 }
 
-function midnight(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); }
-
 /* ======================
    ADDRESS INPUT
 ====================== */
@@ -71,7 +69,7 @@ $("addressInput").onchange = e=>{
 };
 
 /* ======================
-   ACCOUNT
+   ACCOUNT DATA
 ====================== */
 async function loadAccount(){
   if(!address) return;
@@ -95,19 +93,27 @@ setInterval(loadAccount,60000);
 ====================== */
 const statusDot=$("connectionStatus").querySelector(".status-dot");
 const statusText=$("connectionStatus").querySelector(".status-text");
-
 function setStatus(on){
   statusDot.style.background=on?"#22c55e":"#ef4444";
   statusText.textContent=on?"Online":"Offline";
 }
 
 /* ======================
-   CHART
+   DAY HISTORY
 ====================== */
-async function fetchChartData(){
+function midnight(){
+  const d=new Date();
+  d.setHours(0,0,0,0);
+  return d.getTime();
+}
+
+async function fetchDayHistory(){
   const start=midnight();
   const end=Date.now();
-  const minutes=Math.floor((end-start)/60000);
+  const minutes=1440; // 24h * 60
+
+  chartData=new Array(minutes).fill(null);
+  chartLabels=new Array(minutes).fill("");
 
   const url=`https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&startTime=${start}&endTime=${end}`;
   const d=await fetchJSON(url);
@@ -118,18 +124,21 @@ async function fetchChartData(){
   priceHigh=Math.max(...d.map(c=>+c[4]));
 
   d.forEach(c=>{
-    const idx = Math.floor((+c[0]-start)/60000);
-    if(idx>=0 && idx<chartData.length) chartData[idx] = +c[4];
+    const idx=Math.floor((+c[0]-start)/60000);
+    if(idx>=0 && idx<chartData.length) chartData[idx]=+c[4];
   });
 
-  targetPrice = +d.at(-1)[4];
-  displayedPrice = targetPrice;
-  dataReady = true;
+  targetPrice=+d.at(-1)[4];
+  displayedPrice=targetPrice;
+  dataReady=true;
 
   initChart();
   fetch24hChange();
 }
 
+/* ======================
+   CHART
+====================== */
 function createGradient(ctx,price){
   const color = price>=priceOpen ? "rgba(34,197,94,.25)" : "rgba(239,68,68,.25)";
   const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height);
@@ -149,8 +158,7 @@ function initChart(){
         borderColor:"#22c55e",
         backgroundColor:createGradient(ctx,targetPrice),
         fill:true,
-        pointRadius:0,
-        tension:0.2
+        pointRadius:0
       }]
     },
     options:{
@@ -158,7 +166,7 @@ function initChart(){
       maintainAspectRatio:false,
       animation:false,
       plugins:{legend:{display:false}},
-      scales:{x:{display:true},y:{ticks:{color:"#9ca3af"}}}
+      scales:{x:{display:false},y:{ticks:{color:"#9ca3af"}}}
     }
   });
 }
@@ -168,6 +176,7 @@ function initChart(){
 ====================== */
 function startWS(){
   ws=new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+
   ws.onopen=()=>setStatus(true);
   ws.onmessage=e=>{
     targetPrice=+JSON.parse(e.data).p;
@@ -184,7 +193,6 @@ function updateChartRealtime(p){
   if(!chart) return;
   
   const idx = Math.floor((Date.now()-midnight())/60000);
-  if(idx>=chartData.length) return;
   chartData[idx] = p;
 
   const color = p >= priceOpen ? "#22c55e" : "#ef4444";
@@ -210,6 +218,7 @@ function updatePriceBar(){
   let pct = price>=priceOpen
     ? 50 + ((price-priceOpen)/(priceHigh-priceOpen))*50
     : 50 - ((priceOpen-price)/(priceOpen-priceLow))*50;
+
   pct = Math.max(0, Math.min(100, pct));
 
   $("priceLine").style.left = pct+"%";
@@ -234,10 +243,10 @@ function updatePriceBar(){
 }
 
 /* ======================
-   ACCOUNT BOXES
+   ACCOUNT BOXES & REWARDS
 ====================== */
 function animateBoxes() {
-  // Available
+  // Available: animazione solo su variazione reale
   if(Math.abs(displayedAvailable - availableInj) > 0.000001){
     const old = displayedAvailable;
     displayedAvailable = lerp(displayedAvailable, availableInj, 0.05);
@@ -279,22 +288,17 @@ function animateBoxes() {
 ====================== */
 setInterval(async ()=>{
   if(!address) return;
-
   const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
   const newRewards = (r.rewards||[]).reduce(
     (a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0
   )/1e18;
 
-  // Se rewards sono stati prelevati o aggiunti, aggiorna available e staked
-  if(newRewards !== rewardsInj){
-    const diff = rewardsInj - newRewards;
-    availableInj += diff; // se prelevati, aumentano in available
-    rewardsInj = newRewards;
-  }
+  if(newRewards !== rewardsInj) rewardsInj = newRewards;
+  loadAccount(); // aggiorna anche Available/Staked
 }, 2500);
 
 /* ======================
-   PRICE TREND & 24H %
+   PRICE 24H & TREND
 ====================== */
 async function fetch24hChange(){
   const data = await fetchJSON("https://api.binance.com/api/v3/ticker/24hr?symbol=INJUSDT");
@@ -344,17 +348,14 @@ function animate(){
 setInterval(()=>{
   const n = new Date();
   if(n.getHours()===0 && n.getMinutes()===0){
-    chartData.fill(null);
-    priceLow = Infinity;
-    priceHigh = 0;
-    fetchChartData();
+    fetchDayHistory();
   }
 },60000);
 
 /* ======================
    START
 ====================== */
-fetchChartData().then(()=>{
+fetchDayHistory().then(()=>{
   startWS();
   animate();
 });
