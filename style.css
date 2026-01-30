@@ -121,6 +121,20 @@ body {
   color: #9ca3af;
 }
 
+/* PRICE TREND & PERCENT */
+#priceTrend {
+  font-size: 1.2rem;
+  margin-left: 0.5rem;
+}
+
+#pricePercent {
+  font-size: 0.8rem;
+  margin-top: 2px;
+  display: inline-block;
+  text-align: right;
+  width: 100%;
+}
+
 /* PRICE BAR */
 .price-bar-container {
   position: relative;
