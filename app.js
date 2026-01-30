@@ -12,17 +12,17 @@ let priceHigh = 0;
 
 let availableInj = 0;
 let stakeInj = 0;
-let rewardsInj = 0;   
+let rewardsInj = 0;
 let apr = 0;
 
 let displayedAvailable = 0;
 let displayedStake = 0;
-let displayedRewards = 0; 
+let displayedRewards = 0;
 let displayedApr = 0;
 
 let chart;
-let chartData = [];
-let chartLabels = [];
+let chartData = new Array(1440).fill(null);
+let chartLabels = new Array(1440).fill("");
 
 let ws;
 let dataReady = false;
@@ -38,8 +38,10 @@ const lerp = (a,b,f)=>a+(b-a)*f;
 
 function colorNumber(el, current, previous, decimals=2){
   if(!el) return;
+
   const curStr = current.toFixed(decimals);
   const prevStr = previous.toFixed(decimals).padStart(curStr.length, '0');
+
   let html = '';
   for(let i=0;i<curStr.length;i++){
     if(curStr[i]!==prevStr[i]){
@@ -62,27 +64,27 @@ async function fetchJSON(url){
 ====================== */
 $("addressInput").value = address;
 $("addressInput").onchange = e=>{
-  address=e.target.value.trim();
-  localStorage.setItem("inj_address",address);
+  address = e.target.value.trim();
+  localStorage.setItem("inj_address", address);
   loadAccount();
   firstLoad = true;
 };
 
 /* ======================
-   ACCOUNT DATA
+   ACCOUNT
 ====================== */
 async function loadAccount(){
   if(!address) return;
 
-  const [b,s,i]=await Promise.all([
+  const [b,s,i] = await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
-  availableInj=(b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
-  stakeInj=(s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
-  apr=Number(i.inflation||0)*100;
+  availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
+  stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
+  apr = Number(i.inflation||0)*100;
 }
 
 loadAccount();
@@ -91,46 +93,58 @@ setInterval(loadAccount,60000);
 /* ======================
    CONNECTION STATUS
 ====================== */
-const statusDot=$("connectionStatus").querySelector(".status-dot");
-const statusText=$("connectionStatus").querySelector(".status-text");
+const statusDot = $("connectionStatus").querySelector(".status-dot");
+const statusText = $("connectionStatus").querySelector(".status-text");
+
 function setStatus(on){
-  statusDot.style.background=on?"#22c55e":"#ef4444";
-  statusText.textContent=on?"Online":"Offline";
+  statusDot.style.background = on ? "#22c55e" : "#ef4444";
+  statusText.textContent = on ? "Online" : "Offline";
 }
 
 /* ======================
-   DAY HISTORY
+   DAY HISTORY & LOCALSTORAGE
 ====================== */
-function midnight(){
-  const d=new Date();
+function midnight(){ 
+  const d = new Date();
   d.setHours(0,0,0,0);
   return d.getTime();
 }
 
+function getStorageKey(){
+  const d = new Date();
+  return `inj_chart_${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+}
+
 async function fetchDayHistory(){
-  const start=midnight();
-  const end=Date.now();
-  const minutes=1440; // 24h * 60
+  const start = midnight();
+  const end = Date.now();
+  const minutes = Math.floor((end-start)/60000);
 
-  chartData=new Array(minutes).fill(null);
-  chartLabels=new Array(minutes).fill("");
+  // Carica dati salvati in localStorage se disponibili
+  const savedData = JSON.parse(localStorage.getItem(getStorageKey()) || "[]");
+  chartData = new Array(1440).fill(null);
+  chartLabels = new Array(1440).fill("");
 
-  const url=`https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&startTime=${start}&endTime=${end}`;
-  const d=await fetchJSON(url);
+  for(let i=0; i<savedData.length && i<1440; i++){
+    chartData[i] = savedData[i];
+  }
+
+  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&startTime=${start}&endTime=${end}`;
+  const d = await fetchJSON(url);
   if(!d.length) return;
 
-  priceOpen=+d[0][1];
-  priceLow=Math.min(...d.map(c=>+c[4]));
-  priceHigh=Math.max(...d.map(c=>+c[4]));
+  priceOpen = +d[0][1];
+  priceLow = Math.min(...d.map(c=>+c[4]));
+  priceHigh = Math.max(...d.map(c=>+c[4]));
 
   d.forEach(c=>{
-    const idx=Math.floor((+c[0]-start)/60000);
-    if(idx>=0 && idx<chartData.length) chartData[idx]=+c[4];
+    const idx = Math.floor((+c[0]-start)/60000);
+    if(idx>=0 && idx<chartData.length) chartData[idx] = +c[4];
   });
 
-  targetPrice=+d.at(-1)[4];
-  displayedPrice=targetPrice;
-  dataReady=true;
+  targetPrice = +d.at(-1)[4];
+  displayedPrice = targetPrice;
+  dataReady = true;
 
   initChart();
   fetch24hChange();
@@ -139,22 +153,22 @@ async function fetchDayHistory(){
 /* ======================
    CHART
 ====================== */
-function createGradient(ctx,price){
+function createGradient(ctx, price){
   const color = price>=priceOpen ? "rgba(34,197,94,.25)" : "rgba(239,68,68,.25)";
-  const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+  const g = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
   g.addColorStop(0,color);
   g.addColorStop(1,"rgba(0,0,0,0)");
   return g;
 }
 
 function initChart(){
-  const ctx=$("priceChart").getContext("2d");
-  chart=new Chart(ctx,{
+  const ctx = $("priceChart").getContext("2d");
+  chart = new Chart(ctx,{
     type:"line",
     data:{
-      labels:chartLabels,
+      labels: chartLabels,
       datasets:[{
-        data:chartData.map(v=>v??NaN),
+        data: chartData.map(v=>v??NaN),
         borderColor:"#22c55e",
         backgroundColor:createGradient(ctx,targetPrice),
         fill:true,
@@ -175,15 +189,15 @@ function initChart(){
    WEBSOCKET
 ====================== */
 function startWS(){
-  ws=new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
 
-  ws.onopen=()=>setStatus(true);
-  ws.onmessage=e=>{
-    targetPrice=+JSON.parse(e.data).p;
+  ws.onopen = ()=> setStatus(true);
+  ws.onmessage = e=>{
+    targetPrice = +JSON.parse(e.data).p;
     updateChartRealtime(targetPrice);
   };
-  ws.onclose=()=>setTimeout(startWS,3000);
-  ws.onerror=()=>setStatus(false);
+  ws.onclose = ()=> setTimeout(startWS,3000);
+  ws.onerror = ()=> setStatus(false);
 }
 
 /* ======================
@@ -191,14 +205,16 @@ function startWS(){
 ====================== */
 function updateChartRealtime(p){
   if(!chart) return;
-  
+
   const idx = Math.floor((Date.now()-midnight())/60000);
-  chartData[idx] = p;
+  if(idx>=0 && idx<1440) chartData[idx] = p;
+
+  // Salva in localStorage
+  localStorage.setItem(getStorageKey(), JSON.stringify(chartData));
 
   const color = p >= priceOpen ? "#22c55e" : "#ef4444";
   chart.data.datasets[0].borderColor = color;
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, p);
-
   chart.data.datasets[0].data = chartData.map(v => v??NaN);
   chart.update("none");
 
@@ -243,10 +259,10 @@ function updatePriceBar(){
 }
 
 /* ======================
-   ACCOUNT BOXES & REWARDS
+   ACCOUNT BOXES
 ====================== */
 function animateBoxes() {
-  // Available: animazione solo su variazione reale
+  // Available
   if(Math.abs(displayedAvailable - availableInj) > 0.000001){
     const old = displayedAvailable;
     displayedAvailable = lerp(displayedAvailable, availableInj, 0.05);
@@ -271,7 +287,6 @@ function animateBoxes() {
 
     const rewardPct = Math.min(displayedRewards/0.1*100,100);
     $("rewardBar").style.width = rewardPct + "%";
-    $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
     $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
   }
 
@@ -288,17 +303,17 @@ function animateBoxes() {
 ====================== */
 setInterval(async ()=>{
   if(!address) return;
+
   const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
   const newRewards = (r.rewards||[]).reduce(
     (a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0
   )/1e18;
 
   if(newRewards !== rewardsInj) rewardsInj = newRewards;
-  loadAccount(); // aggiorna anche Available/Staked
 }, 2500);
 
 /* ======================
-   PRICE 24H & TREND
+   PRICE PERCENT & TREND
 ====================== */
 async function fetch24hChange(){
   const data = await fetchJSON("https://api.binance.com/api/v3/ticker/24hr?symbol=INJUSDT");
@@ -348,6 +363,8 @@ function animate(){
 setInterval(()=>{
   const n = new Date();
   if(n.getHours()===0 && n.getMinutes()===0){
+    chartData = new Array(1440).fill(null);
+    localStorage.removeItem(getStorageKey());
     fetchDayHistory();
   }
 },60000);
