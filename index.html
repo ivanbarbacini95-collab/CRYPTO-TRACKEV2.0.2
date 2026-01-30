@@ -1,63 +1,88 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Injective Dashboard</title>
-<link href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css" rel="stylesheet">
-<link href="style.css" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Injective • Portfolio</title>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
 
-<div class="card">
-  <input id="addressInput" placeholder="Inserisci indirizzo Injective">
-  <div id="connectionStatus">
-    <span class="status-dot"></span><span class="status-text">Offline</span>
+<div class="container">
+
+  <div class="header">
+    <h1>Injective <span class="dot">•</span> Portfolio</h1>
+    <div class="subtitle">Realtime staking & rewards dashboard</div>
+
+    <!-- Connection Status -->
+    <div class="connection-status" id="connectionStatus">
+      <span class="status-dot"></span>
+      <span class="status-text">Offline</span>
+    </div>
   </div>
+
+  <input id="addressInput" placeholder="Inserisci indirizzo Injective (inj...)" />
+
+  <div class="cards-wrapper">
+
+    <div class="card price-card">
+      <div class="label">INJ Price</div>
+      <div class="value-row"><span id="price">0.0000</span></div>
+      <div class="sub-row"><span id="price24h" class="sub">±0.00%</span></div>
+
+      <div class="price-bar-container">
+        <div id="priceBar" class="price-bar"></div>
+        <div id="priceLine" class="price-line"></div>
+      </div>
+
+      <div class="price-values">
+        <span id="priceMin" class="price-extremes left">0.000</span>
+        <span id="priceOpen" class="price-extremes center">0.000</span>
+        <span id="priceMax" class="price-extremes right">0.000</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">Available</div>
+      <div class="value-row"><span id="available">0.000000</span></div>
+      <div class="sub-row"><span id="availableUsd">≈ $0.00</span></div>
+    </div>
+
+    <div class="card">
+      <div class="label">Staked</div>
+      <div class="value-row"><span id="stake">0.0000</span></div>
+      <div class="sub-row"><span id="stakeUsd">≈ $0.00</span></div>
+    </div>
+
+    <div class="card">
+      <div class="label">Rewards</div>
+      <div class="value-row"><span id="rewards">0.0000000</span></div>
+      <div class="sub-row"><span id="rewardsUsd">≈ $0.00</span></div>
+
+      <div class="reward-bar-container">
+        <div id="rewardBar" class="reward-bar"></div>
+        <span id="rewardPercent" class="reward-percent">0%</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">APR</div>
+      <div class="value-row"><span id="apr">0%</span></div>
+    </div>
+
+    <div class="card chart-card">
+      <div class="label">24h Price Chart</div>
+      <canvas id="priceChart"></canvas>
+    </div>
+
+  </div>
+
+  <div id="updated" class="last-update">Last update: --:--</div>
+
 </div>
 
-<div class="card">
-  <div class="price-section">
-    <div id="price">0.0000</div>
-    <div id="priceTrend">–</div>
-    <span id="pricePercent">0.00%</span>
-  </div>
-  <div class="price-bar-container">
-    <div id="priceBar"></div>
-    <div id="priceLine"></div>
-  </div>
-  <div class="price-values">
-    <div id="priceMin">0.000</div>
-    <div id="priceOpen">0.000</div>
-    <div id="priceMax">0.000</div>
-  </div>
-  <canvas id="priceChart"></canvas>
-</div>
-
-<div class="card">
-  <div class="account-box">
-    <div>Available: <span id="available">0.000000</span> INJ</div>
-    <div id="availableUsd">≈ $0.00</div>
-  </div>
-  <div class="account-box">
-    <div>Staked: <span id="stake">0.0000</span> INJ</div>
-    <div id="stakeUsd">≈ $0.00</div>
-  </div>
-  <div class="account-box">
-    <div>Rewards: <span id="rewards">0.0000000</span> INJ</div>
-    <div id="rewardsUsd">≈ $0.00</div>
-  </div>
-  <div class="reward-bar-container">
-    <div id="rewardBar"></div>
-    <span id="rewardPercent">0%</span>
-  </div>
-  <div class="account-box">
-    <div>APR: <span id="apr">0.00</span>%</div>
-  </div>
-  <div class="updated" id="updated">Last update: --:--:--</div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="app.js"></script>
 </body>
 </html>
