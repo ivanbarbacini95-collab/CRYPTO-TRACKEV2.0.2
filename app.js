@@ -99,11 +99,19 @@ async function fetchDailyHistory() {
     "https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440"
   );
 
-  chartData = d.map(c => +c[4]);
+  chartData = new Array(1440).fill(null); // inizializzo vuoto
+  const now = new Date();
+  const currentIndex = now.getHours() * 60 + now.getMinutes();
+
+  // popolo i dati fino ad ora corrente
+  d.forEach((c, i) => {
+    if (i <= currentIndex) chartData[i] = +c[4]; // prezzo di chiusura
+  });
+
   priceOpen = +d[0][1];
-  priceMin = Math.min(...chartData);
-  priceMax = Math.max(...chartData);
-  targetPrice = chartData.at(-1);
+  priceMin = Math.min(...chartData.filter(v => v !== null));
+  priceMax = Math.max(...chartData.filter(v => v !== null));
+  targetPrice = chartData[currentIndex] || priceOpen;
 
   if (!chart) initChart();
 }
@@ -116,10 +124,15 @@ fetchDailyHistory();
 function initChart() {
   const ctx = $("priceChart").getContext("2d");
 
+  const labels = Array.from({length: 1440}, (_, i) => {
+    if (i % 60 === 0) return `${String(Math.floor(i/60)).padStart(2,'0')}:00`;
+    return "";
+  });
+
   chart = new Chart(ctx, {
     type: "line",
     data: {
-      labels: Array(1440).fill(""), // minuti della giornata
+      labels: labels,
       datasets: [{
         data: chartData,
         borderColor: "#22c55e",
@@ -135,11 +148,8 @@ function initChart() {
       animation: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { display: false },
-        y: {
-          ticks: { color: "#9ca3af" },
-          beginAtZero: false
-        }
+        x: { display: true, ticks: { color: "#9ca3af" } },
+        y: { ticks: { color: "#9ca3af" }, beginAtZero: false }
       }
     }
   });
@@ -166,7 +176,6 @@ function startWS() {
     const p = +JSON.parse(e.data).p;
     targetPrice = p;
 
-    // aggiorno min/max giornalieri
     priceMin = Math.min(priceMin, p);
     priceMax = Math.max(priceMax, p);
 
@@ -204,23 +213,21 @@ function animate() {
   displayedPrice = lerp(displayedPrice, targetPrice, 0.1);
   $("price").textContent = displayedPrice.toFixed(4);
 
-  // Performance rispetto apertura
   const perf = ((displayedPrice - priceOpen) / priceOpen) * 100;
 
-  // LINEA ROSSA/VERDE
   const barWidth = $("priceBar").parentElement.offsetWidth;
   const center = barWidth / 2;
 
   if (perf >= 0) {
     $("priceBar").style.left = `${center}px`;
     $("priceBar").style.width = `${Math.min(center, center * (perf / 100))}px`;
-    $("priceBar").style.background = "#22c55e"; // verde
+    $("priceBar").style.background = "#22c55e";
     $("priceLine").style.left = `${center + Math.min(center, center * (perf / 100))}px`;
   } else {
-    $("priceBar").style.left = `${center + perf / 100 * center}px`;
-    $("priceBar").style.width = `${-perf / 100 * center}px`;
-    $("priceBar").style.background = "#ef4444"; // rosso
-    $("priceLine").style.left = `${center + perf / 100 * center}px`;
+    $("priceBar").style.left = `${center + perf/100 * center}px`;
+    $("priceBar").style.width = `${-perf/100 * center}px`;
+    $("priceBar").style.background = "#ef4444";
+    $("priceLine").style.left = `${center + perf/100 * center}px`;
   }
 
   $("price24h").textContent = `${perf >= 0 ? "▲" : "▼"} ${Math.abs(perf).toFixed(2)}%`;
@@ -230,24 +237,20 @@ function animate() {
   $("priceMax").textContent = priceMax.toFixed(3);
 
   /* AVAILABLE */
-  const oa = displayedAvailable;
   displayedAvailable = lerp(displayedAvailable, availableInj, 0.1);
   $("available").textContent = displayedAvailable.toFixed(6);
   $("availableUsd").textContent = `≈ $${(displayedAvailable * displayedPrice).toFixed(2)}`;
 
   /* STAKE */
-  const os = displayedStake;
   displayedStake = lerp(displayedStake, stakeInj, 0.1);
   $("stake").textContent = displayedStake.toFixed(4);
   $("stakeUsd").textContent = `≈ $${(displayedStake * displayedPrice).toFixed(2)}`;
 
   /* REWARDS */
-  const or = displayedRewards;
   displayedRewards = lerp(displayedRewards, rewardsInj, 0.1);
   $("rewards").textContent = displayedRewards.toFixed(7);
   $("rewardsUsd").textContent = `≈ $${(displayedRewards * displayedPrice).toFixed(2)}`;
 
-  // Reward bar 0 → 0.1
   const rewardPercent = Math.min((displayedRewards / 0.1) * 100, 100);
   $("rewardBar").style.width = rewardPercent + "%";
   $("rewardPercent").textContent = rewardPercent.toFixed(1) + "%";
@@ -257,7 +260,7 @@ function animate() {
 
   $("updated").textContent = "Last update: " + new Date().toLocaleTimeString();
 
-  // RESET A MEZZANOTTE
+  /* RESET MEZZANOTTE */
   const now = new Date();
   if (now.getHours() === 0 && now.getMinutes() === 0 && now.getSeconds() < 1) {
     chartData = new Array(1440).fill(priceOpen);
