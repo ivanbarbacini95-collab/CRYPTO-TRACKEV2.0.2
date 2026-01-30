@@ -1,3 +1,6 @@
+/* ======================
+   GLOBAL
+====================== */
 body {
   font-family: Inter, sans-serif;
   background: #000;
@@ -15,6 +18,9 @@ body {
   position: relative;
 }
 
+/* ======================
+   HEADER
+====================== */
 .header {
   display: flex;
   flex-direction: column;
@@ -30,16 +36,14 @@ body {
   -webkit-text-fill-color: transparent;
 }
 
-.header .dot {
-  color: #9ca3af;
-  -webkit-text-fill-color: #9ca3af;
-}
-
 .subtitle {
   font-size: 0.9rem;
   color: #9ca3af;
 }
 
+/* ======================
+   CONNECTION STATUS
+====================== */
 .connection-status {
   position: absolute;
   top: 0;
@@ -65,8 +69,13 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
-.status-text { color: #f9fafb; }
+.status-text {
+  color: #f9fafb;
+}
 
+/* ======================
+   INPUT
+====================== */
 #addressInput {
   padding: 0.8rem;
   border-radius: 0.5rem;
@@ -81,6 +90,9 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
+/* ======================
+   CARDS
+====================== */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -115,6 +127,25 @@ body {
   color: #9ca3af;
 }
 
+/* ======================
+   PRICE TREND & PERCENT
+====================== */
+#priceTrend {
+  font-size: 1.2rem;
+  margin-left: 0.5rem;
+}
+
+#pricePercent {
+  font-size: 0.8rem;
+  margin-top: 2px;
+  display: inline-block;
+  text-align: right;
+  width: 100%;
+}
+
+/* ======================
+   PRICE BAR
+====================== */
 .price-bar-container {
   position: relative;
   height: 24px;
@@ -149,6 +180,9 @@ body {
 .price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
 .price-extremes.right { position: absolute; right: 0; }
 
+/* ======================
+   REWARD BAR
+====================== */
 .reward-bar-container {
   position: relative;
   height: 24px;
@@ -159,8 +193,10 @@ body {
 
 .reward-bar {
   height: 100%;
-  transition: width 0.3s ease;
+  width: 0%;
+  transition: width 0.2s ease;
   border-radius: 0.3rem;
+  background: linear-gradient(to right,#0ea5e9,#3b82f6);
 }
 
 .reward-percent {
@@ -169,11 +205,24 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 0.85rem;
+  font-weight: bold;
 }
 
-.chart-card { height: 300px; }
-#priceChart { width: 100% !important; height: 100% !important; }
+/* ======================
+   CHART
+====================== */
+.chart-card {
+  height: 300px;
+}
 
+#priceChart {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ======================
+   MISC
+====================== */
 .up { color: #22c55e; }
 .down { color: #ef4444; }
 
@@ -182,3 +231,4 @@ body {
   text-align: center;
   color: #9ca3af;
 }
+
