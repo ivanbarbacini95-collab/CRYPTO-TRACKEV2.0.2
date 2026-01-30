@@ -247,34 +247,28 @@ function updatePriceBar(){
    UPDATE BOXES OGNI 2 SEC
 ====================== */
 function updateBoxes() {
-  // Available INJ
   const oldAvailable = displayedAvailable;
-  displayedAvailable = lerp(displayedAvailable, availableInj, 0.1);
+  displayedAvailable = lerp(displayedAvailable, availableInj, 0.05);
   colorNumber($("available"), displayedAvailable, oldAvailable, 6);
   $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
-  // Stake
   const oldStake = displayedStake;
-  displayedStake = lerp(displayedStake, stakeInj, 0.1);
+  displayedStake = lerp(displayedStake, stakeInj, 0.05);
   colorNumber($("stake"), displayedStake, oldStake, 4);
   $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
-  // Rewards
   const oldRewards = displayedRewards;
-  displayedRewards = lerp(displayedRewards, rewardsInj, 0.08);
+  displayedRewards = lerp(displayedRewards, rewardsInj, 0.03);
   colorNumber($("rewards"), displayedRewards, oldRewards, 7);
   const rewardPct = Math.min(displayedRewards/0.05*100,100);
   $("rewardBar").style.width = rewardPct + "%";
   $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
   $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
 
-  // APR
   $("apr").textContent = apr.toFixed(2)+"%";
-
   $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
 }
 
-// Aggiornamento box ogni 2 secondi
 setInterval(updateBoxes, 2000);
 
 /* ======================
@@ -287,7 +281,7 @@ function animate(){
   }
 
   const oldPrice = displayedPrice;
-  displayedPrice = lerp(displayedPrice, targetPrice, 0.1);
+  displayedPrice = lerp(displayedPrice, targetPrice, 0.05);
   colorNumber($("price"), displayedPrice, oldPrice, 4);
 
   updatePriceBar();
