@@ -25,7 +25,7 @@ let chartLabels = [];
 
 let ws;
 let dataReady = false;
-let firstLoad = true; // flag primo caricamento
+let firstLoad = true;
 
 /* ======================
    HELPERS
@@ -65,7 +65,7 @@ $("addressInput").onchange = e=>{
   address=e.target.value.trim();
   localStorage.setItem("inj_address",address);
   loadAccount();
-  firstLoad = true; // reset primo caricamento ad ogni nuovo indirizzo
+  firstLoad = true;
 };
 
 /* ======================
@@ -246,8 +246,7 @@ function updatePriceBar(){
 }
 
 /* ======================
-   UPDATE BOXES OGNI 2 SEC CON EFFETTO FLUIDO SOLO SE CAMBIA
-   PRIMO CARICAMENTO TUTTI I NUMERI SCORRONO
+   UPDATE BOXES IN REALTIME
 ====================== */
 function updateBoxes() {
   // Available
@@ -278,16 +277,15 @@ function updateBoxes() {
     $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
   }
 
+  // APR
   $("apr").textContent = apr.toFixed(2)+"%";
   $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
 
-  if(firstLoad) firstLoad = false; // primo caricamento completato
+  if(firstLoad) firstLoad = false;
 }
 
-setInterval(updateBoxes, 2000);
-
 /* ======================
-   ANIMATION LOOP SOLO PREZZO
+   ANIMATION LOOP PRINCIPALE
 ====================== */
 function animate(){
   if(!dataReady){
@@ -295,11 +293,17 @@ function animate(){
     return;
   }
 
+  // Prezzo
   const oldPrice = displayedPrice;
   displayedPrice = lerp(displayedPrice, targetPrice, 0.05);
   colorNumber($("price"), displayedPrice, oldPrice, 4);
 
+  // Barra prezzo + min/open/max
   updatePriceBar();
+
+  // Box available/stake/rewards/apr in real time
+  updateBoxes();
+
   requestAnimationFrame(animate);
 }
 
