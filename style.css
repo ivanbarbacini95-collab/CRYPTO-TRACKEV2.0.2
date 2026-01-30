@@ -12,27 +12,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  position: relative;
 }
 
 .header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
   position: relative;
 }
 
 .header h1 {
-  font-size: 1.9rem;
+  font-size: 2rem;
   font-weight: 800;
   background: linear-gradient(90deg, #22c55e, #3b82f6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-}
-
-.header .dot {
-  color: #9ca3af;
-  -webkit-text-fill-color: #9ca3af;
 }
 
 .subtitle {
@@ -45,40 +36,23 @@ body {
   top: 0;
   right: 0;
   display: flex;
+  gap: .5rem;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  font-weight: bold;
 }
 
 .status-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: #ef4444;
-  animation: pulse 1.5s infinite;
+  background: red;
 }
-
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.3); opacity: 1; }
-  100% { transform: scale(1); opacity: 0.8; }
-}
-
-.status-text { color: #f9fafb; }
 
 #addressInput {
-  padding: 0.8rem;
-  border-radius: 0.5rem;
-  border: 2px solid #4b5563;
+  padding: .7rem;
+  border-radius: .5rem;
   background: #0a0f1f;
-  color: #f9fafb;
-  outline: none;
-}
-
-#addressInput:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+  border: 1px solid #374151;
+  color: white;
 }
 
 .cards-wrapper {
@@ -89,45 +63,36 @@ body {
 
 .card {
   background: linear-gradient(135deg, #111827, #1e293b);
-  border-radius: 0.5rem;
+  border-radius: .6rem;
   padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
 .label {
-  font-size: 1.1rem;
   font-weight: bold;
 }
 
 .value-row {
-  display: flex;
-  justify-content: flex-end;
-  font-size: 1.4rem;
-  font-weight: bold;
+  font-size: 1.5rem;
+  text-align: right;
 }
 
 .sub-row {
-  display: flex;
-  justify-content: flex-end;
-  font-size: 0.9rem;
+  text-align: right;
+  font-size: .85rem;
   color: #9ca3af;
 }
 
 .price-bar-container {
   position: relative;
-  height: 24px;
-  background: #111827;
-  border-radius: 0.3rem;
+  height: 22px;
+  background: #020617;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .price-bar {
   position: absolute;
   height: 100%;
-  transition: width 0.2s ease, left 0.2s ease, background 0.2s ease;
-  border-radius: 0.3rem;
 }
 
 .price-line {
@@ -135,51 +100,42 @@ body {
   width: 2px;
   height: 100%;
   background: #facc15;
-  transition: left 0.2s ease;
 }
 
 .price-values {
-  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  font-size: .8rem;
   color: #9ca3af;
-  position: relative;
-  height: 18px;
 }
-
-.price-extremes.left { position: absolute; left: 0; }
-.price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
-.price-extremes.right { position: absolute; right: 0; }
 
 .reward-bar-container {
   position: relative;
-  height: 24px;
-  background: #111827;
-  border-radius: 0.3rem;
-  overflow: hidden;
+  height: 20px;
+  background: #020617;
+  border-radius: 4px;
 }
 
 .reward-bar {
   height: 100%;
-  transition: width 0.3s ease;
-  border-radius: 0.3rem;
+  background: linear-gradient(90deg, #0ea5e9, #3b82f6);
 }
 
-.reward-percent {
+#rewardPercent {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 0.85rem;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .8rem;
 }
 
-.chart-card { height: 300px; }
-
-#priceChart { width: 100% !important; height: 100% !important; }
-
-.up { color: #22c55e; }
-.down { color: #ef4444; }
+.chart-card {
+  height: 300px;
+}
 
 .last-update {
-  font-size: 0.8rem;
   text-align: center;
+  font-size: .8rem;
   color: #9ca3af;
 }
