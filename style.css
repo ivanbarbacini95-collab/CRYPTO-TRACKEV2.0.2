@@ -1,114 +1,200 @@
 body {
-  font-family: Arial, sans-serif;
-  background: #111827;
-  color: #f3f4f6;
+  font-family: Inter, sans-serif;
+  background: #000;
+  color: #f9fafb;
   margin: 0;
-  padding: 20px;
+  padding: 1rem;
 }
 
-.card {
-  background: #1f2937;
-  border-radius: 8px;
-  padding: 15px;
-  margin-bottom: 20px;
+.container {
+  max-width: 900px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: relative;
 }
 
-input {
-  padding: 5px;
-  border-radius: 4px;
-  border: none;
-  width: 100%;
-  margin-bottom: 10px;
+/* HEADER */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  position: relative;
+}
+
+.header h1 {
+  font-size: 1.9rem;
+  font-weight: 800;
+  background: linear-gradient(90deg, #22c55e, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header .dot {
+  color: #9ca3af;
+  -webkit-text-fill-color: #9ca3af;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+  color: #9ca3af;
+}
+
+/* CONNECTION STATUS */
+.connection-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: bold;
 }
 
 .status-dot {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  display: inline-block;
-  margin-right: 5px;
+  background: #ef4444; /* offline iniziale */
+  animation: pulse 1.5s infinite;
 }
 
-.price-section {
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.8; }
+}
+
+.status-text {
+  color: #f9fafb;
+}
+
+/* INPUT */
+#addressInput {
+  padding: 0.8rem;
+  border-radius: 0.5rem;
+  border: 2px solid #4b5563;
+  background: #0a0f1f;
+  color: #f9fafb;
+  outline: none;
+}
+
+#addressInput:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+/* CARDS - verticali */
+.cards-wrapper {
   display: flex;
-  align-items: center;
-  font-size: 24px;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.price-section span {
-  margin-left: 5px;
-  font-size: 18px;
+.card {
+  background: linear-gradient(135deg, #111827, #1e293b);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-#priceTrend {
-  margin-left: 10px;
+.label {
+  font-size: 1.1rem;
   font-weight: bold;
 }
 
+.value-row {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 1.4rem;
+  font-weight: bold;
+}
+
+.sub-row {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 0.9rem;
+  color: #9ca3af;
+}
+
+/* PRICE BAR */
 .price-bar-container {
   position: relative;
-  height: 10px;
-  background: #374151;
-  border-radius: 5px;
-  margin-top: 10px;
+  height: 24px;
+  background: #111827;
+  border-radius: 0.3rem;
+  overflow: hidden;
 }
 
-#priceBar {
+.price-bar {
   position: absolute;
   height: 100%;
-  border-radius: 5px;
+  transition: width 0.3s ease, left 0.3s ease, background 0.3s ease;
+  border-radius: 0.3rem;
 }
 
-#priceLine {
+.price-line {
   position: absolute;
   width: 2px;
   height: 100%;
   background: #facc15;
-  top: 0;
+  transition: left 0.3s ease;
 }
 
 .price-values {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-top: 3px;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  position: relative;
+  height: 18px;
 }
 
-.account-box {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 10px;
-  font-size: 16px;
-}
+.price-extremes.left { position: absolute; left: 0; }
+.price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
+.price-extremes.right { position: absolute; right: 0; }
 
+/* REWARD BAR */
 .reward-bar-container {
   position: relative;
-  background: #374151;
-  border-radius: 5px;
-  height: 10px;
-  margin-top: 5px;
+  height: 24px;
+  background: #111827;
+  border-radius: 0.3rem;
+  overflow: hidden;
 }
 
-#rewardBar {
+.reward-bar {
   height: 100%;
-  border-radius: 5px;
+  transition: width 0.3s ease;
+  border-radius: 0.3rem;
 }
 
-#rewardPercent {
+.reward-percent {
   position: absolute;
-  right: 5px;
-  top: -18px;
-  font-size: 12px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.85rem;
 }
 
-canvas {
-  width: 100%;
-  height: 200px;
-  margin-top: 10px;
+/* CHART */
+.chart-card {
+  height: 300px;
 }
 
-.updated {
-  font-size: 12px;
-  margin-top: 5px;
+#priceChart {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* MISC */
+.up { color: #22c55e; }
+.down { color: #ef4444; }
+
+.last-update {
+  font-size: 0.8rem;
+  text-align: center;
   color: #9ca3af;
 }
