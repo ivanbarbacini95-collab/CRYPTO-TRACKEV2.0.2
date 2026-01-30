@@ -1,224 +1,239 @@
-/* ====================
-   BODY & CONTAINER
-==================== */
-body {
-  font-family: Inter, sans-serif;
-  background: #000;
-  color: #f9fafb;
-  margin: 0;
-  padding: 1rem;
+let address = localStorage.getItem("inj_address") || "";
+
+let targetPrice = 0, displayedPrice = 0;
+let priceOpen = 0, priceLow = Infinity, priceHigh = 0;
+
+let availableInj = 0, stakeInj = 0, rewardsInj = 0;
+let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
+let apr = 0;
+
+let chart, chartData = [], chartLabels = [];
+let ws;
+
+// Helper
+const $ = id => document.getElementById(id);
+const lerp = (a,b,f) => a + (b-a)*f;
+
+// Colore numero se cambia
+function colorNumber(el, n, o, d){
+  const ns = n.toFixed(d);
+  const os = o.toFixed(d);
+  el.innerHTML = [...ns].map((c,i)=>{
+    if(c !== os[i]){
+      return `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>`;
+    } else return `<span style="color:#f9fafb">${c}</span>`;
+  }).join("");
 }
 
-.container {
-  max-width: 900px;
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  position: relative;
+// Fetch JSON sicuro
+async function fetchJSON(url){
+  try { return await (await fetch(url)).json(); }
+  catch { return {}; }
 }
 
-/* ====================
-   HEADER
-==================== */
-.header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  position: relative;
+// INPUT ADDRESS
+$("addressInput").value = address;
+$("addressInput").onchange = e => {
+  address = e.target.value.trim();
+  localStorage.setItem("inj_address", address);
+  loadAccount();
+};
+
+// ACCOUNT
+async function loadAccount(){
+  if(!address) return;
+  const [b,s,r,i] = await Promise.all([
+    fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
+    fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
+    fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
+    fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
+  ]);
+
+  availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
+  stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
+
+  const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+  if(newRewards > rewardsInj) rewardsInj = newRewards;
+
+  apr = Number(i.inflation||0)*100;
+}
+loadAccount();
+setInterval(loadAccount, 60000);
+setInterval(async ()=>{
+  if(!address) return;
+  const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
+  const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+  if(newRewards > rewardsInj) rewardsInj = newRewards;
+},2000);
+
+// CONNECTION STATUS
+const connectionStatus = $("connectionStatus");
+const statusDot = connectionStatus.querySelector(".status-dot");
+const statusText = connectionStatus.querySelector(".status-text");
+function setConnectionStatus(online){
+  if(online){
+    statusDot.style.background="#22c55e";
+    statusText.textContent="Online";
+  } else {
+    statusDot.style.background="#ef4444";
+    statusText.textContent="Offline";
+  }
+}
+setConnectionStatus(false);
+
+// FUNZIONE GRADIENTE
+function createGradient(ctx, price){
+  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+  gradient.addColorStop(0, price>=priceOpen?"rgba(34,197,94,0.2)":"rgba(239,68,68,0.2)");
+  gradient.addColorStop(1,"rgba(0,0,0,0)");
+  return gradient;
 }
 
-.header h1 {
-  font-size: 1.9rem;
-  font-weight: 800;
-  background: linear-gradient(90deg, #22c55e, #3b82f6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+// HISTORY GIORNALIERA
+async function fetchHistoryDay(){
+  const now = new Date();
+  const utcOffset = 2; // apertura 2:00 italiana
+  const todayStr = now.toISOString().slice(0,10);
+  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&startTime=${new Date(todayStr+"T00:00:00Z").getTime()}&endTime=${Date.now()}`;
+  const d = await fetchJSON(url);
+
+  if(d.length === 0) return;
+
+  chartData = d.map(c=>+c[4]);
+  chartLabels = Array(chartData.length).fill("");
+  priceOpen = +d[0][1];
+  priceLow = Math.min(...chartData);
+  priceHigh = Math.max(...chartData);
+  targetPrice = chartData.at(-1);
+
+  if(!chart) initChart();
+}
+fetchHistoryDay();
+
+// INIZIALIZZA GRAFICO
+function initChart(){
+  const ctx = $("priceChart").getContext("2d");
+  chart = new Chart(ctx,{
+    type:"line",
+    data:{
+      labels: chartLabels,
+      datasets:[
+        {
+          label:"Price",
+          data: chartData,
+          borderColor:"#22c55e",
+          backgroundColor:createGradient(ctx, chartData.at(-1)),
+          fill:true,
+          pointRadius:0,
+          tension:0 // linea non smooth
+        }
+      ]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      animation:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{display:false},
+        y:{ticks:{color:"#9ca3af"}}
+      }
+    }
+  });
 }
 
-.header .dot {
-  color: #9ca3af;
-  -webkit-text-fill-color: #9ca3af;
+// AGGIORNA GRAFICO
+function updateChart(p){
+  if(!chart) return;
+  chart.data.datasets[0].data.push(p);
+  chart.data.datasets[0].backgroundColor = createGradient(chart.ctx,p);
+  chartLabels.push("");
+  chart.data.labels = chartLabels;
+  chart.update("none");
+  priceLow = Math.min(priceLow,p);
+  priceHigh = Math.max(priceHigh,p);
 }
 
-.subtitle {
-  font-size: 0.9rem;
-  color: #9ca3af;
+// WEBSOCKET
+function startWS(){
+  if(ws) ws.close();
+  ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  ws.onopen = ()=> setConnectionStatus(true);
+  ws.onmessage = e=>{
+    const p = +JSON.parse(e.data).p;
+    targetPrice = p;
+    updateChart(p);
+  };
+  ws.onclose = ()=> {
+    setConnectionStatus(false);
+    setTimeout(startWS,3000);
+  };
+  ws.onerror = ()=> setConnectionStatus(false);
+}
+startWS();
+
+// BARRE PREZZO E REWARDS
+function updatePriceBar(){
+  const min = priceLow, max = priceHigh, open = priceOpen, price = displayedPrice;
+  let linePercent = price>=open?50 + ((price-open)/(max-open))*50 : 50 - ((open-price)/(open-min))*50;
+  linePercent = Math.max(0,Math.min(100,linePercent));
+  $("priceLine").style.left = linePercent+"%";
+  $("priceBar").style.left = price>=open? "50%": linePercent+"%";
+  $("priceBar").style.width = price>=open? (linePercent-50)+"%": (50-linePercent)+"%";
+  $("priceBar").style.background = price>=open?"linear-gradient(to right, #22c55e, #10b981)":"linear-gradient(to right, #ef4444, #f87171)";
 }
 
-/* ====================
-   CONNECTION STATUS
-==================== */
-.connection-status {
-  position: absolute;
-  top: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  font-weight: bold;
+// ANIMATION LOOP
+function animate(){
+  // PRICE
+  const oldPrice = displayedPrice;
+  displayedPrice = lerp(displayedPrice,targetPrice,0.1);
+  colorNumber($("price"),displayedPrice,oldPrice,4);
+
+  const d = ((displayedPrice-priceOpen)/priceOpen)*100;
+  $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
+  $("price24h").className = "sub "+(d>0?"up":"down");
+  $("priceMin").textContent = priceLow.toFixed(3);
+  $("priceOpen").textContent = priceOpen.toFixed(3);
+  $("priceMax").textContent = priceHigh.toFixed(3);
+
+  updatePriceBar();
+
+  // AVAILABLE
+  const oldAvailable = displayedAvailable;
+  displayedAvailable = lerp(displayedAvailable, availableInj,0.1);
+  colorNumber($("available"), displayedAvailable, oldAvailable,6);
+  $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
+
+  // STAKE
+  const oldStake = displayedStake;
+  displayedStake = lerp(displayedStake, stakeInj,0.1);
+  colorNumber($("stake"), displayedStake, oldStake,4);
+  $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
+
+  // REWARDS
+  const oldRewards = displayedRewards;
+  displayedRewards = lerp(displayedRewards, rewardsInj,0.1);
+  colorNumber($("rewards"), displayedRewards, oldRewards,7);
+  $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+  $("rewardBar").style.background="linear-gradient(to right,#0ea5e9,#3b82f6)";
+  $("rewardBar").style.width = Math.min(displayedRewards/0.05*100,100)+"%";
+  $("rewardPercent").textContent = (displayedRewards/0.05*100).toFixed(1)+"%";
+
+  // APR
+  $("apr").textContent = apr.toFixed(2)+"%";
+
+  // LAST UPDATE
+  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+
+  requestAnimationFrame(animate);
 }
+animate();
 
-.status-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #ef4444;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.3); opacity: 1; }
-  100% { transform: scale(1); opacity: 0.8; }
-}
-
-.status-text {
-  color: #f9fafb;
-}
-
-/* ====================
-   INPUT
-==================== */
-#addressInput {
-  padding: 0.8rem;
-  border-radius: 0.5rem;
-  border: 2px solid #4b5563;
-  background: #0a0f1f;
-  color: #f9fafb;
-  outline: none;
-}
-
-#addressInput:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
-}
-
-/* ====================
-   CARDS
-==================== */
-.cards-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.card {
-  background: linear-gradient(135deg, #111827, #1e293b);
-  border-radius: 0.5rem;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.label {
-  font-size: 1.1rem;
-  font-weight: bold;
-}
-
-.value-row {
-  display: flex;
-  justify-content: flex-end;
-  font-size: 1.4rem;
-  font-weight: bold;
-}
-
-.sub-row {
-  display: flex;
-  justify-content: flex-end;
-  font-size: 0.9rem;
-  color: #9ca3af;
-}
-
-/* ====================
-   PRICE BAR
-==================== */
-.price-bar-container {
-  position: relative;
-  height: 24px;
-  background: #111827;
-  border-radius: 0.3rem;
-  overflow: hidden;
-}
-
-.price-bar {
-  position: absolute;
-  height: 100%;
-  transition: width 0.3s ease, left 0.3s ease, background 0.3s ease;
-  border-radius: 0.3rem;
-}
-
-.price-line {
-  position: absolute;
-  width: 2px;
-  height: 100%;
-  background: #facc15;
-  transition: left 0.3s ease;
-}
-
-.price-values {
-  font-size: 0.8rem;
-  color: #9ca3af;
-  position: relative;
-  height: 18px;
-}
-
-.price-extremes.left { position: absolute; left: 0; }
-.price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
-.price-extremes.right { position: absolute; right: 0; }
-
-/* ====================
-   REWARD BAR
-==================== */
-.reward-bar-container {
-  position: relative;
-  height: 24px;
-  background: #111827;
-  border-radius: 0.3rem;
-  overflow: hidden;
-}
-
-.reward-bar {
-  height: 100%;
-  transition: width 0.3s ease;
-  border-radius: 0.3rem;
-  background: linear-gradient(to right, #0ea5e9, #3b82f6);
-}
-
-.reward-percent {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 0.85rem;
-  color: #f9fafb;
-}
-
-/* ====================
-   CHART CARD
-==================== */
-.chart-card {
-  height: 300px;
-}
-
-#priceChart {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-/* ====================
-   COLORS PRICE UP/DOWN
-==================== */
-.up { color: #22c55e; }
-.down { color: #ef4444; }
-
-/* ====================
-   LAST UPDATE
-==================== */
-.last-update {
-  font-size: 0.8rem;
-  text-align: center;
-  color: #9ca3af;
-}
+// RESET GIORNALIERO ALLE 23:59
+setInterval(()=>{
+  const now = new Date();
+  if(now.getHours()===23 && now.getMinutes()===59){
+    fetchHistoryDay();
+  }
+},60000);
