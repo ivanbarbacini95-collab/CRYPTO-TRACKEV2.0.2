@@ -1,5 +1,5 @@
 /* =======================
-   BASE
+   GLOBAL
 ======================= */
 
 body {
@@ -7,20 +7,16 @@ body {
   background: #000;
   color: #f9fafb;
   margin: 0;
-  padding: 0;
-  display: flex;
-  justify-content: center;
+  padding: 1rem;
 }
 
 .container {
-  width: 100%;
   max-width: 900px;
-  margin: 0 auto;
-  padding: 1rem;
+  margin: auto;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  box-sizing: border-box;
+  position: relative;
 }
 
 /* =======================
@@ -71,7 +67,7 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #ef4444;
+  background: #ef4444; /* offline iniziale */
   animation: pulse 1.5s infinite;
 }
 
@@ -90,13 +86,13 @@ body {
 ======================= */
 
 #addressInput {
-  width: 100%;
   padding: 0.8rem;
   border-radius: 0.5rem;
   border: 2px solid #4b5563;
   background: #0a0f1f;
   color: #f9fafb;
   outline: none;
+  width: 100%;
   box-sizing: border-box;
 }
 
@@ -158,6 +154,7 @@ body {
 .price-bar {
   position: absolute;
   height: 100%;
+  transition: width 0.2s ease;
   border-radius: 0.3rem;
 }
 
@@ -166,6 +163,7 @@ body {
   width: 2px;
   height: 100%;
   background: #facc15;
+  transition: left 0.2s ease;
 }
 
 .price-values {
@@ -194,6 +192,7 @@ body {
 .reward-bar {
   height: 100%;
   border-radius: 0.3rem;
+  transition: width 0.2s ease;
   background: linear-gradient(to right, #0ea5e9, #3b82f6);
 }
 
@@ -203,17 +202,14 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 0.85rem;
-  font-weight: bold;
-  color: #f9fafb;
 }
 
 /* =======================
-   CHART
+   CHART CARD
 ======================= */
 
 .chart-card {
   height: 300px;
-  width: 100%;
 }
 
 #priceChart {
@@ -222,7 +218,7 @@ body {
 }
 
 /* =======================
-   UP/DOWN COLORS
+   COLORS
 ======================= */
 
 .up { color: #22c55e; }
@@ -233,30 +229,18 @@ body {
 ======================= */
 
 .last-update {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   text-align: center;
   color: #9ca3af;
-  margin-top: 1rem;
 }
 
 /* =======================
    RESPONSIVE
 ======================= */
 
-@media (max-width: 600px) {
-  .header h1 {
-    font-size: 1.5rem;
-  }
-
-  .value-row {
-    font-size: 1.2rem;
-  }
-
-  .label {
-    font-size: 1rem;
-  }
-
-  .reward-percent {
-    font-size: 0.75rem;
-  }
+@media (max-width:600px){
+  .header h1 { font-size: 1.5rem; }
+  .value-row { font-size: 1.2rem; }
+  .label { font-size: 1rem; }
+  .chart-card { height: 250px; }
 }
