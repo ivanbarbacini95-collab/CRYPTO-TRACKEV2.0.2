@@ -19,10 +19,6 @@ let displayedAvailable = 0;
 let displayedStake = 0;
 let displayedRewards = 0;
 
-let prevAvailable = 0;
-let prevStake = 0;
-let prevRewards = 0;
-
 let chart;
 let chartData = [];
 let chartLabels = [];
@@ -36,13 +32,24 @@ let dataReady = false;
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f)=>a+(b-a)*f;
 
-function colorNumber(el,n,o,d){
+/* Animazione cifra per cifra */
+function colorNumber(el, current, previous, decimals=2){
   if(!el) return;
-  const ns=n.toFixed(d), os=o.toFixed(d);
-  el.innerHTML=[...ns].map((c,i)=>{
-    if(c!==os[i]) return `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>`;
-    return `<span>${c}</span>`;
-  }).join("");
+  
+  const curStr = current.toFixed(decimals);
+  const prevStr = previous.toFixed(decimals).padStart(curStr.length, '0');
+
+  let html = '';
+  for(let i=0; i<curStr.length; i++){
+    if(curStr[i] !== prevStr[i]){
+      // cifra cambiata: verde se sale, rosso se scende
+      const color = +curStr[i] > +prevStr[i] ? '#22c55e' : '#ef4444';
+      html += `<span style="color:${color}">${curStr[i]}</span>`;
+    } else {
+      html += `<span>${curStr[i]}</span>`;
+    }
+  }
+  el.innerHTML = html;
 }
 
 async function fetchJSON(url){
@@ -193,7 +200,7 @@ function updateChartRealtime(p){
   const idx = Math.floor((Date.now()-midnight())/60000);
   chartData[idx] = p;
 
-  // Aggiorna colore del grafico in base al prezzo vs apertura
+  // colore grafico linea
   const color = p >= priceOpen ? "#22c55e" : "#ef4444";
   chart.data.datasets[0].borderColor = color;
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, p);
@@ -201,7 +208,7 @@ function updateChartRealtime(p){
   chart.data.datasets[0].data = chartData.map(v => v??NaN);
   chart.update("none");
 
-  // Aggiorna min/max per barra prezzo
+  // aggiorna min/max per barra
   priceLow = Math.min(priceLow, p);
   priceHigh = Math.max(priceHigh, p);
 
@@ -233,6 +240,11 @@ function updatePriceBar(){
     $("priceBar").style.left = pct+"%";
     $("priceBar").style.width = (50-pct)+"%";
   }
+
+  // Aggiorna min, max e open indicatori
+  $("priceMin").textContent = priceLow.toFixed(3);
+  $("priceOpen").textContent = priceOpen.toFixed(3);
+  $("priceMax").textContent = priceHigh.toFixed(3);
 }
 
 /* ======================
@@ -247,31 +259,31 @@ function animate(){
   // Prezzo principale
   const oldPrice = displayedPrice;
   displayedPrice = lerp(displayedPrice,targetPrice,0.1);
-  colorNumber($("price"),displayedPrice,oldPrice,4);
-
-  updatePriceBar();
+  colorNumber($("price"), displayedPrice, oldPrice, 4);
 
   // Available INJ
+  const oldAvailable = displayedAvailable;
   displayedAvailable = lerp(displayedAvailable, availableInj, 0.1);
-  colorNumber($("available"), displayedAvailable, prevAvailable,6);
-  prevAvailable = displayedAvailable;
+  colorNumber($("available"), displayedAvailable, oldAvailable, 6);
   $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
   // Stake
+  const oldStake = displayedStake;
   displayedStake = lerp(displayedStake, stakeInj,0.1);
-  colorNumber($("stake"), displayedStake, prevStake,4);
-  prevStake = displayedStake;
+  colorNumber($("stake"), displayedStake, oldStake, 4);
   $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
   // Rewards
+  const oldRewards = displayedRewards;
   displayedRewards = lerp(displayedRewards, rewardsInj,0.08);
-  colorNumber($("rewards"), displayedRewards, prevRewards,7);
-  prevRewards = displayedRewards;
-
+  colorNumber($("rewards"), displayedRewards, oldRewards, 7);
   const rewardPct = Math.min(displayedRewards/0.05*100,100);
   $("rewardBar").style.width = rewardPct + "%";
   $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
   $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
+
+  // Aggiorna barra prezzo
+  updatePriceBar();
 
   requestAnimationFrame(animate);
 }
