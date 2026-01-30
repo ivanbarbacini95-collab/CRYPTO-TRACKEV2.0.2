@@ -63,11 +63,16 @@ async function fetchJSON(url){
    ADDRESS INPUT
 ====================== */
 $("addressInput").value = address;
-$("addressInput").onchange = e=>{
-  address=e.target.value.trim();
-  localStorage.setItem("inj_address",address);
-  loadAccount();
-  firstLoad = true;
+
+let addrTimer;
+$("addressInput").oninput = e=>{
+  clearTimeout(addrTimer);
+  addrTimer = setTimeout(()=>{
+    address = e.target.value.trim();
+    localStorage.setItem("inj_address", address);
+    loadAccount();
+    firstLoad = true;
+  }, 500);
 };
 
 /* ======================
@@ -97,8 +102,14 @@ const statusDot=$("connectionStatus").querySelector(".status-dot");
 const statusText=$("connectionStatus").querySelector(".status-text");
 
 function setStatus(on){
-  statusDot.style.background=on?"#22c55e":"#ef4444";
-  statusText.textContent=on?"Online":"Offline";
+  if(on){
+    $("connectionStatus").classList.add("online");
+    $("connectionStatus").classList.remove("offline");
+  } else {
+    $("connectionStatus").classList.add("offline");
+    $("connectionStatus").classList.remove("online");
+  }
+  statusText.textContent = on?"Online":"Offline";
 }
 
 /* ======================
@@ -123,8 +134,8 @@ async function fetchDayHistory(){
   if(!d.length) return;
 
   priceOpen=+d[0][1];
-  priceLow=Math.min(...d.map(c=>+c[4]));
-  priceHigh=Math.max(...d.map(c=>+c[4]));
+  priceLow=Math.min(...d.map(c=>+c[3]));
+  priceHigh=Math.max(...d.map(c=>+c[2]));
 
   d.forEach(c=>{
     const idx=Math.floor((+c[0]-start)/60000);
@@ -135,8 +146,9 @@ async function fetchDayHistory(){
   displayedPrice=targetPrice;
   dataReady=true;
 
+  if(chart) chart.destroy();
   initChart();
-  fetch24hChange(); // aggiorna % Binance
+  fetch24hChange();
 }
 
 /* ======================
@@ -196,6 +208,8 @@ function updateChartRealtime(p){
   if(!chart) return;
   
   const idx = Math.floor((Date.now()-midnight())/60000);
+  if(idx<0 || idx>=chartData.length) return;
+
   chartData[idx] = p;
 
   const color = p >= priceOpen ? "#22c55e" : "#ef4444";
@@ -272,9 +286,8 @@ function animateBoxes() {
     colorNumber($("rewards"), displayedRewards, old, 7);
     $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
 
-    const rewardPct = Math.min(displayedRewards/0.05*100,100);
+    const rewardPct = stakeInj>0 ? Math.min(displayedRewards / (stakeInj*0.02)*100, 100) : 0;
     $("rewardBar").style.width = rewardPct + "%";
-    $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
     $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
   }
 
@@ -282,7 +295,7 @@ function animateBoxes() {
   if(Math.abs(displayedApr - apr) > 0.0001){
     const old = displayedApr;
     displayedApr = lerp(displayedApr, apr, 0.05);
-    colorNumber($("apr"), displayedApr, old, 2);
+    $("apr").textContent = displayedApr.toFixed(2) + "%";
   }
 }
 
@@ -308,12 +321,17 @@ async function fetch24hChange(){
   if(!data) return;
 
   price24hChange = parseFloat(data.priceChangePercent);
-  $("pricePercent").textContent = (price24hChange>=0?"+":"")+price24hChange.toFixed(2)+"%";
-  $("pricePercent").style.color = price24hChange>=0?"#22c55e":"#ef4444";
+  const pctEl = $("pricePercent");
+  if(pctEl){
+    pctEl.textContent = (price24hChange>=0?"+":"")+price24hChange.toFixed(2)+"%";
+    pctEl.style.color = price24hChange>=0?"#22c55e":"#ef4444";
+  }
 }
 
 function updatePriceTrend(oldPrice){
   const trendEl = $("priceTrend");
+  if(!trendEl) return;
+
   if(displayedPrice > oldPrice){
     trendEl.textContent = "▲";
     trendEl.style.color = "#22c55e";
