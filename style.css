@@ -86,7 +86,7 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* CARDS - verticali */
+/* CARDS */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -133,7 +133,7 @@ body {
 .price-bar {
   position: absolute;
   height: 100%;
-  transition: width 0.2s ease, left 0.2s ease, background 0.2s ease;
+  transition: width 0.2s linear, left 0.2s linear, background 0.2s linear;
   border-radius: 0.3rem;
 }
 
@@ -142,7 +142,7 @@ body {
   width: 2px;
   height: 100%;
   background: #facc15;
-  transition: left 0.2s ease;
+  transition: left 0.2s linear;
 }
 
 .price-values {
@@ -150,7 +150,6 @@ body {
   color: #9ca3af;
   position: relative;
   height: 18px;
-  margin-top: 0.2rem;
 }
 
 .price-extremes.left { position: absolute; left: 0; }
@@ -168,7 +167,7 @@ body {
 
 .reward-bar {
   height: 100%;
-  transition: width 0.2s ease, background 0.2s ease;
+  transition: width 0.3s ease;
   border-radius: 0.3rem;
 }
 
@@ -178,16 +177,11 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 0.85rem;
-  font-weight: bold;
-  color: #f9fafb;
-  text-shadow: 0 0 2px rgba(0,0,0,0.5);
 }
 
-/* CHART CARD */
+/* CHART */
 .chart-card {
   height: 300px;
-  border-radius: 0.5rem;
-  overflow: hidden;
 }
 
 #priceChart {
@@ -195,14 +189,12 @@ body {
   height: 100% !important;
 }
 
-/* COLORS UP/DOWN */
+/* MISC */
 .up { color: #22c55e; }
 .down { color: #ef4444; }
 
-/* LAST UPDATE */
 .last-update {
   font-size: 0.8rem;
   text-align: center;
   color: #9ca3af;
-  margin-top: 0.5rem;
 }
