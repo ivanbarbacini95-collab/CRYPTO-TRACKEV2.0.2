@@ -246,7 +246,7 @@ function updatePriceBar(){
 }
 
 /* ======================
-   UPDATE BOXES IN REALTIME
+   UPDATE BOXES REALTIME (SENZA REWARDS)
 ====================== */
 function updateBoxes() {
   // Available
@@ -265,10 +265,21 @@ function updateBoxes() {
     $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
   }
 
-  // Rewards
-  if(firstLoad || Math.abs(displayedRewards - rewardsInj) > 0.0000001){
-    const oldRewards = displayedRewards;
-    displayedRewards = lerp(displayedRewards, rewardsInj, 0.03);
+  // APR
+  $("apr").textContent = apr.toFixed(2)+"%";
+  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+
+  if(firstLoad) firstLoad = false;
+}
+
+/* ======================
+   UPDATE REWARDS OGNI 2.5 SECONDI
+====================== */
+setInterval(()=>{
+  const oldRewards = displayedRewards;
+  displayedRewards = lerp(displayedRewards, rewardsInj, 0.03);
+
+  if(Math.abs(displayedRewards - oldRewards) > 0.0000001){
     colorNumber($("rewards"), displayedRewards, oldRewards, 7);
 
     const rewardPct = Math.min(displayedRewards/0.05*100,100);
@@ -276,13 +287,7 @@ function updateBoxes() {
     $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
     $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
   }
-
-  // APR
-  $("apr").textContent = apr.toFixed(2)+"%";
-  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
-
-  if(firstLoad) firstLoad = false;
-}
+}, 2500);
 
 /* ======================
    ANIMATION LOOP PRINCIPALE
@@ -301,7 +306,7 @@ function animate(){
   // Barra prezzo + min/open/max
   updatePriceBar();
 
-  // Box available/stake/rewards/apr in real time
+  // Box available/stake/apr in real time
   updateBoxes();
 
   requestAnimationFrame(animate);
