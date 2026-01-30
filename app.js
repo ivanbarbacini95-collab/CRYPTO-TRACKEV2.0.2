@@ -20,7 +20,7 @@ let displayedAvailable = 0;
 let displayedStake = 0;
 let displayedRewards = 0;
 
-let chart, chartData = [];
+let chart, chartData = Array(1440).fill(0);
 let ws;
 
 /* =======================
@@ -101,7 +101,7 @@ setInterval(loadAccount, 60000);
 
 async function fetchHistory() {
   const d = await fetchJSON(
-    "https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24"
+    "https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440"
   );
 
   chartData = d.map(c => +c[4]);
@@ -123,7 +123,7 @@ function initChart() {
   chart = new Chart($("priceChart"), {
     type: "line",
     data: {
-      labels: Array(chartData.length).fill(""),
+      labels: Array(1440).fill(""),
       datasets: [{
         data: chartData,
         borderColor: "#22c55e",
@@ -208,7 +208,7 @@ function animate() {
   /* PRICE BAR */
   const container = $("priceBar").parentElement;
   const half = container.clientWidth / 2;
-  const ratio = Math.min(Math.abs(perf) / 10, 1);
+  const ratio = Math.min(Math.abs(perf) / 10, 1); 
   const size = ratio * half;
 
   if (perf >= 0) {
@@ -238,12 +238,15 @@ function animate() {
   colorNumber($("rewards"), displayedRewards, displayedRewards - 0.000001, 7);
   $("rewardsUsd").textContent = `≈ $${(displayedRewards * displayedPrice).toFixed(2)}`;
 
-  const rewardPercent = Math.min(displayedRewards / 0.1 * 100, 100);
+  const rewardTarget = 0.1;
+  const rewardPercent = Math.min(displayedRewards / rewardTarget * 100, 100);
   $("rewardBar").style.width = rewardPercent + "%";
   $("rewardPercent").textContent = rewardPercent.toFixed(1) + "%";
 
   /* APR */
   $("apr").textContent = apr.toFixed(2) + "%";
+
+  /* LAST UPDATE */
   $("updated").textContent = "Last update: " + new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
