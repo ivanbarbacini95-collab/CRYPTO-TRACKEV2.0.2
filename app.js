@@ -201,20 +201,25 @@ function startWS(){
 function updatePriceBar(){
   if(!dataReady || priceHigh===priceLow) return;
 
-  const p=displayedPrice;
-  let pct=p>=priceOpen
-    ?50+((p-priceOpen)/(priceHigh-priceOpen))*50
-    :50-((priceOpen-p)/(priceOpen-priceLow))*50;
+  const price = displayedPrice;
+  let pct = price>=priceOpen
+    ? 50 + ((price-priceOpen)/(priceHigh-priceOpen))*50
+    : 50 - ((priceOpen-price)/(priceOpen-priceLow))*50;
 
-  pct=Math.max(0,Math.min(100,pct));
-  $("priceLine").style.left=pct+"%";
+  pct = Math.max(0, Math.min(100, pct));
 
-  if(p>=priceOpen){
-    $("priceBar").style.left="50%";
-    $("priceBar").style.width=(pct-50)+"%";
-  }else{
-    $("priceBar").style.left=pct+"%";
-    $("priceBar").style.width=(50-pct)+"%";
+  // linea prezzo
+  $("priceLine").style.left = pct+"%";
+
+  // barra con gradiente dinamico
+  if(price>=priceOpen){
+    $("priceBar").style.left = "50%";
+    $("priceBar").style.width = (pct-50)+"%";
+    $("priceBar").style.background = "linear-gradient(to right,#22c55e,#10b981)";
+  } else {
+    $("priceBar").style.left = pct+"%";
+    $("priceBar").style.width = (50-pct)+"%";
+    $("priceBar").style.background = "linear-gradient(to right,#ef4444,#f87171)";
   }
 }
 
@@ -222,28 +227,52 @@ function updatePriceBar(){
    ANIMATION LOOP
 ====================== */
 function animate(){
-  if(!dataReady) return requestAnimationFrame(animate);
+  if(!dataReady){
+    requestAnimationFrame(animate);
+    return;
+  }
 
-  const old=displayedPrice;
-  displayedPrice=lerp(displayedPrice,targetPrice,0.1);
-  colorNumber($("price"),displayedPrice,old,4);
+  // Prezzo principale
+  const oldPrice = displayedPrice;
+  displayedPrice = lerp(displayedPrice,targetPrice,0.1);
+  colorNumber($("price"),displayedPrice,oldPrice,4);
 
   updatePriceBar();
 
-  displayedAvailable=lerp(displayedAvailable,availableInj,0.1);
-  colorNumber($("available"),displayedAvailable,prevAvailable,6);
-  prevAvailable=displayedAvailable;
+  // Available INJ
+  displayedAvailable = lerp(displayedAvailable, availableInj, 0.1);
+  colorNumber($("available"), displayedAvailable, prevAvailable,6);
+  prevAvailable = displayedAvailable;
+  $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
-  displayedStake=lerp(displayedStake,stakeInj,0.1);
-  colorNumber($("stake"),displayedStake,prevStake,4);
-  prevStake=displayedStake;
+  // Stake
+  displayedStake = lerp(displayedStake, stakeInj,0.1);
+  colorNumber($("stake"), displayedStake, prevStake,4);
+  prevStake = displayedStake;
+  $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
-  displayedRewards=lerp(displayedRewards,rewardsInj,0.1);
-  colorNumber($("rewards"),displayedRewards,prevRewards,7);
-  prevRewards=displayedRewards;
+  // Rewards
+  displayedRewards = lerp(displayedRewards, rewardsInj,0.08);
+  colorNumber($("rewards"), displayedRewards, prevRewards,7);
+  prevRewards = displayedRewards;
+
+  const rewardPct = Math.min(displayedRewards/0.05*100,100);
+  $("rewardBar").style.width = rewardPct + "%";
+  $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
+  $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
 
   requestAnimationFrame(animate);
 }
+
+/* ======================
+   RESET A MEZZANOTTE
+====================== */
+setInterval(()=>{
+  const n = new Date();
+  if(n.getHours()===0 && n.getMinutes()===0){
+    fetchDayHistory();
+  }
+},60000);
 
 /* ======================
    START
