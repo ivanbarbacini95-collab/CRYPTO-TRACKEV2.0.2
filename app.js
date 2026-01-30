@@ -25,6 +25,7 @@ let chartLabels = [];
 
 let ws;
 let dataReady = false;
+let firstLoad = true; // flag primo caricamento
 
 /* ======================
    HELPERS
@@ -64,6 +65,7 @@ $("addressInput").onchange = e=>{
   address=e.target.value.trim();
   localStorage.setItem("inj_address",address);
   loadAccount();
+  firstLoad = true; // reset primo caricamento ad ogni nuovo indirizzo
 };
 
 /* ======================
@@ -245,10 +247,11 @@ function updatePriceBar(){
 
 /* ======================
    UPDATE BOXES OGNI 2 SEC CON EFFETTO FLUIDO SOLO SE CAMBIA
+   PRIMO CARICAMENTO TUTTI I NUMERI SCORRONO
 ====================== */
 function updateBoxes() {
   // Available
-  if(Math.abs(displayedAvailable - availableInj) > 0.000001){
+  if(firstLoad || Math.abs(displayedAvailable - availableInj) > 0.000001){
     const oldAvailable = displayedAvailable;
     displayedAvailable = lerp(displayedAvailable, availableInj, 0.05);
     colorNumber($("available"), displayedAvailable, oldAvailable, 6);
@@ -256,7 +259,7 @@ function updateBoxes() {
   }
 
   // Stake
-  if(Math.abs(displayedStake - stakeInj) > 0.000001){
+  if(firstLoad || Math.abs(displayedStake - stakeInj) > 0.000001){
     const oldStake = displayedStake;
     displayedStake = lerp(displayedStake, stakeInj, 0.05);
     colorNumber($("stake"), displayedStake, oldStake, 4);
@@ -264,7 +267,7 @@ function updateBoxes() {
   }
 
   // Rewards
-  if(Math.abs(displayedRewards - rewardsInj) > 0.0000001){
+  if(firstLoad || Math.abs(displayedRewards - rewardsInj) > 0.0000001){
     const oldRewards = displayedRewards;
     displayedRewards = lerp(displayedRewards, rewardsInj, 0.03);
     colorNumber($("rewards"), displayedRewards, oldRewards, 7);
@@ -277,6 +280,8 @@ function updateBoxes() {
 
   $("apr").textContent = apr.toFixed(2)+"%";
   $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+
+  if(firstLoad) firstLoad = false; // primo caricamento completato
 }
 
 setInterval(updateBoxes, 2000);
