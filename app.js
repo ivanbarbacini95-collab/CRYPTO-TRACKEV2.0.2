@@ -74,19 +74,14 @@ $("addressInput").onchange = e=>{
 async function loadAccount(){
   if(!address) return;
 
-  const [b,s,r,i]=await Promise.all([
+  const [b,s,i]=await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
-    fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
   availableInj=(b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
   stakeInj=(s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
-
-  rewardsInj=(r.rewards||[]).reduce(
-    (a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0
-  )/1e18;
 
   apr=Number(i.inflation||0)*100;
 }
@@ -273,11 +268,21 @@ function updateBoxes() {
 }
 
 /* ======================
-   UPDATE REWARDS OGNI 2.5 SECONDI
+   UPDATE REWARDS OGNI 2.5 SECONDI (DA API)
 ====================== */
-setInterval(()=>{
+setInterval(async ()=>{
+  if(!address) return;
+
+  // Prendo solo rewards dall'API
+  const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
+  const newRewards = (r.rewards||[]).reduce(
+    (a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0
+  )/1e18;
+
+  if(newRewards !== rewardsInj) rewardsInj = newRewards;
+
   const oldRewards = displayedRewards;
-  displayedRewards = lerp(displayedRewards, rewardsInj, 0.03);
+  displayedRewards = lerp(displayedRewards, rewardsInj, 0.05);
 
   if(Math.abs(displayedRewards - oldRewards) > 0.0000001){
     colorNumber($("rewards"), displayedRewards, oldRewards, 7);
