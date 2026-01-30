@@ -42,7 +42,6 @@ function colorNumber(el, current, previous, decimals=2){
   let html = '';
   for(let i=0; i<curStr.length; i++){
     if(curStr[i] !== prevStr[i]){
-      // cifra cambiata: verde se sale, rosso se scende
       const color = +curStr[i] > +prevStr[i] ? '#22c55e' : '#ef4444';
       html += `<span style="color:${color}">${curStr[i]}</span>`;
     } else {
@@ -200,7 +199,6 @@ function updateChartRealtime(p){
   const idx = Math.floor((Date.now()-midnight())/60000);
   chartData[idx] = p;
 
-  // colore grafico linea
   const color = p >= priceOpen ? "#22c55e" : "#ef4444";
   chart.data.datasets[0].borderColor = color;
   chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, p);
@@ -208,7 +206,6 @@ function updateChartRealtime(p){
   chart.data.datasets[0].data = chartData.map(v => v??NaN);
   chart.update("none");
 
-  // aggiorna min/max per barra
   priceLow = Math.min(priceLow, p);
   priceHigh = Math.max(priceHigh, p);
 
@@ -241,26 +238,15 @@ function updatePriceBar(){
     $("priceBar").style.width = (50-pct)+"%";
   }
 
-  // Aggiorna min, max e open indicatori
   $("priceMin").textContent = priceLow.toFixed(3);
   $("priceOpen").textContent = priceOpen.toFixed(3);
   $("priceMax").textContent = priceHigh.toFixed(3);
 }
 
 /* ======================
-   ANIMATION LOOP
+   UPDATE BOXES OGNI 2 SEC
 ====================== */
-function animate(){
-  if(!dataReady){
-    requestAnimationFrame(animate);
-    return;
-  }
-
-  // Prezzo principale
-  const oldPrice = displayedPrice;
-  displayedPrice = lerp(displayedPrice,targetPrice,0.1);
-  colorNumber($("price"), displayedPrice, oldPrice, 4);
-
+function updateBoxes() {
   // Available INJ
   const oldAvailable = displayedAvailable;
   displayedAvailable = lerp(displayedAvailable, availableInj, 0.1);
@@ -269,22 +255,42 @@ function animate(){
 
   // Stake
   const oldStake = displayedStake;
-  displayedStake = lerp(displayedStake, stakeInj,0.1);
+  displayedStake = lerp(displayedStake, stakeInj, 0.1);
   colorNumber($("stake"), displayedStake, oldStake, 4);
   $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
   // Rewards
   const oldRewards = displayedRewards;
-  displayedRewards = lerp(displayedRewards, rewardsInj,0.08);
+  displayedRewards = lerp(displayedRewards, rewardsInj, 0.08);
   colorNumber($("rewards"), displayedRewards, oldRewards, 7);
   const rewardPct = Math.min(displayedRewards/0.05*100,100);
   $("rewardBar").style.width = rewardPct + "%";
   $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
   $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
 
-  // Aggiorna barra prezzo
-  updatePriceBar();
+  // APR
+  $("apr").textContent = apr.toFixed(2)+"%";
 
+  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+}
+
+// Aggiornamento box ogni 2 secondi
+setInterval(updateBoxes, 2000);
+
+/* ======================
+   ANIMATION LOOP SOLO PREZZO
+====================== */
+function animate(){
+  if(!dataReady){
+    requestAnimationFrame(animate);
+    return;
+  }
+
+  const oldPrice = displayedPrice;
+  displayedPrice = lerp(displayedPrice, targetPrice, 0.1);
+  colorNumber($("price"), displayedPrice, oldPrice, 4);
+
+  updatePriceBar();
   requestAnimationFrame(animate);
 }
 
