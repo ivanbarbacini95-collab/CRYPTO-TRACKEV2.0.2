@@ -57,7 +57,7 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #ef4444;
+  background: #ef4444; 
   animation: pulse 1.5s infinite;
 }
 
@@ -67,6 +67,10 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
+.status-text {
+  color: #f9fafb;
+}
+
 /* INPUT */
 #addressInput {
   padding: 0.8rem;
@@ -74,6 +78,12 @@ body {
   border: 2px solid #4b5563;
   background: #0a0f1f;
   color: #f9fafb;
+  outline: none;
+}
+
+#addressInput:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
 /* CARDS */
@@ -123,6 +133,8 @@ body {
 .price-bar {
   position: absolute;
   height: 100%;
+  transition: width 0.3s ease, left 0.3s ease, background 0.3s ease;
+  border-radius: 0.3rem;
 }
 
 .price-line {
@@ -130,7 +142,19 @@ body {
   width: 2px;
   height: 100%;
   background: #facc15;
+  transition: left 0.3s ease;
 }
+
+.price-values {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  position: relative;
+  height: 18px;
+}
+
+.price-extremes.left { position: absolute; left: 0; }
+.price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
+.price-extremes.right { position: absolute; right: 0; }
 
 /* REWARD BAR */
 .reward-bar-container {
@@ -138,18 +162,42 @@ body {
   height: 24px;
   background: #111827;
   border-radius: 0.3rem;
+  overflow: hidden;
 }
 
 .reward-bar {
   height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 0.3rem;
+  background: linear-gradient(to right, #0ea5e9, #3b82f6);
 }
 
+.reward-percent {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.85rem;
+}
+
+/* CHART */
 .chart-card {
   height: 300px;
+  position: relative;
 }
 
-.last-update {
-  font-size: 0.8rem;
-  text-align: center;
-  color: #9ca3af;
+#priceChart {
+  width: 100% !important;
+  height: 100% !important;
 }
+
+.chart-hours {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  margin-top: 0.2rem;
+}
+
+/* MISC */
+.up { color: #22c55e; }
