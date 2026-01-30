@@ -69,20 +69,62 @@ function setConnectionStatus(online){
 }
 setConnectionStatus(false);
 
-// GRAFICO
-async function fetchHistoryDay(){
+// GRAFICOasync function fetchHistoryDay(){
   const now = new Date();
-  const todayStr = now.toISOString().slice(0,10);
-  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&startTime=${new Date(todayStr+"T00:00:00Z").getTime()}&endTime=${Date.now()}`;
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startTime = todayMidnight.getTime();
+  const endTime = Date.now();
+
+  // Creiamo un array di minuti dalla mezzanotte fino ad ora corrente
+  const minutesPassed = Math.floor((endTime - startTime)/60000);
+  chartData = new Array(minutesPassed).fill(null); // null indica dato mancante
+  chartLabels = new Array(minutesPassed).fill("");
+
+  // Prendiamo i dati storici da Binance
+  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}`;
   const d = await fetchJSON(url);
   if(!d.length) return;
-  chartData=d.map(c=>+c[4]);
-  chartLabels=Array(chartData.length).fill("");
-  priceOpen=+d[0][1];
-  priceLow=Math.min(...chartData);
-  priceHigh=Math.max(...chartData);
-  targetPrice=chartData.at(-1);
+
+  // Impostiamo prezzo di apertura, min e max
+  priceOpen = +d[0][1];
+  priceLow = Math.min(...d.map(c=>+c[4]));
+  priceHigh = Math.max(...d.map(c=>+c[4]));
+
+  // Riempimento dei dati disponibili nei minuti corretti
+  d.forEach(c=>{
+    const minuteIndex = Math.floor((+c[0]-startTime)/60000);
+    chartData[minuteIndex] = +c[4];
+  });
+
+  // Prendiamo l'ultimo prezzo disponibile come targetPrice
+  const lastFilledIndex = chartData.map(v=>v!==null).lastIndexOf(true);
+  targetPrice = chartData[lastFilledIndex] || priceOpen;
+
   if(!chart) initChart();
+}
+
+// Aggiorna il grafico senza linee piatte
+function updateChart(p){
+  const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const minuteIndex = Math.floor((now.getTime()-todayMidnight.getTime())/60000);
+
+  if(minuteIndex >= chartData.length){
+    chartData.push(p);
+    chartLabels.push("");
+  } else {
+    chartData[minuteIndex] = p;
+  }
+
+  if(!chart) return;
+
+  chart.data.datasets[0].data = chartData.map(v=>v===null?NaN:v); // null -> NaN per non tirare linea piatta
+  chart.data.datasets[0].backgroundColor=createGradient(chart.ctx,p);
+  chart.update("none");
+
+  // Aggiorna min/max realtime
+  priceLow = Math.min(priceLow,p);
+  priceHigh = Math.max(priceHigh,p);
 }
 
 fetchHistoryDay();
