@@ -1,12 +1,22 @@
-// ------------------------
-// HELPERS
-// ------------------------
+let address = localStorage.getItem("inj_address") || "";
+
+let targetPrice = 0, displayedPrice = 0;
+let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
+
+let availableInj = 0, stakeInj = 0, rewardsInj = 0;
+let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
+let apr = 0;
+
+let chart, chartData = [], ws;
+
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f)=>a+(b-a)*f;
 
+/* FUNZIONE PER COLORARE CIFRE CAMBIATE */
 function colorNumber(el, n, o, d){
   const ns = n.toFixed(d);
   const os = o.toFixed(d);
+
   el.innerHTML = [...ns].map((c,i) => {
     if(c !== os[i]){
       return `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>`;
@@ -16,27 +26,21 @@ function colorNumber(el, n, o, d){
   }).join("");
 }
 
+/* FETCH JSON */
 async function fetchJSON(url){
   try { return await (await fetch(url)).json(); }
   catch { return {}; }
 }
 
-// ------------------------
-// ACCOUNT DATA
-// ------------------------
-let address = localStorage.getItem("inj_address") || "";
+/* INPUT ADDRESS */
 $("addressInput").value = address;
-
 $("addressInput").onchange = e => {
   address = e.target.value.trim();
   localStorage.setItem("inj_address", address);
   loadAccount();
 };
 
-let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
-
-// Fetch account data
+/* LOAD ACCOUNT */
 async function loadAccount(){
   if(!address) return;
 
@@ -47,55 +51,61 @@ async function loadAccount(){
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
-  availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount || 0)/1e18;
+  availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
   stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
+
   const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
-  rewardsInj = Math.max(rewardsInj, newRewards); // non ridurre mai i rewards
-  apr = Number(i.inflation || 0)*100;
+  if(newRewards > rewardsInj) rewardsInj = newRewards;
+
+  apr = Number(i.inflation||0)*100;
 }
 
-// Update periodically
+/* AGGIORNAMENTI PERIODICI */
 loadAccount();
 setInterval(loadAccount, 60000);
 setInterval(async ()=>{
   if(!address) return;
   const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
   const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
-  rewardsInj = Math.max(rewardsInj, newRewards);
+  if(newRewards > rewardsInj) rewardsInj = newRewards;
 }, 2000);
 
-// ------------------------
-// PRICE DATA & CHART
-// ------------------------
-let targetPrice = 0, displayedPrice = 0;
-let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
-let chart, chartData = [];
-
-// Fetch 24h history from Binance
-async function fetchHistory24h(){
-  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
-  chartData = d.map(c => +c[4]);
+/* FETCH HISTORY 24H */
+async function fetchHistory(){
+  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1h&limit=24");
+  chartData = d.map(c=>+c[4]);
   price24hOpen = +d[0][1];
   price24hLow = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
   targetPrice = chartData.at(-1);
-
   if(!chart) initChart();
 }
+fetchHistory();
 
-fetchHistory24h();
+/* CREA GRADIENTE */
+function createGradient(ctx, price){
+  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+  gradient.addColorStop(0, price>=price24hOpen ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)");
+  gradient.addColorStop(1, "rgba(0,0,0,0)");
+  return gradient;
+}
 
-// Initialize chart
+/* INIT CHART */
 function initChart(){
   const ctx = $("priceChart").getContext("2d");
+
+  // Dati iniziali leggermente variati per movimento
+  const initialPrice = chartData.at(-1);
+  const smoothData = chartData.map(p => p * (0.995 + Math.random()*0.01));
+
   chart = new Chart(ctx, {
     type: "line",
     data: {
-      labels: Array(chartData.length).fill(""),
+      labels: Array(smoothData.length).fill(""),
       datasets: [{
-        data: chartData,
-        borderColor: "#22c55e",
-        backgroundColor: createGradient(ctx, chartData.at(-1)),
+        data: smoothData,
+        borderColor: initialPrice >= price24hOpen ? "#22c55e" : "#ef4444",
+        backgroundColor: createGradient(ctx, initialPrice),
         fill: true,
         pointRadius: 0,
         tension: 0.2
@@ -104,7 +114,7 @@ function initChart(){
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: false,
+      animation: { duration: 0 },
       plugins: { legend: { display: false } },
       scales: {
         x: { display: false },
@@ -114,13 +124,7 @@ function initChart(){
   });
 }
 
-function createGradient(ctx, price){
-  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
-  gradient.addColorStop(0, price >= price24hOpen ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)");
-  gradient.addColorStop(1,"rgba(0,0,0,0)");
-  return gradient;
-}
-
+/* UPDATE CHART */
 function updateChart(p){
   if(!chart) return;
   chart.data.datasets[0].data.push(p);
@@ -130,39 +134,44 @@ function updateChart(p){
   chart.update("none");
 }
 
-// ------------------------
-// WEBSOCKET PRICE STREAM
-// ------------------------
+/* CONNECTION STATUS */
 const connectionStatus = $("connectionStatus");
 const statusDot = connectionStatus.querySelector(".status-dot");
 const statusText = connectionStatus.querySelector(".status-text");
 
 function setConnectionStatus(online){
-  statusDot.style.background = online ? "#22c55e" : "#ef4444";
-  statusText.textContent = online ? "Online" : "Offline";
+  if(online){
+    statusDot.style.background = "#22c55e";
+    statusText.textContent = "Online";
+  } else {
+    statusDot.style.background = "#ef4444";
+    statusText.textContent = "Offline";
+  }
 }
+setConnectionStatus(false);
 
-let ws;
+/* WEBSOCKET */
 function startWS(){
   if(ws) ws.close();
   ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+
   ws.onopen = () => setConnectionStatus(true);
-  ws.onmessage = e=>{
+  ws.onmessage = e => {
     const p = +JSON.parse(e.data).p;
     targetPrice = p;
-    price24hHigh = Math.max(price24hHigh, p);
-    price24hLow = Math.min(price24hLow, p);
+    price24hHigh = Math.max(price24hHigh,p);
+    price24hLow = Math.min(price24hLow,p);
     updateChart(p);
   };
-  ws.onclose = ()=> { setConnectionStatus(false); setTimeout(startWS, 3000); };
-  ws.onerror = ()=> setConnectionStatus(false);
+  ws.onclose = () => {
+    setConnectionStatus(false);
+    setTimeout(startWS, 3000);
+  };
+  ws.onerror = () => setConnectionStatus(false);
 }
-
 startWS();
 
-// ------------------------
-// PRICE BAR
-// ------------------------
+/* PRICE BAR */
 function updatePriceBar(){
   const min = price24hLow;
   const max = price24hHigh;
@@ -175,41 +184,39 @@ function updatePriceBar(){
   } else {
     linePercent = 50 - ((open - price)/(open - min))*50;
   }
-  linePercent = Math.max(0,Math.min(100,linePercent));
-
+  linePercent = Math.max(0, Math.min(100, linePercent));
   $("priceLine").style.left = linePercent + "%";
+
+  $("priceBar").style.background = price >= open
+    ? "linear-gradient(to right, #22c55e, #10b981)"
+    : "linear-gradient(to right, #ef4444, #f87171)";
 
   let barWidth, barLeft;
   if(price >= open){
     barLeft = 50;
     barWidth = linePercent - 50;
-    $("priceBar").style.background = "linear-gradient(to right, #22c55e, #10b981)";
   } else {
     barLeft = linePercent;
     barWidth = 50 - linePercent;
-    $("priceBar").style.background = "linear-gradient(to right, #ef4444, #f87171)";
   }
-
   $("priceBar").style.left = barLeft + "%";
   $("priceBar").style.width = barWidth + "%";
 }
 
-// ------------------------
-// ANIMATION LOOP
-// ------------------------
+/* ANIMATION LOOP */
 function animate(){
   // PRICE
   const oldPrice = displayedPrice;
   displayedPrice = lerp(displayedPrice, targetPrice, 0.1);
   colorNumber($("price"), displayedPrice, oldPrice, 4);
 
-  const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
-  $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
-  $("price24h").className = "sub "+(d>0?"up":"down");
+  const d=((displayedPrice-price24hOpen)/price24hOpen)*100;
+  $("price24h").textContent=`${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
+  $("price24h").className="sub "+(d>0?"up":"down");
 
-  $("priceMin").textContent = price24hLow.toFixed(3);
-  $("priceOpen").textContent = price24hOpen.toFixed(3);
-  $("priceMax").textContent = price24hHigh.toFixed(3);
+  $("priceMin").textContent=price24hLow.toFixed(3);
+  $("priceOpen").textContent=price24hOpen.toFixed(3);
+  $("priceMax").textContent=price24hHigh.toFixed(3);
 
   updatePriceBar();
 
@@ -227,22 +234,19 @@ function animate(){
 
   // REWARDS
   const oldRewards = displayedRewards;
-  displayedRewards = lerp(displayedRewards, rewardsInj || 0, 0.1);
+  displayedRewards = lerp(displayedRewards, rewardsInj, 0.1);
   colorNumber($("rewards"), displayedRewards, oldRewards, 7);
   $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
-
-  const rewardPercent = Math.min((displayedRewards / 0.05)*100, 100);
-  $("rewardBar").style.width = rewardPercent + "%";
   $("rewardBar").style.background = "linear-gradient(to right, #0ea5e9, #3b82f6)";
-  $("rewardPercent").textContent = rewardPercent.toFixed(1) + "%";
+  $("rewardBar").style.width = Math.min(displayedRewards/0.05*100,100)+"%";
+  $("rewardPercent").textContent=(displayedRewards/0.05*100).toFixed(1)+"%";
 
   // APR
-  $("apr").textContent = (apr || 0).toFixed(2) + "%";
+  $("apr").textContent=apr.toFixed(2)+"%";
 
   // LAST UPDATE
-  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+  $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
 }
-
 animate();
