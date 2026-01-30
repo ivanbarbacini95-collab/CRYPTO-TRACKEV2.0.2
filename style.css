@@ -65,9 +65,7 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
-.status-text {
-  color: #f9fafb;
-}
+.status-text { color: #f9fafb; }
 
 #addressInput {
   padding: 0.8rem;
@@ -117,8 +115,7 @@ body {
   color: #9ca3af;
 }
 
-.price-bar-container,
-.reward-bar-container {
+.price-bar-container {
   position: relative;
   height: 24px;
   background: #111827;
@@ -126,7 +123,7 @@ body {
   overflow: hidden;
 }
 
-.price-bar, .reward-bar {
+.price-bar {
   position: absolute;
   height: 100%;
   transition: width 0.3s ease, left 0.3s ease, background 0.3s ease;
@@ -152,6 +149,20 @@ body {
 .price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
 .price-extremes.right { position: absolute; right: 0; }
 
+.reward-bar-container {
+  position: relative;
+  height: 24px;
+  background: #111827;
+  border-radius: 0.3rem;
+  overflow: hidden;
+}
+
+.reward-bar {
+  height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 0.3rem;
+}
+
 .reward-percent {
   position: absolute;
   top: 50%;
@@ -160,14 +171,8 @@ body {
   font-size: 0.85rem;
 }
 
-.chart-card {
-  height: 300px;
-}
-
-#priceChart {
-  width: 100% !important;
-  height: 100% !important;
-}
+.chart-card { height: 300px; }
+#priceChart { width: 100% !important; height: 100% !important; }
 
 .up { color: #22c55e; }
 .down { color: #ef4444; }
