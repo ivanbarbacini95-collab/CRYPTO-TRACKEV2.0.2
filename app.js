@@ -32,16 +32,16 @@ let dataReady = false;
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f)=>a+(b-a)*f;
 
-/* Animazione cifra per cifra */
+/* Animazione cifra-per-cifra solo sui numeri cambiati */
 function colorNumber(el, current, previous, decimals=2){
   if(!el) return;
-  
+
   const curStr = current.toFixed(decimals);
   const prevStr = previous.toFixed(decimals).padStart(curStr.length, '0');
 
   let html = '';
-  for(let i=0; i<curStr.length; i++){
-    if(curStr[i] !== prevStr[i]){
+  for(let i=0;i<curStr.length;i++){
+    if(curStr[i]!==prevStr[i]){
       const color = +curStr[i] > +prevStr[i] ? '#22c55e' : '#ef4444';
       html += `<span style="color:${color}">${curStr[i]}</span>`;
     } else {
