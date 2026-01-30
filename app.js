@@ -1,25 +1,14 @@
-let address = localStorage.getItem("inj_address") || "";
-
-// Prezzi e dati 24h
-let targetPrice = 0, displayedPrice = 0;
-let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
-let chart, chartData = [];
-
-// Dati account
-let availableInj = 0, stakeInj = 0, rewardsInj = 0;
-let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
-let apr = 0;
-
+// ------------------------
+// HELPERS
+// ------------------------
 const $ = id => document.getElementById(id);
-const lerp = (a, b, f) => a + (b - a) * f;
+const lerp = (a,b,f)=>a+(b-a)*f;
 
-/* Funzione per colorare le cifre cambiate */
-function colorNumber(el, n, o, d) {
+function colorNumber(el, n, o, d){
   const ns = n.toFixed(d);
   const os = o.toFixed(d);
-
-  el.innerHTML = [...ns].map((c, i) => {
-    if (c !== os[i]) {
+  el.innerHTML = [...ns].map((c,i) => {
+    if(c !== os[i]){
       return `<span style="color:${n>o?'#22c55e':'#ef4444'}">${c}</span>`;
     } else {
       return `<span style="color:#f9fafb">${c}</span>`;
@@ -27,21 +16,27 @@ function colorNumber(el, n, o, d) {
   }).join("");
 }
 
-/* Fetch JSON helper */
 async function fetchJSON(url){
   try { return await (await fetch(url)).json(); }
   catch { return {}; }
 }
 
-/* Input address */
+// ------------------------
+// ACCOUNT DATA
+// ------------------------
+let address = localStorage.getItem("inj_address") || "";
 $("addressInput").value = address;
+
 $("addressInput").onchange = e => {
   address = e.target.value.trim();
   localStorage.setItem("inj_address", address);
   loadAccount();
 };
 
-/* Load account completo */
+let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
+let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
+
+// Fetch account data
 async function loadAccount(){
   if(!address) return;
 
@@ -52,30 +47,35 @@ async function loadAccount(){
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
-  availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
+  availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount || 0)/1e18;
   stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
-
-  const newRewards = (r.rewards||[]).reduce((a,v)=>a.reward.reduce((s,x)=>s+Number(x.amount),0)+a,0)/1e18;
-  if(newRewards > rewardsInj) rewardsInj = newRewards;
-
-  apr = Number(i.inflation||0)*100;
+  const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+  rewardsInj = Math.max(rewardsInj, newRewards); // non ridurre mai i rewards
+  apr = Number(i.inflation || 0)*100;
 }
 
-/* Aggiornamenti periodici */
+// Update periodically
 loadAccount();
-setInterval(loadAccount, 60000); // account completo ogni 60s
+setInterval(loadAccount, 60000);
 setInterval(async ()=>{
   if(!address) return;
   const r = await fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`);
-  const newRewards = (r.rewards||[]).reduce((a,v)=>a.reward.reduce((s,x)=>s+Number(x.amount),0)+a,0)/1e18;
-  if(newRewards > rewardsInj) rewardsInj = newRewards;
+  const newRewards = (r.rewards||[]).reduce((a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+  rewardsInj = Math.max(rewardsInj, newRewards);
 }, 2000);
 
-/* History e chart 24h */
+// ------------------------
+// PRICE DATA & CHART
+// ------------------------
+let targetPrice = 0, displayedPrice = 0;
+let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
+let chart, chartData = [];
+
+// Fetch 24h history from Binance
 async function fetchHistory24h(){
   const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
   chartData = d.map(c => +c[4]);
-  price24hOpen = chartData[0];
+  price24hOpen = +d[0][1];
   price24hLow = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
   targetPrice = chartData.at(-1);
@@ -83,58 +83,69 @@ async function fetchHistory24h(){
   if(!chart) initChart();
 }
 
+fetchHistory24h();
+
+// Initialize chart
 function initChart(){
   const ctx = $("priceChart").getContext("2d");
-  chart = new Chart(ctx,{
-    type:"line",
-    data:{
+  chart = new Chart(ctx, {
+    type: "line",
+    data: {
       labels: Array(chartData.length).fill(""),
-      datasets:[{
+      datasets: [{
         data: chartData,
         borderColor: "#22c55e",
-        backgroundColor: ctx.createLinearGradient(0,0,0,ctx.canvas.height),
+        backgroundColor: createGradient(ctx, chartData.at(-1)),
         fill: true,
         pointRadius: 0,
         tension: 0.2
       }]
     },
-    options:{
-      responsive:true,
-      maintainAspectRatio:false,
-      animation:false,
-      plugins:{legend:{display:false}},
-      scales:{
-        x:{display:false, grid:{color:"#1f2937"}},
-        y:{ticks:{color:"#9ca3af"}, grid:{color:"#1f2937"}}
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: "#9ca3af" }, grid: { color: "#1f2937" } }
       }
     }
   });
 }
 
-function updateChart(price){
+function createGradient(ctx, price){
+  const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+  gradient.addColorStop(0, price >= price24hOpen ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)");
+  gradient.addColorStop(1,"rgba(0,0,0,0)");
+  return gradient;
+}
+
+function updateChart(p){
   if(!chart) return;
-  chart.data.datasets[0].data.push(price);
+  chart.data.datasets[0].data.push(p);
   chart.data.datasets[0].data.shift();
+  chart.data.datasets[0].borderColor = p >= price24hOpen ? "#22c55e" : "#ef4444";
+  chart.data.datasets[0].backgroundColor = createGradient(chart.ctx, p);
   chart.update("none");
 }
 
-/* Connection Status */
+// ------------------------
+// WEBSOCKET PRICE STREAM
+// ------------------------
 const connectionStatus = $("connectionStatus");
 const statusDot = connectionStatus.querySelector(".status-dot");
 const statusText = connectionStatus.querySelector(".status-text");
 
 function setConnectionStatus(online){
-  statusDot.style.background = online?"#22c55e":"#ef4444";
-  statusText.textContent = online?"Online":"Offline";
+  statusDot.style.background = online ? "#22c55e" : "#ef4444";
+  statusText.textContent = online ? "Online" : "Offline";
 }
-setConnectionStatus(false);
 
-/* WebSocket */
 let ws;
 function startWS(){
   if(ws) ws.close();
   ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
-
   ws.onopen = () => setConnectionStatus(true);
   ws.onmessage = e=>{
     const p = +JSON.parse(e.data).p;
@@ -143,35 +154,49 @@ function startWS(){
     price24hLow = Math.min(price24hLow, p);
     updateChart(p);
   };
-  ws.onclose = () => { setConnectionStatus(false); setTimeout(startWS,3000); };
-  ws.onerror = () => setConnectionStatus(false);
+  ws.onclose = ()=> { setConnectionStatus(false); setTimeout(startWS, 3000); };
+  ws.onerror = ()=> setConnectionStatus(false);
 }
+
 startWS();
 
-/* Price Bar */
-function updatePriceBar() {
+// ------------------------
+// PRICE BAR
+// ------------------------
+function updatePriceBar(){
   const min = price24hLow;
   const max = price24hHigh;
   const open = price24hOpen;
   const price = displayedPrice;
 
-  let linePercent = price >= open
-    ? 50 + ((price-open)/(max-open))*50
-    : 50 - ((open-price)/(open-min))*50;
-  linePercent = Math.max(0, Math.min(100, linePercent));
+  let linePercent;
+  if(price >= open){
+    linePercent = 50 + ((price - open)/(max - open))*50;
+  } else {
+    linePercent = 50 - ((open - price)/(open - min))*50;
+  }
+  linePercent = Math.max(0,Math.min(100,linePercent));
+
   $("priceLine").style.left = linePercent + "%";
 
-  $("priceBar").style.background = price>=open
-    ? "linear-gradient(to right, #22c55e, #10b981)"
-    : "linear-gradient(to right, #ef4444, #f87171)";
+  let barWidth, barLeft;
+  if(price >= open){
+    barLeft = 50;
+    barWidth = linePercent - 50;
+    $("priceBar").style.background = "linear-gradient(to right, #22c55e, #10b981)";
+  } else {
+    barLeft = linePercent;
+    barWidth = 50 - linePercent;
+    $("priceBar").style.background = "linear-gradient(to right, #ef4444, #f87171)";
+  }
 
-  let barLeft = price>=open ? 50 : linePercent;
-  let barWidth = price>=open ? linePercent-50 : 50-linePercent;
   $("priceBar").style.left = barLeft + "%";
   $("priceBar").style.width = barWidth + "%";
 }
 
-/* Animation Loop */
+// ------------------------
+// ANIMATION LOOP
+// ------------------------
 function animate(){
   // PRICE
   const oldPrice = displayedPrice;
@@ -202,38 +227,22 @@ function animate(){
 
   // REWARDS
   const oldRewards = displayedRewards;
-  displayedRewards = lerp(displayedRewards, rewardsInj, 0.1);
+  displayedRewards = lerp(displayedRewards, rewardsInj || 0, 0.1);
   colorNumber($("rewards"), displayedRewards, oldRewards, 7);
   $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
-  if(displayedRewards > oldRewards){
-    $("rewards").classList.add("up");
-    setTimeout(()=> $("rewards").classList.remove("up"), 1000);
-  }
-  const rewardPercent = Math.min(displayedRewards/0.05*100, 100);
-  $("rewardBar").style.width = rewardPercent+"%";
+
+  const rewardPercent = Math.min((displayedRewards / 0.05)*100, 100);
+  $("rewardBar").style.width = rewardPercent + "%";
   $("rewardBar").style.background = "linear-gradient(to right, #0ea5e9, #3b82f6)";
-  $("rewardPercent").textContent = rewardPercent.toFixed(1)+"%";
+  $("rewardPercent").textContent = rewardPercent.toFixed(1) + "%";
 
   // APR
-  $("apr").textContent = apr.toFixed(2)+"%";
+  $("apr").textContent = (apr || 0).toFixed(2) + "%";
 
   // LAST UPDATE
   $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
 }
+
 animate();
-
-/* Ricrea grafico ogni mezzanotte */
-function scheduleMidnightReset(){
-  const now = new Date();
-  const msToMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1).getTime() - now.getTime();
-  setTimeout(()=>{
-    fetchHistory24h();
-    scheduleMidnightReset();
-  }, msToMidnight);
-}
-scheduleMidnightReset();
-
-// Avvio iniziale grafico
-fetchHistory24h();
