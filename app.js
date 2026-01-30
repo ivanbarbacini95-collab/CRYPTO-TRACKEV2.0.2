@@ -12,12 +12,13 @@ let priceHigh = 0;
 
 let availableInj = 0;
 let stakeInj = 0;
-let rewardsInj = 0;   // Valore reale dei rewards
+let rewardsInj = 0;   
 let apr = 0;
 
 let displayedAvailable = 0;
 let displayedStake = 0;
-let displayedRewards = 0; // Valore visualizzato
+let displayedRewards = 0; 
+let displayedApr = 0;
 
 let chart;
 let chartData = [];
@@ -33,7 +34,6 @@ let firstLoad = true;
 const $ = id => document.getElementById(id);
 const lerp = (a,b,f)=>a+(b-a)*f;
 
-// Animazione cifra-per-cifra solo sui numeri cambiati
 function colorNumber(el, current, previous, decimals=2){
   if(!el) return;
 
@@ -82,7 +82,6 @@ async function loadAccount(){
 
   availableInj=(b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
   stakeInj=(s.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
-
   apr=Number(i.inflation||0)*100;
 }
 
@@ -241,34 +240,47 @@ function updatePriceBar(){
 }
 
 /* ======================
-   UPDATE BOXES REALTIME (SENZA REWARDS)
+   UPDATE BOXES REALTIME
 ====================== */
-function updateBoxes() {
+function animateBoxes() {
   // Available
-  if(firstLoad || Math.abs(displayedAvailable - availableInj) > 0.000001){
-    const oldAvailable = displayedAvailable;
+  if(Math.abs(displayedAvailable - availableInj) > 0.000001){
+    const old = displayedAvailable;
     displayedAvailable = lerp(displayedAvailable, availableInj, 0.05);
-    colorNumber($("available"), displayedAvailable, oldAvailable, 6);
+    colorNumber($("available"), displayedAvailable, old, 6);
     $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
   }
 
   // Stake
-  if(firstLoad || Math.abs(displayedStake - stakeInj) > 0.000001){
-    const oldStake = displayedStake;
+  if(Math.abs(displayedStake - stakeInj) > 0.000001){
+    const old = displayedStake;
     displayedStake = lerp(displayedStake, stakeInj, 0.05);
-    colorNumber($("stake"), displayedStake, oldStake, 4);
+    colorNumber($("stake"), displayedStake, old, 4);
     $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
   }
 
-  // APR
-  $("apr").textContent = apr.toFixed(2)+"%";
-  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+  // Rewards
+  if(Math.abs(displayedRewards - rewardsInj) > 0.0000001){
+    const old = displayedRewards;
+    displayedRewards = lerp(displayedRewards, rewardsInj, 0.05);
+    colorNumber($("rewards"), displayedRewards, old, 7);
 
-  if(firstLoad) firstLoad = false;
+    const rewardPct = Math.min(displayedRewards/0.05*100,100);
+    $("rewardBar").style.width = rewardPct + "%";
+    $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
+    $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
+  }
+
+  // APR
+  if(Math.abs(displayedApr - apr) > 0.0001){
+    const old = displayedApr;
+    displayedApr = lerp(displayedApr, apr, 0.05);
+    colorNumber($("apr"), displayedApr, old, 2);
+  }
 }
 
 /* ======================
-   UPDATE REWARDS OGNI 2.5 SECONDI (SOLO VALORE REALE)
+   UPDATE REWARDS OGNI 2.5 SEC
 ====================== */
 setInterval(async ()=>{
   if(!address) return;
@@ -278,41 +290,26 @@ setInterval(async ()=>{
     (a,v)=>a+v.reward.reduce((s,x)=>s+Number(x.amount),0),0
   )/1e18;
 
-  if(newRewards !== rewardsInj) rewardsInj = newRewards; // animate() farà scorrere fluido
+  if(newRewards !== rewardsInj) rewardsInj = newRewards;
 }, 2500);
 
 /* ======================
-   ANIMATION LOOP PRINCIPALE
+   ANIMATION LOOP
 ====================== */
 function animate(){
-  if(!dataReady){
-    requestAnimationFrame(animate);
-    return;
-  }
+  if(!dataReady){ requestAnimationFrame(animate); return; }
 
   // Prezzo
   const oldPrice = displayedPrice;
   displayedPrice = lerp(displayedPrice, targetPrice, 0.05);
   colorNumber($("price"), displayedPrice, oldPrice, 4);
 
-  // Barra prezzo + min/open/max
   updatePriceBar();
 
-  // Box available/stake/apr in real time
-  updateBoxes();
+  // Tutte le card
+  animateBoxes();
 
-  // Rewards: animazione fluida
-  const oldRewards = displayedRewards;
-  displayedRewards = lerp(displayedRewards, rewardsInj, 0.05);
-
-  if(Math.abs(displayedRewards - oldRewards) > 0.0000001){
-    colorNumber($("rewards"), displayedRewards, oldRewards, 7);
-
-    const rewardPct = Math.min(displayedRewards/0.05*100,100);
-    $("rewardBar").style.width = rewardPct + "%";
-    $("rewardBar").style.background = "linear-gradient(to right,#0ea5e9,#3b82f6)";
-    $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
-  }
+  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
 
   requestAnimationFrame(animate);
 }
