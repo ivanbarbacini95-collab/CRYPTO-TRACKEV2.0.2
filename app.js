@@ -238,7 +238,6 @@ function updatePriceBar(){
    ANIMATE BOXES
 ====================== */
 function animateBoxes(){
-  // Available
   if(Math.abs(displayedAvailable-availableInj) > 0.000001){
     const old = displayedAvailable;
     displayedAvailable = lerp(displayedAvailable,availableInj,0.1);
@@ -246,7 +245,6 @@ function animateBoxes(){
     $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
   }
 
-  // Staked
   if(Math.abs(displayedStake-stakeInj) > 0.0001){
     const old = displayedStake;
     displayedStake = lerp(displayedStake,stakeInj,0.1);
@@ -254,7 +252,6 @@ function animateBoxes(){
     $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
   }
 
-  // Rewards
   if(Math.abs(displayedRewards-rewardsInj) > 0.0000001){
     const old = displayedRewards;
     displayedRewards = lerp(displayedRewards,rewardsInj,0.1);
@@ -266,7 +263,6 @@ function animateBoxes(){
     $("rewardPercent").textContent = rewardPct.toFixed(1)+"%";
   }
 
-  // APR
   if(Math.abs(displayedApr-apr)>0.0001){
     const old = displayedApr;
     displayedApr = lerp(displayedApr,apr,0.05);
@@ -334,7 +330,7 @@ function animate(){
 setInterval(()=>{
   const n = new Date();
   if(n.getHours()===0 && n.getMinutes()===0){
-    fetchDayHistory();
+    initChart24h();
   }
 },60000);
 
