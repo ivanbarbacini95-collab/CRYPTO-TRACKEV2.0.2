@@ -30,18 +30,16 @@ let ws;
 const $ = id => document.getElementById(id);
 
 function colorNumber(el, n, o, decimals = 4) {
-    if(n === o) {
-        // Nessun cambiamento -> mostra neutro
+    if(n === o){
         el.innerHTML = n.toFixed(decimals);
         return;
     }
-
     const ns = n.toFixed(decimals);
     const os = o.toFixed(decimals);
 
-    el.innerHTML = [...ns].map((c,i) => {
-        if(c !== os[i]) {
-            return `<span style="color:${n>o ? "#22c55e":"#ef4444"}">${c}</span>`;
+    el.innerHTML = [...ns].map((c,i)=>{
+        if(c!==os[i]){
+            return `<span style="color:${n>o?"#22c55e":"#ef4444"}">${c}</span>`;
         }
         return `<span style="color:#f9fafb">${c}</span>`;
     }).join('');
@@ -58,7 +56,7 @@ async function fetchJSON(url){
 
 $("addressInput").value = address;
 
-$("addressInput").addEventListener("input", e => {
+$("addressInput").addEventListener("input", e=>{
     address = e.target.value.trim();
     localStorage.setItem("inj_address", address);
     loadAccount();
@@ -78,11 +76,11 @@ async function loadAccount() {
         fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
     ]);
 
-    availableInj = (balances.balances?.find(b=>b.denom==="inj")?.amount || 0)/1e18;
+    availableInj = (balances.balances?.find(b=>b.denom==="inj")?.amount||0)/1e18;
 
-    stakeInj = (staking.delegation_responses || []).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
+    stakeInj = (staking.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
 
-    rewardsInj = (rewards.rewards || []).reduce((a,r)=> a+r.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+    rewardsInj = (rewards.rewards||[]).reduce((a,r)=> a+r.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
 
     apr = Number(inflation.inflation||0)*100;
 }
@@ -96,7 +94,7 @@ setInterval(loadAccount, 60000);
 
 async function fetchHistory() {
     const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
-    chartData = d.map(c => +c[4]); // prezzo chiusura
+    chartData = d.map(c=>+c[4]);
     price24hOpen = +d[0][1];
     price24hLow = Math.min(...chartData);
     price24hHigh = Math.max(...chartData);
@@ -116,7 +114,7 @@ function initChart() {
     chart = new Chart(ctx,{
         type:"line",
         data:{
-            labels: Array(1440).fill(""),
+            labels:Array(1440).fill(""),
             datasets:[{
                 data: chartData,
                 borderColor:"#22c55e",
@@ -132,8 +130,8 @@ function initChart() {
             animation:false,
             plugins:{legend:{display:false}},
             scales:{
-                x:{display:true, ticks:{color:"#9ca3af"}, grid:{display:false}},
-                y:{ticks:{color:"#9ca3af"}}
+                x:{ display:false, grid:{display:false} }, // <-- nessun numero sotto
+                y:{ ticks:{color:"#9ca3af"} }
             }
         }
     });
@@ -155,7 +153,7 @@ function setConnectionStatus(online){
     $("connectionStatus").querySelector(".status-text").textContent = online?"Online":"Offline";
 }
 
-function startWS() {
+function startWS(){
     if(ws) ws.close();
 
     ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
@@ -202,7 +200,7 @@ function animate() {
         // BAR PREZZO
         const range = price24hHigh - price24hLow;
         const barPerc = range ? ((displayedPrice-price24hLow)/range)*100 : 0;
-        const lineLeft = ((price24hOpen-price24hLow)/range)*100 || 50;
+        const lineLeft = range ? ((price24hOpen-price24hLow)/range)*100 : 50;
 
         $("priceBar").style.width = barPerc+"%";
         $("priceBar").style.background = displayedPrice>=price24hOpen?"#22c55e":"#ef4444";
@@ -242,6 +240,7 @@ function animate() {
     /* -------- APR -------- */
     $("apr").textContent = apr.toFixed(2)+"%";
 
+    /* -------- LAST UPDATE -------- */
     $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
 
     requestAnimationFrame(animate);
