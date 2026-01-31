@@ -30,11 +30,8 @@ const $ = id => document.getElementById(id);
 
 function clamp(v,min=0,max=100){return Math.max(min,Math.min(max,v));}
 
+// Color only digits that change
 function colorNumber(el, n, o, decimals = 4) {
-    if(n === o){
-        el.innerHTML = n.toFixed(decimals);
-        return;
-    }
     const ns = n.toFixed(decimals);
     const os = o.toFixed(decimals);
     el.innerHTML = [...ns].map((c,i)=>{
@@ -43,6 +40,11 @@ function colorNumber(el, n, o, decimals = 4) {
         }
         return `<span style="color:#f9fafb">${c}</span>`;
     }).join('');
+}
+
+// Smooth interpolation
+function smoothStep(current, target, speed=0.15){
+    return current + (target - current) * speed;
 }
 
 async function fetchJSON(url){
@@ -76,18 +78,9 @@ async function loadAccount() {
     ]);
 
     availableInj = (balances.balances?.find(b=>b.denom==="inj")?.amount||0)/1e18;
-
     stakeInj = (staking.delegation_responses||[]).reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
-
     rewardsInj = (rewards.rewards||[]).reduce((a,r)=> a+r.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
-
     apr = Number(inflation.inflation||0)*100;
-
-    // Aggiorna barra reward subito al caricamento
-    displayedRewards = rewardsInj;
-    $("rewards").textContent = displayedRewards.toFixed(7);
-    $("rewardsUsd").textContent = "≈ $" + (displayedRewards * displayedPrice).toFixed(2);
-    updateRewardBar();
 }
 
 loadAccount();
@@ -213,9 +206,14 @@ function updateRewardBar(){
     $("rewardLine").style.left = rewardPerc+"%";
     $("rewardPercent").textContent = rewardPerc.toFixed(1)+"%";
 
-    // Mostra range sotto la barra
     $("rewardMin").textContent = "0 INJ";
     $("rewardMax").textContent = maxReward.toFixed(7)+" INJ";
+
+    // Gradient dinamico da azzurro a rosso in base al progresso
+    const r = Math.round(34 + 221 * (rewardPerc/100));
+    const g = Math.round(197 - 197*(rewardPerc/100));
+    const b = Math.round(94 - 94*(rewardPerc/100));
+    $("rewardBar").style.background = `rgb(${r},${g},${b})`;
 }
 
 /* =======================
@@ -224,43 +222,34 @@ function updateRewardBar(){
 
 function animate(){
     /* -------- PRICE -------- */
-    if(displayedPrice !== targetPrice){
-        const old = displayedPrice;
-        displayedPrice = targetPrice;
-        colorNumber($("price"), displayedPrice, old,4);
+    displayedPrice = smoothStep(displayedPrice, targetPrice, 0.2);
+    colorNumber($("price"), displayedPrice, displayedPrice, 4);
 
-        const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
-        $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
-        $("price24h").className = "sub "+(d>0?"up":"down");
+    const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
+    $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
+    $("price24h").className = "sub "+(d>0?"up":"down");
 
-        $("priceMin").textContent = price24hLow.toFixed(3);
-        $("priceOpen").textContent = price24hOpen.toFixed(3);
-        $("priceMax").textContent = price24hHigh.toFixed(3);
+    $("priceMin").textContent = price24hLow.toFixed(3);
+    $("priceOpen").textContent = price24hOpen.toFixed(3);
+    $("priceMax").textContent = price24hHigh.toFixed(3);
 
-        updatePriceBar();
-    }
+    updatePriceBar();
 
     /* -------- AVAILABLE -------- */
-    if(displayedAvailable !== availableInj){
-        const old = displayedAvailable;
-        displayedAvailable = availableInj;
-        colorNumber($("available"), displayedAvailable, old,6);
-        $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
-    }
+    displayedAvailable = smoothStep(displayedAvailable, availableInj, 0.2);
+    colorNumber($("available"), displayedAvailable, displayedAvailable, 6);
+    $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
     /* -------- STAKE -------- */
-    if(displayedStake !== stakeInj){
-        const old = displayedStake;
-        displayedStake = stakeInj;
-        colorNumber($("stake"), displayedStake, old,4);
-        $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
-    }
+    displayedStake = smoothStep(displayedStake, stakeInj, 0.2);
+    colorNumber($("stake"), displayedStake, displayedStake, 4);
+    $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
     /* -------- REWARDS -------- */
-    // Aggiornamento fluido ogni 2 sec
-    requestAnimationFrame(()=>{ 
-        updateRewardBar();
-    });
+    displayedRewards = smoothStep(displayedRewards, rewardsInj, 0.2);
+    colorNumber($("rewards"), displayedRewards, displayedRewards, 7);
+    $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+    updateRewardBar();
 
     /* -------- APR -------- */
     $("apr").textContent = apr.toFixed(2)+"%";
@@ -272,13 +261,3 @@ function animate(){
 }
 
 animate();
-
-// Aggiornamento rewards ogni 2 secondi
-setInterval(()=>{
-    if(displayedRewards !== rewardsInj){
-        displayedRewards = rewardsInj;
-        $("rewards").textContent = displayedRewards.toFixed(7);
-        $("rewardsUsd").textContent = "≈ $" + (displayedRewards * displayedPrice).toFixed(2);
-        updateRewardBar();
-    }
-},2000);
