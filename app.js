@@ -170,12 +170,10 @@ function animate(){
             line.style.left = `${50-perc*50}%`;
         }
 
-        // aggiornamento valori
         $("priceMin").textContent = price24hLow.toFixed(3);
         $("priceOpen").textContent = price24hOpen.toFixed(3);
         $("priceMax").textContent = price24hHigh.toFixed(3);
 
-        // lampeggio ATH/ATL
         if(displayedPrice===price24hHigh||displayedPrice===price24hLow){
             const targets = [displayedPrice===price24hHigh?$ ("priceMax"):$("priceMin")];
             targets.forEach(t=>{ 
@@ -214,10 +212,9 @@ function animate(){
         $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
 
         const perc = Math.min(displayedRewards/0.1, 1);
-        const bar=$("rewardBar"), line=$("rewardLine");
+        const bar=$("rewardBar");
         bar.style.width = `${perc*100}%`;
-        bar.style.background = `linear-gradient(to right, #0ea5e9, #3b82f6, #ef4444)`;
-        line.style.left = `${perc*100}%`;
+        bar.style.background = `linear-gradient(to right, #22c55e, #3b82f6)`; // verde gradient
         $("rewardPercent").textContent = `${(perc*100).toFixed(1)}%`;
     }
 
@@ -229,6 +226,4 @@ function animate(){
     requestAnimationFrame(animate);
 }
 animate();
-
-// Aggiornamento reward ogni 2 secondi
-setInterval(loadAccount, 2000);
+setInterval(loadAccount, 2000); // aggiornamento reward
