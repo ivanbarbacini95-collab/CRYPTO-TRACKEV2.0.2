@@ -18,6 +18,7 @@ body { font-family: Inter, sans-serif; background:#000; color:#f9fafb; margin:0;
 .value-row { display:flex; justify-content:flex-end; font-size:1.4rem; font-weight:bold; }
 .sub-row { display:flex; justify-content:flex-end; font-size:0.9rem; color:#9ca3af; }
 .price-bar-wrapper { margin-top:0.5rem; }
+.price-bar-wrapper + .price-bar-wrapper { margin-top:1rem; }
 .price-bar-container, .reward-bar-container { position:relative; height:24px; background:#111827; border-radius:0.3rem; overflow:hidden; margin-top:0.2rem; }
 .price-bar, .reward-bar { position:absolute; height:100%; border-radius:0.3rem; transition:width 0.2s ease, background 0.2s ease; }
 .price-line, .reward-line { position:absolute; width:2px; height:100%; background:#facc15; transition:left 0.1s ease; }
