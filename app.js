@@ -9,14 +9,21 @@ let displayedAvailable = 0, displayedStake = 0, displayedRewards = 0;
 let chart, chartData = [];
 let ws;
 
+// Track ATH/ATL for flashing
+let lastATH = 0, lastATL = Infinity;
+let athFlash = false, atlFlash = false;
+
 // ================= HELPERS =================
 const $ = id => document.getElementById(id);
 
-function smooth(curr, next, factor = 0.12){ return curr + (next - curr) * factor; }
-
 function colorNumber(el, n, o, decimals = 4){
+    if(n === o){
+        el.innerHTML = n.toFixed(decimals);
+        return;
+    }
     const ns = n.toFixed(decimals);
     const os = o.toFixed(decimals);
+
     el.innerHTML = [...ns].map((c,i)=>{
         if(c!==os[i]){
             return `<span style="color:${n>o?"#22c55e":"#ef4444"}">${c}</span>`;
@@ -54,8 +61,9 @@ async function loadAccount() {
     rewardsInj = (rewardsData.rewards||[]).reduce((a,r)=> a+r.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
     apr = Number(inflation.inflation||0)*100;
 }
+
 loadAccount();
-setInterval(loadAccount, 3000);
+setInterval(loadAccount, 2000);
 
 // ================= PRICE HISTORY =================
 async function fetchHistory(){
@@ -65,6 +73,8 @@ async function fetchHistory(){
     price24hLow = Math.min(...chartData);
     price24hHigh = Math.max(...chartData);
     targetPrice = chartData.at(-1);
+    lastATH = price24hHigh;
+    lastATL = price24hLow;
     if(!chart) initChart();
 }
 fetchHistory();
@@ -75,7 +85,7 @@ function initChart(){
     chart = new Chart(ctx,{
         type:"line",
         data:{
-            labels:Array(chartData.length).fill(""),
+            labels:Array(1440).fill(""),
             datasets:[{
                 data: chartData,
                 borderColor:"#22c55e",
@@ -123,60 +133,90 @@ function startWS(){
         updateChart(p);
     };
     ws.onclose = ()=>{ setConnectionStatus(false); setTimeout(startWS,3000); };
+    ws.onerror = ()=>setConnectionStatus(false);
 }
 startWS();
 
 // ================= ANIMATION LOOP =================
 function animate(){
     // -------- PRICE --------
-    displayedPrice = smooth(displayedPrice,targetPrice);
-    colorNumber($("price"), displayedPrice, displayedPrice,4);
+    if(displayedPrice!==targetPrice){
+        const old = displayedPrice;
+        displayedPrice = targetPrice;
+        colorNumber($("price"), displayedPrice, old,4);
 
-    const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
-    $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
-    $("price24h").className = "sub "+(d>0?"up":"down");
+        const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
+        $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
+        $("price24h").className = "sub "+(d>0?"up":"down");
 
-    $("priceMin").textContent = price24hLow.toFixed(3);
-    $("priceOpen").textContent = price24hOpen.toFixed(3);
-    $("priceMax").textContent = price24hHigh.toFixed(3);
+        $("priceMin").textContent = price24hLow.toFixed(3);
+        $("priceOpen").textContent = price24hOpen.toFixed(3);
+        $("priceMax").textContent = price24hHigh.toFixed(3);
 
-    // -------- BAR --------
-    const barEl = $("priceBar");
-    const lineEl = $("priceLine");
-    const center = 50;
+        // Lampeggio ATH/ATL
+        if(price24hHigh>lastATH){ athFlash = true; lastATH = price24hHigh; }
+        if(price24hLow<lastATL){ atlFlash = true; lastATL = price24hLow; }
 
-    if(displayedPrice>=price24hOpen){
-        const widthPerc = ((displayedPrice-price24hOpen)/(price24hHigh-price24hOpen))*50;
-        barEl.style.left = center+"%";
-        barEl.style.width = widthPerc+"%";
-        barEl.style.background = "linear-gradient(to right,#22c55e,#10b981)";
-    } else {
-        const leftPerc = center-((price24hOpen-displayedPrice)/(price24hOpen-price24hLow))*50;
-        barEl.style.left = leftPerc+"%";
-        barEl.style.width = (50-leftPerc)+"%";
-        barEl.style.background = "linear-gradient(to left,#ef4444,#f87171)";
+        if(athFlash){
+            $("priceMax").style.color = $("priceMax").style.color==="yellow"?"#9ca3af":"yellow";
+            if(displayedPrice<lastATH) athFlash=false;
+        }
+        if(atlFlash){
+            $("priceMin").style.color = $("priceMin").style.color==="yellow"?"#9ca3af":"yellow";
+            if(displayedPrice>lastATL) atlFlash=false;
+        }
+
+        // BAR PREZZO CENTRATA
+        const range = Math.max(price24hHigh-price24hOpen, price24hOpen-price24hLow);
+        const barEl = $("priceBar");
+        const lineEl = $("priceLine");
+        let leftPercent;
+        if(displayedPrice>=price24hOpen){
+            leftPercent=50;
+            const widthPerc = ((displayedPrice-price24hOpen)/(price24hHigh-price24hOpen))*50;
+            barEl.style.left = "50%";
+            barEl.style.width = widthPerc+"%";
+            barEl.style.background = "linear-gradient(to right, #22c55e, #10b981)";
+        } else {
+            leftPercent = 50-((price24hOpen-displayedPrice)/(price24hOpen-price24hLow))*50;
+            barEl.style.left = leftPercent+"%";
+            barEl.style.width = (50-leftPercent)+"%";
+            barEl.style.background = "linear-gradient(to left, #ef4444, #f87171)";
+        }
+        lineEl.style.left = ((displayedPrice-price24hLow)/(price24hHigh-price24hLow))*100+"%";
     }
-    lineEl.style.left = ((displayedPrice-price24hLow)/(price24hHigh-price24hLow))*100+"%";
 
     // -------- AVAILABLE --------
-    displayedAvailable = smooth(displayedAvailable, availableInj);
-    colorNumber($("available"), displayedAvailable, displayedAvailable,6);
-    $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
+    if(displayedAvailable!==availableInj){
+        const old = displayedAvailable;
+        displayedAvailable = availableInj;
+        colorNumber($("available"), displayedAvailable, old,6);
+        $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
+    }
 
-    // -------- STAKED --------
-    displayedStake = smooth(displayedStake, stakeInj);
-    colorNumber($("stake"), displayedStake, displayedStake,4);
-    $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
+    // -------- STAKE --------
+    if(displayedStake!==stakeInj){
+        const old = displayedStake;
+        displayedStake = stakeInj;
+        colorNumber($("stake"), displayedStake, old,4);
+        $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
+    }
 
     // -------- REWARDS --------
-    displayedRewards = smooth(displayedRewards, rewardsInj);
-    colorNumber($("rewards"), displayedRewards, displayedRewards,7);
-    $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+    if(displayedRewards!==rewardsInj){
+        const old = displayedRewards;
+        displayedRewards = rewardsInj;
+        colorNumber($("rewards"), displayedRewards, old,7);
+        $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
 
-    const perc = Math.min(displayedRewards/0.1,1)*100;
-    $("rewardBar").style.width = perc+"%";
-    $("rewardLine").style.left = perc+"%";
-    $("rewardPercent").textContent = perc.toFixed(1)+"%";
+        const perc = Math.min(displayedRewards/0.1,1)*100;
+        const barEl = $("rewardBar");
+        const lineEl = $("rewardLine");
+        barEl.style.width = perc+"%";
+        barEl.style.background = `linear-gradient(to right, #22c55e, #10b981)`;
+        lineEl.style.left = perc+"%";
+        $("rewardPercent").textContent = perc.toFixed(1)+"%";
+    }
 
     // -------- APR --------
     $("apr").textContent = apr.toFixed(2)+"%";
