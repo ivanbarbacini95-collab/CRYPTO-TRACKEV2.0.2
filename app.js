@@ -88,7 +88,7 @@ function initChart(){
     const ctx=$("priceChart").getContext("2d");
     chart=new Chart(ctx,{
         type:"line",
-        data:{labels:Array(1440).fill(""), datasets:[{data:chartData, borderColor:"#22c55e", backgroundColor:"rgba(34,197,94,0.2)", fill:true, pointRadius:0, tension:0.3}]},
+        data:{labels:Array(1440).fill(""), datasets:[{data:chartData,borderColor:"#22c55e",backgroundColor:"rgba(34,197,94,0.2)",fill:true,pointRadius:0,tension:0.3}]},
         options:{responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{display:false, grid:{display:false}}, y:{ticks:{color:"#9ca3af"}}}}
     });
 }
@@ -129,32 +129,4 @@ function animate(){
     updateValue(values.price,targetPrice);
     updateValue(values.available,availableInj); $("availableUsd").textContent=`≈ $${(values.available.displayed*values.price.displayed).toFixed(2)}`;
     updateValue(values.stake,stakeInj); $("stakeUsd").textContent=`≈ $${(values.stake.displayed*values.price.displayed).toFixed(2)}`;
-    updateValue(values.rewards,rewardsInj); $("rewardsUsd").textContent=`≈ $${(values.rewards.displayed*values.price.displayed).toFixed(2)}`;
-
-    // BARS
-    updateBar($("priceBar"),$("priceLine"),values.price.displayed,price24hOpen,price24hLow,price24hHigh);
-    updateBar($("weekBar"),$("weekLine"),values.price.displayed,priceWeekOpen,priceWeekLow,priceWeekHigh);
-    updateBar($("monthBar"),$("monthLine"),values.price.displayed,priceMonthOpen,priceMonthLow,priceMonthHigh);
-
-    // 24h change
-    const d=((values.price.displayed-price24hOpen)/price24hOpen)*100;
-    $("price24h").textContent=`${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
-    $("price24h").className="sub "+(d>0?"up":"down");
-
-    // Min/Open/Max
-    $("priceMin").textContent=price24hLow.toFixed(3);
-    $("priceOpen").textContent=price24hOpen.toFixed(3);
-    $("priceMax").textContent=price24hHigh.toFixed(3);
-
-    // ATH/ATL flash
-    if(price24hHigh>lastATH){ athFlash=true; lastATH=price24hHigh; }
-    if(price24hLow<lastATL){ atlFlash=true; lastATL=price24hLow; }
-    if(athFlash){ $("priceMax").style.color=$("priceMax").style.color==="yellow"?"#9ca3af":"yellow"; if(values.price.displayed<lastATH) athFlash=false; }
-    if(atlFlash){ $("priceMin").style.color=$("priceMin").style.color==="yellow"?"#9ca3af":"yellow"; if(values.price.displayed>lastATL) atlFlash=false; }
-
-    $("apr").textContent=apr.toFixed(2)+"%";
-    $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
-
-    requestAnimationFrame(animate);
-}
-animate();
+    updateValue(values.rewards,rewardsInj); $("rewardsUsd").textContent=`≈ $
