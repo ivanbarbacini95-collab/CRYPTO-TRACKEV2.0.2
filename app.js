@@ -6,6 +6,7 @@ let address = localStorage.getItem("inj_address") || "";
 
 let targetPrice = 0;
 let displayedPrice = 0;
+let priceBootstrapped = false;
 
 let price24hOpen = 0;
 let price24hLow = 0;
@@ -29,25 +30,40 @@ let ws;
 
 const $ = id => document.getElementById(id);
 
-function colorNumber(el, n, o, decimals = 4){
-  const ns = n.toFixed(decimals);
-  const os = o.toFixed(decimals);
-
-  el.innerHTML = [...ns].map((c,i)=>{
-    if(c !== os[i]){
-      return `<span style="color:${n>o?"#22c55e":"#ef4444"}">${c}</span>`;
-    }
-    return `<span style="color:#f9fafb">${c}</span>`;
-  }).join("");
+function clamp(n,min=0,max=100){
+  return Math.min(Math.max(n,min),max);
 }
 
-function smartSmooth(current, target){
-  const diff = Math.abs(target - current);
+function colorNumber(el,n,o,d=4){
+  const ns = n.toFixed(d), os = o.toFixed(d);
+  el.innerHTML = [...ns].map((c,i)=>
+    `<span style="color:${
+      c!==os[i] ? (n>o?"#22c55e":"#ef4444") : "#f9fafb"
+    }">${c}</span>`
+  ).join("");
+}
 
-  if(diff > 10) return target;              // cambi grossi → istantaneo
-  if(diff > 1)  return current + (target-current)*0.45;
-  if(diff > 0.1)return current + (target-current)*0.28;
-  return current + (target-current)*0.14;
+function smartSmooth(c,t){
+  const diff = Math.abs(t-c);
+  if(diff > 5) return t;          // stake / unstake → istantaneo
+  if(diff > 1) return c+(t-c)*0.5;
+  if(diff > 0.1) return c+(t-c)*0.3;
+  return c+(t-c)*0.15;
+}
+
+function rewardGradient(p){
+  return `linear-gradient(90deg,
+    #38bdf8 0%,
+    #6366f1 ${p*0.4}%,
+    #a855f7 ${p*0.7}%,
+    #ef4444 ${p}%
+  )`;
+}
+
+function priceGradient(pos){
+  return pos>=0
+    ? "linear-gradient(90deg,#22c55e,#16a34a)"
+    : "linear-gradient(90deg,#ef4444,#b91c1c)";
 }
 
 async function fetchJSON(url){
@@ -56,47 +72,41 @@ async function fetchJSON(url){
 }
 
 /* =======================
-   ADDRESS INPUT
+   ADDRESS
 ======================= */
 
 $("addressInput").value = address;
-
-$("addressInput").addEventListener("input", e=>{
+$("addressInput").addEventListener("input",e=>{
   address = e.target.value.trim();
-  localStorage.setItem("inj_address", address);
+  localStorage.setItem("inj_address",address);
   loadAccount();
 });
 
 /* =======================
-   ACCOUNT LOAD
+   ACCOUNT
 ======================= */
 
 async function loadAccount(){
   if(!address.startsWith("inj")) return;
 
-  const [balances, staking, rewards, inflation] = await Promise.all([
+  const [b,s,r,i] = await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
-  availableInj =
-    (balances.balances?.find(b=>b.denom==="inj")?.amount || 0) / 1e18;
+  availableInj = (b.balances?.find(x=>x.denom==="inj")?.amount||0)/1e18;
+  stakeInj = (s.delegation_responses||[])
+    .reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
+  rewardsInj = (r.rewards||[])
+    .reduce((a,x)=>a+x.reward.reduce((s,y)=>s+Number(y.amount),0),0)/1e18;
 
-  stakeInj =
-    (staking.delegation_responses || [])
-      .reduce((a,d)=>a + Number(d.balance.amount), 0) / 1e18;
-
-  rewardsInj =
-    (rewards.rewards || [])
-      .reduce((a,r)=>a + r.reward.reduce((s,x)=>s + Number(x.amount),0), 0) / 1e18;
-
-  apr = Number(inflation.inflation || 0) * 100;
+  apr = Number(i.inflation||0)*100;
 }
 
 loadAccount();
-setInterval(loadAccount, 60000);
+setInterval(loadAccount,60000);
 
 /* =======================
    PRICE HISTORY
@@ -107,18 +117,17 @@ async function fetchHistory(){
     "https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440"
   );
 
-  chartData = d.map(c=>+c[4]);
-
+  chartData = d.map(x=>+x[4]);
   price24hOpen = +d[0][1];
   price24hLow  = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
 
   targetPrice = chartData.at(-1);
   displayedPrice = targetPrice;
+  priceBootstrapped = true;
 
   if(!chart) initChart();
 }
-
 fetchHistory();
 
 /* =======================
@@ -126,31 +135,17 @@ fetchHistory();
 ======================= */
 
 function initChart(){
-  const ctx = $("priceChart").getContext("2d");
-
-  chart = new Chart(ctx,{
+  chart = new Chart($("priceChart"),{
     type:"line",
-    data:{
-      labels:Array(1440).fill(""),
-      datasets:[{
-        data: chartData,
-        borderColor:"#22c55e",
-        backgroundColor:"rgba(34,197,94,0.2)",
-        fill:true,
-        pointRadius:0,
-        tension:0.3
-      }]
-    },
-    options:{
-      responsive:true,
-      maintainAspectRatio:false,
-      animation:false,
-      plugins:{ legend:{display:false} },
-      scales:{
-        x:{ display:false },
-        y:{ ticks:{color:"#9ca3af"} }
-      }
-    }
+    data:{labels:Array(1440).fill(""),datasets:[{
+      data:chartData,
+      borderColor:"#22c55e",
+      backgroundColor:"rgba(34,197,94,.2)",
+      fill:true,pointRadius:0,tension:.3
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,
+      animation:false,plugins:{legend:{display:false}},
+      scales:{x:{display:false},y:{ticks:{color:"#9ca3af"}}}}
   });
 }
 
@@ -165,122 +160,75 @@ function updateChart(p){
    WEBSOCKET
 ======================= */
 
-function setConnectionStatus(online){
-  $("connectionStatus").querySelector(".status-dot").style.background =
-    online ? "#22c55e" : "#ef4444";
-  $("connectionStatus").querySelector(".status-text").textContent =
-    online ? "Online" : "Offline";
-}
-
 function startWS(){
-  if(ws) ws.close();
-
   ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
-
-  ws.onopen = ()=>setConnectionStatus(true);
-
   ws.onmessage = e=>{
     const p = +JSON.parse(e.data).p;
     targetPrice = p;
-    price24hHigh = Math.max(price24hHigh, p);
-    price24hLow  = Math.min(price24hLow,  p);
+    price24hHigh = Math.max(price24hHigh,p);
+    price24hLow  = Math.min(price24hLow,p);
     updateChart(p);
   };
-
-  ws.onclose = ()=>{
-    setConnectionStatus(false);
-    setTimeout(startWS, 3000);
-  };
-
-  ws.onerror = ()=>setConnectionStatus(false);
+  ws.onclose = ()=>setTimeout(startWS,3000);
 }
-
 startWS();
 
 /* =======================
-   MAIN LOOP (FAST & FLUID)
+   MAIN LOOP
 ======================= */
 
 setInterval(()=>{
 
-  /* -------- PRICE -------- */
+  /* PRICE */
+  const oldP = displayedPrice;
+  displayedPrice = priceBootstrapped
+    ? smartSmooth(displayedPrice,targetPrice)
+    : targetPrice;
 
-  const oldPrice = displayedPrice;
-  displayedPrice = smartSmooth(displayedPrice, targetPrice);
-  colorNumber($("price"), displayedPrice, oldPrice, 4);
+  colorNumber($("price"),displayedPrice,oldP,4);
 
-  const sessionPerc =
-    ((displayedPrice - price24hOpen) / price24hOpen) * 100;
-
+  const move = ((displayedPrice-price24hOpen)/price24hOpen)*100;
   $("price24h").textContent =
-    `${sessionPerc>=0?"▲":"▼"} ${Math.abs(sessionPerc).toFixed(2)}%`;
-  $("price24h").className =
-    "sub " + (sessionPerc>=0 ? "up" : "down");
-
-  $("priceMin").textContent  = price24hLow.toFixed(3);
-  $("priceOpen").textContent= price24hOpen.toFixed(3);
-  $("priceMax").textContent = price24hHigh.toFixed(3);
-
-  /* -------- PRICE BAR (OPEN-CENTERED) -------- */
+    `${move>=0?"▲":"▼"} ${Math.abs(move).toFixed(2)}%`;
+  $("price24h").className = "sub "+(move>=0?"up":"down");
 
   const maxMove = Math.max(
-    Math.abs(price24hHigh - price24hOpen),
-    Math.abs(price24hOpen - price24hLow),
-    0.0001
+    Math.abs(price24hHigh-price24hOpen),
+    Math.abs(price24hOpen-price24hLow),0.0001
   );
 
-  const offsetPerc =
-    ((displayedPrice - price24hOpen) / maxMove) * 50;
+  const offset = ((displayedPrice-price24hOpen)/maxMove)*50;
+  $("priceLine").style.left = clamp(50+offset,0,100)+"%";
 
-  const linePos = Math.max(0, Math.min(100, 50 + offsetPerc));
-  $("priceLine").style.left = linePos + "%";
-
-  const barWidth = Math.abs(offsetPerc);
-  $("priceBar").style.width = barWidth + "%";
+  $("priceBar").style.width = Math.abs(offset)+"%";
   $("priceBar").style.left =
-    offsetPerc >= 0
-      ? "50%"
-      : (50 - barWidth) + "%";
+    offset>=0 ? "50%" : (50-Math.abs(offset))+"%";
+  $("priceBar").style.background = priceGradient(offset);
 
-  $("priceBar").style.background =
-    offsetPerc >= 0 ? "#22c55e" : "#ef4444";
+  /* AVAILABLE / STAKE */
+  displayedAvailable = smartSmooth(displayedAvailable,availableInj);
+  displayedStake = smartSmooth(displayedStake,stakeInj);
+  displayedRewards = smartSmooth(displayedRewards,rewardsInj);
 
-  /* -------- AVAILABLE -------- */
+  colorNumber($("available"),displayedAvailable,displayedAvailable-0.0001,6);
+  colorNumber($("stake"),displayedStake,displayedStake-0.0001,4);
+  colorNumber($("rewards"),displayedRewards,displayedRewards-0.0001,7);
 
-  const oldA = displayedAvailable;
-  displayedAvailable = smartSmooth(displayedAvailable, availableInj);
-  colorNumber($("available"), displayedAvailable, oldA, 6);
   $("availableUsd").textContent =
-    `≈ $${(displayedAvailable * displayedPrice).toFixed(2)}`;
-
-  /* -------- STAKE -------- */
-
-  const oldS = displayedStake;
-  displayedStake = smartSmooth(displayedStake, stakeInj);
-  colorNumber($("stake"), displayedStake, oldS, 4);
+    `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
   $("stakeUsd").textContent =
-    `≈ $${(displayedStake * displayedPrice).toFixed(2)}`;
-
-  /* -------- REWARDS -------- */
-
-  const oldR = displayedRewards;
-  displayedRewards = smartSmooth(displayedRewards, rewardsInj);
-  colorNumber($("rewards"), displayedRewards, oldR, 7);
+    `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
   $("rewardsUsd").textContent =
-    `≈ $${(displayedRewards * displayedPrice).toFixed(2)}`;
+    `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
 
-  const rewardPerc = stakeInj
-    ? Math.min((displayedRewards / stakeInj) * 100, 100)
-    : 0;
+  /* REWARD BAR 0 → 0.1 INJ */
+  const rewardPerc = clamp((displayedRewards/0.1)*100);
+  $("rewardBar").style.width = rewardPerc+"%";
+  $("rewardBar").style.background = rewardGradient(rewardPerc);
+  $("rewardPercent").textContent = rewardPerc.toFixed(1)+"%";
 
-  $("rewardBar").style.width = rewardPerc + "%";
-  $("rewardPercent").textContent =
-    rewardPerc.toFixed(1) + "%";
-
-  /* -------- APR + UPDATE -------- */
-
-  $("apr").textContent = apr.toFixed(2) + "%";
+  $("apr").textContent = apr.toFixed(2)+"%";
   $("updated").textContent =
-    "Last update: " + new Date().toLocaleTimeString();
+    "Last update: "+new Date().toLocaleTimeString();
 
-}, 120);
+},100);
