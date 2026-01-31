@@ -15,10 +15,6 @@ const $ = id => document.getElementById(id);
 function smooth(curr, next, factor = 0.12){ return curr + (next - curr) * factor; }
 
 function colorNumber(el, n, o, decimals = 4){
-    if(n === o){
-        el.innerHTML = n.toFixed(decimals);
-        return;
-    }
     const ns = n.toFixed(decimals);
     const os = o.toFixed(decimals);
     el.innerHTML = [...ns].map((c,i)=>{
@@ -162,30 +158,30 @@ function animate(){
     }
     lineEl.style.left = ((displayedPrice-price24hLow)/(price24hHigh-price24hLow))*100+"%";
 
-    // -------- BALANCES --------
+    // -------- AVAILABLE --------
     displayedAvailable = smooth(displayedAvailable, availableInj);
-    displayedStake = smooth(displayedStake, stakeInj);
-    displayedRewards = smooth(displayedRewards, rewardsInj);
-
     colorNumber($("available"), displayedAvailable, displayedAvailable,6);
     $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
 
+    // -------- STAKED --------
+    displayedStake = smooth(displayedStake, stakeInj);
     colorNumber($("stake"), displayedStake, displayedStake,4);
     $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
 
+    // -------- REWARDS --------
+    displayedRewards = smooth(displayedRewards, rewardsInj);
     colorNumber($("rewards"), displayedRewards, displayedRewards,7);
     $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
 
-    // REWARD BAR
     const perc = Math.min(displayedRewards/0.1,1)*100;
     $("rewardBar").style.width = perc+"%";
     $("rewardLine").style.left = perc+"%";
     $("rewardPercent").textContent = perc.toFixed(1)+"%";
 
-    // APR
+    // -------- APR --------
     $("apr").textContent = apr.toFixed(2)+"%";
 
-    // LAST UPDATE
+    // -------- LAST UPDATE --------
     $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
 
     requestAnimationFrame(animate);
