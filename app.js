@@ -138,11 +138,13 @@ startWS();
 
 // ================= ANIMATION LOOP =================
 function animate(){
+
     // -------- PRICE --------
-    if(displayedPrice!==targetPrice){
-        const old = displayedPrice;
-        displayedPrice = targetPrice;
-        colorNumber($("price"), displayedPrice, old,4);
+    if(displayedPrice !== targetPrice){
+        displayedPrice += (targetPrice - displayedPrice) * 0.2;
+        if(Math.abs(displayedPrice - targetPrice) < 0.0001) displayedPrice = targetPrice;
+
+        colorNumber($("price"), displayedPrice, targetPrice,4);
 
         const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
         $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
@@ -165,61 +167,58 @@ function animate(){
             if(displayedPrice>lastATL) atlFlash=false;
         }
 
-        // ======== BAR PREZZO CENTRATA ========
+        // ======== BAR PREZZO ========
         if(price24hHigh !== price24hLow){
             const barEl = $("priceBar");
             const lineEl = $("priceLine");
 
-            const rangeHigh = price24hHigh - price24hOpen;
-            const rangeLow = price24hOpen - price24hLow;
-
-            if(displayedPrice >= price24hOpen){
-                const perc = ((displayedPrice - price24hOpen)/rangeHigh)*50;
-                barEl.style.left = "50%";
-                barEl.style.width = perc+"%";
-                barEl.style.background = "linear-gradient(to right, #22c55e, #10b981)";
-            } else {
-                const perc = ((price24hOpen - displayedPrice)/rangeLow)*50;
-                barEl.style.left = (50-perc)+"%";
-                barEl.style.width = perc+"%";
-                barEl.style.background = "linear-gradient(to left, #ef4444, #f87171)";
-            }
-
             const totalRange = price24hHigh - price24hLow;
             const linePerc = ((displayedPrice - price24hLow)/totalRange)*100;
-            lineEl.style.left = linePerc+"%";
+            lineEl.style.left = linePerc+"%"; // linea trascina la barra
+
+            if(displayedPrice >= price24hOpen){
+                barEl.style.left = "50%";
+                barEl.style.width = (linePerc - 50) + "%";
+                barEl.style.background = "linear-gradient(to right, #22c55e, #10b981)";
+            } else {
+                barEl.style.left = linePerc + "%";
+                barEl.style.width = (50 - linePerc) + "%";
+                barEl.style.background = "linear-gradient(to left, #ef4444, #f87171)";
+            }
         }
     }
 
     // -------- AVAILABLE --------
-    if(displayedAvailable!==availableInj){
-        const old = displayedAvailable;
-        displayedAvailable = availableInj;
-        colorNumber($("available"), displayedAvailable, old,6);
+    if(displayedAvailable !== availableInj){
+        displayedAvailable += (availableInj - displayedAvailable) * 0.2;
+        if(Math.abs(displayedAvailable - availableInj) < 0.000001) displayedAvailable = availableInj;
+        colorNumber($("available"), displayedAvailable, availableInj,6);
         $("availableUsd").textContent = `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
     }
 
     // -------- STAKE --------
-    if(displayedStake!==stakeInj){
-        const old = displayedStake;
-        displayedStake = stakeInj;
-        colorNumber($("stake"), displayedStake, old,4);
+    if(displayedStake !== stakeInj){
+        displayedStake += (stakeInj - displayedStake) * 0.2;
+        if(Math.abs(displayedStake - stakeInj) < 0.0001) displayedStake = stakeInj;
+        colorNumber($("stake"), displayedStake, stakeInj,4);
         $("stakeUsd").textContent = `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
     }
 
     // -------- REWARDS --------
-    if(displayedRewards!==rewardsInj){
-        const old = displayedRewards;
-        displayedRewards = rewardsInj;
-        colorNumber($("rewards"), displayedRewards, old,7);
+    if(displayedRewards !== rewardsInj){
+        displayedRewards += (rewardsInj - displayedRewards) * 0.2;
+        if(Math.abs(displayedRewards - rewardsInj) < 0.0000001) displayedRewards = rewardsInj;
+        colorNumber($("rewards"), displayedRewards, rewardsInj,7);
         $("rewardsUsd").textContent = `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
 
-        const perc = Math.min(displayedRewards/0.1,1)*100;
         const barEl = $("rewardBar");
         const lineEl = $("rewardLine");
+
+        const perc = Math.min(displayedRewards/0.1,1)*100;
+        lineEl.style.left = perc+"%";  // linea gialla trascina
+        barEl.style.left = "0%";       // barra parte da 0
         barEl.style.width = perc+"%";
         barEl.style.background = `linear-gradient(to right, #22c55e, #10b981)`;
-        lineEl.style.left = perc+"%";
         $("rewardPercent").textContent = perc.toFixed(1)+"%";
     }
 
