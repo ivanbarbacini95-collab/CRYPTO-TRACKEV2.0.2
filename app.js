@@ -136,6 +136,31 @@ function animate(){
     updateBar($("priceBar"), $("priceLine"), displayed.price, price24hOpen, price24hLow, price24hHigh, "linear-gradient(to right,#22c55e,#10b981)", "linear-gradient(to left,#ef4444,#f87171)");
     $("priceMin").textContent=price24hLow.toFixed(3);
     $("priceOpen").textContent=price24hOpen.toFixed(3);
-    $("priceMax").textContent=price24hHigh.toFixed(3
+    $("priceMax").textContent=price24hHigh.toFixed(3);
+    const d24h = (displayed.price-price24hOpen)/price24hOpen*100;
+    $("price24h").textContent=`${d24h>0?"▲":"▼"} ${Math.abs(d24h).toFixed(2)}%`;
+    $("price24h").className="sub-row "+(d24h>0?"up":"down");
 
-                
+    // Weekly
+    updateBar($("weekBar"), $("weekLine"), displayed.price, priceWeekOpen, priceWeekLow, priceWeekHigh, "linear-gradient(to right,#f59e0b,#fbbf24)", "linear-gradient(to left,#f97316,#f87171)");
+    $("weekMin").textContent=priceWeekLow.toFixed(3);
+    $("weekOpen").textContent=priceWeekOpen.toFixed(3);
+    $("weekMax").textContent=priceWeekHigh.toFixed(3);
+    const dWeek = (displayed.price-priceWeekOpen)/priceWeekOpen*100;
+    $("priceWeek").textContent=`${dWeek>0?"▲":"▼"} ${Math.abs(dWeek).toFixed(2)}%`;
+    $("priceWeek").className="sub-row "+(dWeek>0?"up":"down");
+
+    // Monthly
+    updateBar($("monthBar"), $("monthLine"), displayed.price, priceMonthOpen, priceMonthLow, priceMonthHigh, "linear-gradient(to right,#8b5cf6,#c084fc)", "linear-gradient(to left,#6b21a8,#c084fc)");
+    $("monthMin").textContent=priceMonthLow.toFixed(3);
+    $("monthOpen").textContent=priceMonthOpen.toFixed(3);
+    $("monthMax").textContent=priceMonthHigh.toFixed(3);
+    const dMonth = (displayed.price-priceMonthOpen)/priceMonthOpen*100;
+    $("priceMonth").textContent=`${dMonth>0?"▲":"▼"} ${Math.abs(dMonth).toFixed(2)}%`;
+    $("priceMonth").className="sub-row "+(dMonth>0?"up":"down");
+
+    $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
+    requestAnimationFrame(animate);
+}
+
+animate();
