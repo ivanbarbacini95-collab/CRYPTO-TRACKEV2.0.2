@@ -31,27 +31,47 @@
     <div class="card price-card">
       <div class="label">INJ Price</div>
       <div class="value-row"><span id="price">0.0000</span></div>
-      <div class="sub-row"><span id="price24h" class="sub">±0.00%</span></div>
 
-      <div class="price-bar-container">
-        <div id="priceBar" class="price-bar"></div>
-        <div id="priceLine" class="price-line"></div>
+      <!-- 24h BAR -->
+      <div class="price-bar-wrapper">
+        <div class="sub-row">24h Change: <span id="price24h">±0.00%</span></div>
+        <div class="price-bar-container">
+          <div id="priceBar" class="price-bar"></div>
+          <div id="priceLine" class="price-line"></div>
+        </div>
+        <div class="price-values">
+          <span id="priceMin" class="price-extremes left">0.000</span>
+          <span id="priceOpen" class="price-extremes center">0.000</span>
+          <span id="priceMax" class="price-extremes right">0.000</span>
+        </div>
       </div>
 
-      <div class="price-bar-container weekly-bar">
-        <div id="weekBar" class="price-bar"></div>
-        <div id="weekLine" class="price-line"></div>
+      <!-- WEEKLY BAR -->
+      <div class="price-bar-wrapper weekly-bar">
+        <div class="sub-row">Weekly Change: <span id="priceWeek">±0.00%</span></div>
+        <div class="price-bar-container">
+          <div id="weekBar" class="price-bar"></div>
+          <div id="weekLine" class="price-line"></div>
+        </div>
+        <div class="price-values">
+          <span id="weekMin" class="price-extremes left">0.000</span>
+          <span id="weekOpen" class="price-extremes center">0.000</span>
+          <span id="weekMax" class="price-extremes right">0.000</span>
+        </div>
       </div>
 
-      <div class="price-bar-container monthly-bar">
-        <div id="monthBar" class="price-bar"></div>
-        <div id="monthLine" class="price-line"></div>
-      </div>
-
-      <div class="price-values">
-        <span id="priceMin" class="price-extremes left">0.000</span>
-        <span id="priceOpen" class="price-extremes center">0.000</span>
-        <span id="priceMax" class="price-extremes right">0.000</span>
+      <!-- MONTHLY BAR -->
+      <div class="price-bar-wrapper monthly-bar">
+        <div class="sub-row">Monthly Change: <span id="priceMonth">±0.00%</span></div>
+        <div class="price-bar-container">
+          <div id="monthBar" class="price-bar"></div>
+          <div id="monthLine" class="price-line"></div>
+        </div>
+        <div class="price-values">
+          <span id="monthMin" class="price-extremes left">0.000</span>
+          <span id="monthOpen" class="price-extremes center">0.000</span>
+          <span id="monthMax" class="price-extremes right">0.000</span>
+        </div>
       </div>
     </div>
 
