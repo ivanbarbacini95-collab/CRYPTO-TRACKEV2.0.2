@@ -17,7 +17,6 @@
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
-    <!-- Connection Status -->
     <div class="connection-status" id="connectionStatus">
       <span class="status-dot"></span>
       <span class="status-text">Offline</span>
@@ -57,7 +56,7 @@
       <div class="sub-row"><span id="stakeUsd">≈ $0.00</span></div>
     </div>
 
-    <div class="card">
+    <div class="card reward-card">
       <div class="label">Rewards</div>
       <div class="value-row"><span id="rewards">0.0000000</span></div>
       <div class="sub-row"><span id="rewardsUsd">≈ $0.00</span></div>
@@ -67,7 +66,11 @@
         <div id="rewardLine" class="reward-line"></div>
         <span id="rewardPercent" class="reward-percent">0%</span>
       </div>
-      <div class="reward-range">0 — 0.1 INJ</div>
+
+      <div class="reward-values">
+        <span class="reward-extremes left">0</span>
+        <span class="reward-extremes right">0.1</span>
+      </div>
     </div>
 
     <div class="card">
