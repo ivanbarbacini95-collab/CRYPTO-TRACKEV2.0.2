@@ -22,6 +22,14 @@ function colorNumber(el, n, o, decimals=4){
 
 async function fetchJSON(url){ try{return await (await fetch(url)).json();}catch{return{};} }
 
+function getHeatColor(percent){
+    // percent 0-100, da blu a rosso
+    const r = Math.round(14 + (239-14)*(percent/100));
+    const g = Math.round(165 - 165*(percent/100));
+    const b = Math.round(233 - 233*(percent/100));
+    return `rgb(${r},${g},${b})`;
+}
+
 // ================= ADDRESS INPUT =================
 $("addressInput").value=address;
 $("addressInput").addEventListener("input", e=>{
@@ -198,7 +206,7 @@ function animate(){
         $("rewardBar").style.width=perc+"%";
         $("rewardLine").style.left=perc+"%";
         $("rewardPercent").textContent=perc.toFixed(1)+"%";
-        $("rewardBar").style.background="linear-gradient(to right,#22c55e,#10b981)";
+        $("rewardBar").style.background=getHeatColor(perc);
     }
 
     // -------- APR --------
