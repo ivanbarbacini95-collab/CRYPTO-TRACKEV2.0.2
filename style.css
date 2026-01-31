@@ -1,6 +1,3 @@
-/* =======================
-   GLOBAL
-======================= */
 body {
   font-family: Inter, sans-serif;
   background: #000;
@@ -18,9 +15,6 @@ body {
   position: relative;
 }
 
-/* =======================
-   HEADER
-======================= */
 .header {
   display: flex;
   flex-direction: column;
@@ -36,19 +30,10 @@ body {
   -webkit-text-fill-color: transparent;
 }
 
-.header .dot {
-  color: #9ca3af;
-  -webkit-text-fill-color: #9ca3af;
-}
+.header .dot { color: #9ca3af; }
 
-.subtitle {
-  font-size: 0.9rem;
-  color: #9ca3af;
-}
+.subtitle { font-size: 0.9rem; color: #9ca3af; }
 
-/* =======================
-   CONNECTION STATUS
-======================= */
 .connection-status {
   position: absolute;
   top: 0;
@@ -74,13 +59,8 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
-.status-text {
-  color: #f9fafb;
-}
+.status-text { color: #f9fafb; }
 
-/* =======================
-   INPUT
-======================= */
 #addressInput {
   padding: 0.8rem;
   border-radius: 0.5rem;
@@ -97,14 +77,7 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }
 
-/* =======================
-   CARDS
-======================= */
-.cards-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
+.cards-wrapper { display: flex; flex-direction: column; gap: 1rem; }
 
 .card {
   background: linear-gradient(135deg, #111827, #1e293b);
@@ -115,28 +88,13 @@ body {
   gap: 0.5rem;
 }
 
-.label {
-  font-size: 1.1rem;
-  font-weight: bold;
-}
+.label { font-size: 1.1rem; font-weight: bold; }
 
-.value-row {
-  display: flex;
-  justify-content: flex-end;
-  font-size: 1.4rem;
-  font-weight: bold;
-}
+.value-row { display: flex; justify-content: flex-end; font-size: 1.4rem; font-weight: bold; }
 
-.sub-row {
-  display: flex;
-  justify-content: flex-end;
-  font-size: 0.9rem;
-  color: #9ca3af;
-}
+.sub-row { display: flex; justify-content: flex-end; font-size: 0.9rem; color: #9ca3af; }
 
-/* =======================
-   PRICE BAR
-======================= */
+/* PRICE BAR */
 .price-bar-container {
   position: relative;
   height: 24px;
@@ -148,8 +106,8 @@ body {
 .price-bar {
   position: absolute;
   height: 100%;
-  transition: width 0.2s ease;
   border-radius: 0.3rem;
+  transition: width 0.2s ease;
   background: linear-gradient(to right, #22c55e, #3b82f6);
 }
 
@@ -161,20 +119,7 @@ body {
   transition: left 0.2s ease;
 }
 
-.price-values {
-  font-size: 0.8rem;
-  color: #9ca3af;
-  position: relative;
-  height: 18px;
-}
-
-.price-extremes.left { position: absolute; left: 0; }
-.price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
-.price-extremes.right { position: absolute; right: 0; }
-
-/* =======================
-   REWARD BAR
-======================= */
+/* Reward bar */
 .reward-bar-container {
   position: relative;
   height: 24px;
@@ -204,48 +149,28 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 0.85rem;
-  font-weight: bold;
-  color: #f9fafb;
 }
 
 .reward-range {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: #9ca3af;
-  display: flex;
-  justify-content: space-between;
+  text-align: center;
   margin-top: 2px;
 }
 
-/* =======================
-   CHART CARD
-======================= */
-.chart-card {
-  height: 300px;
-}
+.price-values { font-size: 0.8rem; color: #9ca3af; position: relative; height: 18px; }
+.price-extremes.left { position: absolute; left: 0; }
+.price-extremes.center { position: absolute; left: 50%; transform: translateX(-50%); }
+.price-extremes.right { position: absolute; right: 0; }
 
-#priceChart {
-  width: 100% !important;
-  height: 100% !important;
-}
+.chart-card { height: 300px; }
+#priceChart { width: 100% !important; height: 100% !important; }
 
-/* =======================
-   COLORS
-======================= */
 .up { color: #22c55e; }
 .down { color: #ef4444; }
 
-/* =======================
-   LAST UPDATE
-======================= */
-.last-update {
-  font-size: 0.8rem;
-  text-align: center;
-  color: #9ca3af;
-}
+.last-update { font-size: 0.8rem; text-align: center; color: #9ca3af; }
 
-/* =======================
-   RESPONSIVE
-======================= */
 @media (max-width:600px){
   .header h1 { font-size: 1.5rem; }
   .value-row { font-size: 1.2rem; }
