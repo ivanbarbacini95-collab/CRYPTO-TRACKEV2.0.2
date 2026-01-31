@@ -1,4 +1,4 @@
-// ================== STATE ==================
+// ================= STATE =================
 let address = localStorage.getItem("inj_address") || "";
 
 const market = {
@@ -23,7 +23,7 @@ let displayedRewards = 0;
 let chart, chartData = [];
 let ws;
 
-// ================== HELPERS ==================
+// ================= HELPERS =================
 const $ = id => document.getElementById(id);
 
 async function fetchJSON(url){
@@ -31,19 +31,7 @@ async function fetchJSON(url){
   catch { return {}; }
 }
 
-function colorNumber(el, n, o, decimals){
-  if(n === o){
-    el.textContent = n.toFixed(decimals);
-    return;
-  }
-  const ns = n.toFixed(decimals);
-  const os = o.toFixed(decimals);
-  el.innerHTML = [...ns].map((c,i)=>`
-    <span style="color:${c!==os[i]?(n>o?"#22c55e":"#ef4444"):"#f9fafb"}">${c}</span>
-  `).join("");
-}
-
-// ================== ADDRESS ==================
+// ================= ADDRESS =================
 $("addressInput").value = address;
 $("addressInput").addEventListener("input", e=>{
   address = e.target.value.trim();
@@ -51,7 +39,7 @@ $("addressInput").addEventListener("input", e=>{
   loadAccount();
 });
 
-// ================== ACCOUNT ==================
+// ================= ACCOUNT =================
 async function loadAccount(){
   if(!address) return;
 
@@ -70,9 +58,11 @@ async function loadAccount(){
 loadAccount();
 setInterval(loadAccount, 3000);
 
-// ================== BINANCE 24H ==================
+// ================= BINANCE 24H =================
 async function fetch24h(){
-  const d = await fetchJSON("https://api.binance.com/api/v3/ticker/24hr?symbol=INJUSDT");
+  const d = await fetchJSON(
+    "https://api.binance.com/api/v3/ticker/24hr?symbol=INJUSDT"
+  );
 
   market.open = +d.openPrice;
   market.high = +d.highPrice;
@@ -85,35 +75,40 @@ async function fetch24h(){
 fetch24h();
 setInterval(fetch24h, 30000);
 
-// ================== WEBSOCKET ==================
+// ================= WEBSOCKET =================
 function setConnectionStatus(ok){
-  $("connectionStatus").querySelector(".status-dot").style.background = ok?"#22c55e":"#ef4444";
-  $("connectionStatus").querySelector(".status-text").textContent = ok?"Online":"Offline";
+  $("connectionStatus").querySelector(".status-dot").style.background =
+    ok ? "#22c55e" : "#ef4444";
+  $("connectionStatus").querySelector(".status-text").textContent =
+    ok ? "Online" : "Offline";
 }
 
 function startWS(){
   if(ws) ws.close();
+
   ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
 
-  ws.onopen = ()=>setConnectionStatus(true);
+  ws.onopen = () => setConnectionStatus(true);
 
-  ws.onmessage = e=>{
+  ws.onmessage = e => {
     market.price = +JSON.parse(e.data).p;
     updateChart(market.price);
   };
 
-  ws.onclose = ()=>{
+  ws.onclose = () => {
     setConnectionStatus(false);
     setTimeout(startWS, 3000);
   };
 
-  ws.onerror = ()=>setConnectionStatus(false);
+  ws.onerror = () => setConnectionStatus(false);
 }
 startWS();
 
-// ================== CHART ==================
+// ================= CHART =================
 async function initHistory(){
-  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
+  const d = await fetchJSON(
+    "https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440"
+  );
   chartData = d.map(c=>+c[4]);
   initChart();
 }
@@ -154,16 +149,25 @@ function updateChart(p){
   chart.update("none");
 }
 
-// ================== RENDER ==================
+// ================= RENDER =================
 function renderPrice(){
-  const old = uiPrice;
-  uiPrice += (market.price - uiPrice) * 0.18;
+  const prev = uiPrice;
+  uiPrice += (market.price - uiPrice) * 0.12;
 
-  colorNumber($("price"), uiPrice, old, 4);
+  $("price").textContent = uiPrice.toFixed(4);
 
+  const pct = market.changePct;
   $("price24h").textContent =
-    `${market.changePct>0?"▲":"▼"} ${Math.abs(market.changePct).toFixed(2)}%`;
-  $("price24h").className = "sub " + (market.changePct>0?"up":"down");
+    `${pct > 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(2)}%`;
+  $("price24h").className = "sub " + (pct > 0 ? "up" : "down");
+
+  // micro feedback card
+  const card = document.querySelector(".price-card");
+  card.classList.remove("up","down");
+  if(Math.abs(uiPrice - prev) > 0.0001){
+    card.classList.add(uiPrice > prev ? "up" : "down");
+    setTimeout(()=>card.classList.remove("up","down"),150);
+  }
 }
 
 function renderBar(){
@@ -194,41 +198,42 @@ function renderBar(){
 }
 
 function renderBalances(){
-  if(displayedAvailable!==availableInj){
-    const o = displayedAvailable;
+  if(displayedAvailable !== availableInj){
     displayedAvailable = availableInj;
-    colorNumber($("available"), displayedAvailable, o, 6);
-    $("availableUsd").textContent = `≈ $${(displayedAvailable*uiPrice).toFixed(2)}`;
+    $("available").textContent = displayedAvailable.toFixed(6);
+    $("availableUsd").textContent =
+      `≈ $${(displayedAvailable * uiPrice).toFixed(2)}`;
   }
 
-  if(displayedStake!==stakeInj){
-    const o = displayedStake;
+  if(displayedStake !== stakeInj){
     displayedStake = stakeInj;
-    colorNumber($("stake"), displayedStake, o, 4);
-    $("stakeUsd").textContent = `≈ $${(displayedStake*uiPrice).toFixed(2)}`;
+    $("stake").textContent = displayedStake.toFixed(4);
+    $("stakeUsd").textContent =
+      `≈ $${(displayedStake * uiPrice).toFixed(2)}`;
   }
 
-  if(displayedRewards!==rewardsInj){
-    const o = displayedRewards;
+  if(displayedRewards !== rewardsInj){
     displayedRewards = rewardsInj;
-    colorNumber($("rewards"), displayedRewards, o, 7);
-    $("rewardsUsd").textContent = `≈ $${(displayedRewards*uiPrice).toFixed(2)}`;
+    $("rewards").textContent = displayedRewards.toFixed(7);
+    $("rewardsUsd").textContent =
+      `≈ $${(displayedRewards * uiPrice).toFixed(2)}`;
 
-    const perc = Math.min(displayedRewards/0.1,1)*100;
-    $("rewardBar").style.width = perc+"%";
-    $("rewardLine").style.left = perc+"%";
-    $("rewardPercent").textContent = perc.toFixed(1)+"%";
+    const perc = Math.min(displayedRewards / 0.1, 1) * 100;
+    $("rewardBar").style.width = perc + "%";
+    $("rewardLine").style.left = perc + "%";
+    $("rewardPercent").textContent = perc.toFixed(1) + "%";
   }
 
-  $("apr").textContent = apr.toFixed(2)+"%";
+  $("apr").textContent = apr.toFixed(2) + "%";
 }
 
-// ================== LOOP ==================
+// ================= LOOP =================
 function loop(){
   renderPrice();
   renderBar();
   renderBalances();
-  $("updated").textContent = "Last update: "+new Date().toLocaleTimeString();
+  $("updated").textContent =
+    "Last update: " + new Date().toLocaleTimeString();
   requestAnimationFrame(loop);
 }
 loop();
