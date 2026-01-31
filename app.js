@@ -29,7 +29,7 @@ let ws;
 
 const $ = id => document.getElementById(id);
 
-function colorNumber(el, n, o, decimals = 4) {
+function colorNumber(el, n, o, decimals = 4){
   const ns = n.toFixed(decimals);
   const os = o.toFixed(decimals);
 
@@ -41,9 +41,13 @@ function colorNumber(el, n, o, decimals = 4) {
   }).join("");
 }
 
-function smooth(current, target, speed = 0.15, epsilon = 0.00001){
-  const v = current + (target - current) * speed;
-  return Math.abs(v - target) < epsilon ? target : v;
+function smartSmooth(current, target){
+  const diff = Math.abs(target - current);
+
+  if(diff > 10) return target;              // cambi grossi → istantaneo
+  if(diff > 1)  return current + (target-current)*0.45;
+  if(diff > 0.1)return current + (target-current)*0.28;
+  return current + (target-current)*0.14;
 }
 
 async function fetchJSON(url){
@@ -77,15 +81,18 @@ async function loadAccount(){
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
-  availableInj = (balances.balances?.find(b=>b.denom==="inj")?.amount||0)/1e18;
+  availableInj =
+    (balances.balances?.find(b=>b.denom==="inj")?.amount || 0) / 1e18;
 
-  stakeInj = (staking.delegation_responses||[])
-    .reduce((a,d)=>a+Number(d.balance.amount),0)/1e18;
+  stakeInj =
+    (staking.delegation_responses || [])
+      .reduce((a,d)=>a + Number(d.balance.amount), 0) / 1e18;
 
-  rewardsInj = (rewards.rewards||[])
-    .reduce((a,r)=>a+r.reward.reduce((s,x)=>s+Number(x.amount),0),0)/1e18;
+  rewardsInj =
+    (rewards.rewards || [])
+      .reduce((a,r)=>a + r.reward.reduce((s,x)=>s + Number(x.amount),0), 0) / 1e18;
 
-  apr = Number(inflation.inflation||0)*100;
+  apr = Number(inflation.inflation || 0) * 100;
 }
 
 loadAccount();
@@ -101,9 +108,11 @@ async function fetchHistory(){
   );
 
   chartData = d.map(c=>+c[4]);
+
   price24hOpen = +d[0][1];
-  price24hLow = Math.min(...chartData);
+  price24hLow  = Math.min(...chartData);
   price24hHigh = Math.max(...chartData);
+
   targetPrice = chartData.at(-1);
   displayedPrice = targetPrice;
 
@@ -136,10 +145,10 @@ function initChart(){
       responsive:true,
       maintainAspectRatio:false,
       animation:false,
-      plugins:{legend:{display:false}},
+      plugins:{ legend:{display:false} },
       scales:{
-        x:{display:false},
-        y:{ticks:{color:"#9ca3af"}}
+        x:{ display:false },
+        y:{ ticks:{color:"#9ca3af"} }
       }
     }
   });
@@ -173,14 +182,14 @@ function startWS(){
   ws.onmessage = e=>{
     const p = +JSON.parse(e.data).p;
     targetPrice = p;
-    price24hHigh = Math.max(price24hHigh,p);
-    price24hLow = Math.min(price24hLow,p);
+    price24hHigh = Math.max(price24hHigh, p);
+    price24hLow  = Math.min(price24hLow,  p);
     updateChart(p);
   };
 
   ws.onclose = ()=>{
     setConnectionStatus(false);
-    setTimeout(startWS,3000);
+    setTimeout(startWS, 3000);
   };
 
   ws.onerror = ()=>setConnectionStatus(false);
@@ -189,65 +198,89 @@ function startWS(){
 startWS();
 
 /* =======================
-   ANIMATION LOOP
+   MAIN LOOP (FAST & FLUID)
 ======================= */
 
 setInterval(()=>{
 
   /* -------- PRICE -------- */
+
   const oldPrice = displayedPrice;
-  displayedPrice = smooth(displayedPrice, targetPrice, 0.2);
+  displayedPrice = smartSmooth(displayedPrice, targetPrice);
   colorNumber($("price"), displayedPrice, oldPrice, 4);
 
-  const d = ((displayedPrice-price24hOpen)/price24hOpen)*100;
-  $("price24h").textContent = `${d>0?"▲":"▼"} ${Math.abs(d).toFixed(2)}%`;
-  $("price24h").className = "sub "+(d>0?"up":"down");
+  const sessionPerc =
+    ((displayedPrice - price24hOpen) / price24hOpen) * 100;
 
-  $("priceMin").textContent = price24hLow.toFixed(3);
-  $("priceOpen").textContent = price24hOpen.toFixed(3);
+  $("price24h").textContent =
+    `${sessionPerc>=0?"▲":"▼"} ${Math.abs(sessionPerc).toFixed(2)}%`;
+  $("price24h").className =
+    "sub " + (sessionPerc>=0 ? "up" : "down");
+
+  $("priceMin").textContent  = price24hLow.toFixed(3);
+  $("priceOpen").textContent= price24hOpen.toFixed(3);
   $("priceMax").textContent = price24hHigh.toFixed(3);
 
-  const range = Math.max(price24hHigh-price24hLow,0.0001);
-  $("priceBar").style.width =
-    ((displayedPrice-price24hLow)/range)*100+"%";
+  /* -------- PRICE BAR (OPEN-CENTERED) -------- */
+
+  const maxMove = Math.max(
+    Math.abs(price24hHigh - price24hOpen),
+    Math.abs(price24hOpen - price24hLow),
+    0.0001
+  );
+
+  const offsetPerc =
+    ((displayedPrice - price24hOpen) / maxMove) * 50;
+
+  const linePos = Math.max(0, Math.min(100, 50 + offsetPerc));
+  $("priceLine").style.left = linePos + "%";
+
+  const barWidth = Math.abs(offsetPerc);
+  $("priceBar").style.width = barWidth + "%";
+  $("priceBar").style.left =
+    offsetPerc >= 0
+      ? "50%"
+      : (50 - barWidth) + "%";
+
   $("priceBar").style.background =
-    displayedPrice>=price24hOpen?"#22c55e":"#ef4444";
-  $("priceLine").style.left =
-    ((price24hOpen-price24hLow)/range)*100+"%";
+    offsetPerc >= 0 ? "#22c55e" : "#ef4444";
 
   /* -------- AVAILABLE -------- */
+
   const oldA = displayedAvailable;
-  displayedAvailable = smooth(displayedAvailable, availableInj, 0.1);
+  displayedAvailable = smartSmooth(displayedAvailable, availableInj);
   colorNumber($("available"), displayedAvailable, oldA, 6);
   $("availableUsd").textContent =
-    `≈ $${(displayedAvailable*displayedPrice).toFixed(2)}`;
+    `≈ $${(displayedAvailable * displayedPrice).toFixed(2)}`;
 
   /* -------- STAKE -------- */
+
   const oldS = displayedStake;
-  displayedStake = smooth(displayedStake, stakeInj, 0.1);
+  displayedStake = smartSmooth(displayedStake, stakeInj);
   colorNumber($("stake"), displayedStake, oldS, 4);
   $("stakeUsd").textContent =
-    `≈ $${(displayedStake*displayedPrice).toFixed(2)}`;
+    `≈ $${(displayedStake * displayedPrice).toFixed(2)}`;
 
   /* -------- REWARDS -------- */
+
   const oldR = displayedRewards;
-  displayedRewards = smooth(displayedRewards, rewardsInj, 0.1);
+  displayedRewards = smartSmooth(displayedRewards, rewardsInj);
   colorNumber($("rewards"), displayedRewards, oldR, 7);
   $("rewardsUsd").textContent =
-    `≈ $${(displayedRewards*displayedPrice).toFixed(2)}`;
+    `≈ $${(displayedRewards * displayedPrice).toFixed(2)}`;
 
   const rewardPerc = stakeInj
-    ? Math.min((displayedRewards/stakeInj)*100,100)
+    ? Math.min((displayedRewards / stakeInj) * 100, 100)
     : 0;
 
-  $("rewardBar").style.width = rewardPerc+"%";
-  $("rewardPercent").textContent = rewardPerc.toFixed(1)+"%";
+  $("rewardBar").style.width = rewardPerc + "%";
+  $("rewardPercent").textContent =
+    rewardPerc.toFixed(1) + "%";
 
-  /* -------- APR -------- */
-  $("apr").textContent = apr.toFixed(2)+"%";
+  /* -------- APR + UPDATE -------- */
 
-  /* -------- LAST UPDATE -------- */
+  $("apr").textContent = apr.toFixed(2) + "%";
   $("updated").textContent =
-    "Last update: "+new Date().toLocaleTimeString();
+    "Last update: " + new Date().toLocaleTimeString();
 
-}, 200);
+}, 120);
