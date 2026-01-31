@@ -23,7 +23,6 @@ function colorNumber(el, n, o, decimals = 4){
     }
     const ns = n.toFixed(decimals);
     const os = o.toFixed(decimals);
-
     el.innerHTML = [...ns].map((c,i)=>{
         if(c!==os[i]){
             return `<span style="color:${n>o?"#22c55e":"#ef4444"}">${c}</span>`;
@@ -166,24 +165,30 @@ function animate(){
             if(displayedPrice>lastATL) atlFlash=false;
         }
 
-        // BAR PREZZO CENTRATA
-        const range = Math.max(price24hHigh-price24hOpen, price24hOpen-price24hLow);
-        const barEl = $("priceBar");
-        const lineEl = $("priceLine");
-        let leftPercent;
-        if(displayedPrice>=price24hOpen){
-            leftPercent=50;
-            const widthPerc = ((displayedPrice-price24hOpen)/(price24hHigh-price24hOpen))*50;
-            barEl.style.left = "50%";
-            barEl.style.width = widthPerc+"%";
-            barEl.style.background = "linear-gradient(to right, #22c55e, #10b981)";
-        } else {
-            leftPercent = 50-((price24hOpen-displayedPrice)/(price24hOpen-price24hLow))*50;
-            barEl.style.left = leftPercent+"%";
-            barEl.style.width = (50-leftPercent)+"%";
-            barEl.style.background = "linear-gradient(to left, #ef4444, #f87171)";
+        // ======== BAR PREZZO CENTRATA ========
+        if(price24hHigh !== price24hLow){
+            const barEl = $("priceBar");
+            const lineEl = $("priceLine");
+
+            const rangeHigh = price24hHigh - price24hOpen;
+            const rangeLow = price24hOpen - price24hLow;
+
+            if(displayedPrice >= price24hOpen){
+                const perc = ((displayedPrice - price24hOpen)/rangeHigh)*50;
+                barEl.style.left = "50%";
+                barEl.style.width = perc+"%";
+                barEl.style.background = "linear-gradient(to right, #22c55e, #10b981)";
+            } else {
+                const perc = ((price24hOpen - displayedPrice)/rangeLow)*50;
+                barEl.style.left = (50-perc)+"%";
+                barEl.style.width = perc+"%";
+                barEl.style.background = "linear-gradient(to left, #ef4444, #f87171)";
+            }
+
+            const totalRange = price24hHigh - price24hLow;
+            const linePerc = ((displayedPrice - price24hLow)/totalRange)*100;
+            lineEl.style.left = linePerc+"%";
         }
-        lineEl.style.left = ((displayedPrice-price24hLow)/(price24hHigh-price24hLow))*100+"%";
     }
 
     // -------- AVAILABLE --------
