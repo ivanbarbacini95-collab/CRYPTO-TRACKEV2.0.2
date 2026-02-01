@@ -694,26 +694,33 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* ===== BARS – tutte uguali rosso/verde ===== */
-  const upGradAll = "linear-gradient(90deg,#065f46 0%,#22c55e 45%,#a7f3d0 100%)";
-  const dnGradAll = "linear-gradient(270deg,#7f1d1d 0%,#ef4444 45%,#fecaca 100%)";
+  /* ===== BARS – GRADIENT IDENTICO A "Injective Portfolio" ===== */
 
-  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, upGradAll, dnGradAll);
-  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, upGradAll, dnGradAll);
-  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, upGradAll, dnGradAll);
+/* Injective gradient base (verde → blu) */
+const upGradInj = "linear-gradient(90deg,#16a34a 0%,#22c55e 45%,#3b82f6 100%)";
 
-  /* Values under bars */
-  $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
-  $("priceOpen").textContent = tfReady.d ? safe(candle.d.open).toFixed(3) : "--";
-  $("priceMax").textContent  = tfReady.d ? safe(candle.d.high).toFixed(3) : "--";
+/* Down: stessa palette ma più scura e aggressiva */
+const dnGradInj = "linear-gradient(270deg,#7f1d1d 0%,#dc2626 45%,#1e40af 100%)";
 
-  $("weekMin").textContent   = tfReady.w ? safe(candle.w.low).toFixed(3)  : "--";
-  $("weekOpen").textContent  = tfReady.w ? safe(candle.w.open).toFixed(3) : "--";
-  $("weekMax").textContent   = tfReady.w ? safe(candle.w.high).toFixed(3) : "--";
+/* Tutti i timeframe usano Injective gradient */
+renderBar(
+  $("priceBar"), $("priceLine"),
+  targetPrice, candle.d.open, candle.d.low, candle.d.high,
+  upGradInj, dnGradInj
+);
 
-  $("monthMin").textContent  = tfReady.m ? safe(candle.m.low).toFixed(3)  : "--";
-  $("monthOpen").textContent = tfReady.m ? safe(candle.m.open).toFixed(3) : "--";
-  $("monthMax").textContent  = tfReady.m ? safe(candle.m.high).toFixed(3) : "--";
+renderBar(
+  $("weekBar"), $("weekLine"),
+  targetPrice, candle.w.open, candle.w.low, candle.w.high,
+  upGradInj, dnGradInj
+);
+
+renderBar(
+  $("monthBar"), $("monthLine"),
+  targetPrice, candle.m.open, candle.m.low, candle.m.high,
+  upGradInj, dnGradInj
+);
+
 
   /* ===== ATH/ATL flash (solo quando cambia davvero) ===== */
   if (tfReady.d) {
