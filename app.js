@@ -6,7 +6,6 @@ const ACCOUNT_POLL_MS = 2000;
 const REST_SYNC_MS = 60000;     // safety sync candele 1D/1W/1M
 const CHART_SYNC_MS = 60000;    // safety sync grafico giornata
 
-/* Grafico giornata: 1m, max 1440 punti */
 const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
@@ -55,12 +54,24 @@ const candle = {
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
-/* ================= CHART (giornata) ================= */
+/* ================= CHART ================= */
 let chart = null;
-let chartLabels = [];     // HH:MM
-let chartData = [];       // price
-let lastChartMinuteStart = 0; // openTime dell’ultimo minuto in chart
-let lastChartSign = "neutral"; // "up" | "down" | "neutral"
+let chartLabels = [];
+let chartData = [];
+let lastChartMinuteStart = 0;
+
+let chartBootstrappedToday = false;
+
+/* Hover interaction state */
+let hoverActive = false;
+let hoverIndex = null;      // indice selezionato
+let hoverPrice = null;      // valore al punto
+
+/* Overlay price (top-right) */
+let displayedChartPrice = 0;
+
+/* Color state (performance daily) */
+let lastChartSign = "neutral";
 
 /* ws */
 let wsTrade = null;
@@ -109,13 +120,7 @@ function updatePerf(arrowId, pctId, v) {
   pct.textContent = Math.abs(v).toFixed(2) + "%";
 }
 
-/* ================= BAR RENDER =================
-   - open sempre al centro (50%)
-   - low/high presi dalla candela (realtime)
-   - linea = posizione reale del prezzo
-   - fill tira dal centro (verde/rosso)
-   - SE NON PRONTO: barra neutra (mai -100 o valori falsi)
-*/
+/* ================= BAR RENDER ================= */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   open = safe(open); low = safe(low); high = safe(high); val = safe(val);
 
@@ -145,6 +150,12 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
     bar.style.width = Math.max(0, center - pos) + "%";
     bar.style.background = gradDown;
   }
+}
+
+/* ================= HEAT COLOR (Rewards) ================= */
+function heatColor(p) {
+  const t = clamp(p, 0, 100) / 100;
+  return `rgb(${14 + (239 - 14) * t},${165 - 165 * t},${233 - 233 * t})`;
 }
 
 /* ================= FETCH ================= */
@@ -236,30 +247,29 @@ async function loadCandleSnapshot() {
     root.classList.add("ready");
   }
 }
-loadCandleSnapshot();
 setInterval(loadCandleSnapshot, REST_SYNC_MS);
 
-/* ================= CHART: linea verticale + tooltip leggibile ================= */
+/* ================= CHART: vertical line plugin (solo quando hoverActive) ================= */
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
-  afterDraw(chart) {
-    const tooltip = chart.tooltip;
-    if (!tooltip || !tooltip.getActiveElements || tooltip.getActiveElements().length === 0) return;
+  afterDraw(ch) {
+    if (!hoverActive || hoverIndex == null) return;
 
-    const active = tooltip.getActiveElements()[0];
-    if (!active) return;
+    const meta = ch.getDatasetMeta(0);
+    const el = meta?.data?.[hoverIndex];
+    if (!el) return;
 
-    const ctx = chart.ctx;
-    const x = active.element.x;
-    const topY = chart.chartArea.top;
-    const bottomY = chart.chartArea.bottom;
+    const ctx = ch.ctx;
+    const x = el.x;
+    const topY = ch.chartArea.top;
+    const bottomY = ch.chartArea.bottom;
 
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(x, topY);
     ctx.lineTo(x, bottomY);
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(250, 204, 21, 0.9)"; // giallo elegante
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.9)";
     ctx.stroke();
     ctx.restore();
   }
@@ -283,9 +293,8 @@ function applyChartColorBySign(sign) {
   chart.update("none");
 }
 
-/* ================= CHART: giornata corrente (da open candela 1D) ================= */
+/* ================= CHART: giornata corrente (REST bootstrap) ================= */
 async function fetchKlines1mRange(startTime, endTime) {
-  // Binance max 1000 per call -> chunk
   const out = [];
   let cursor = startTime;
   const end = endTime || Date.now();
@@ -300,36 +309,10 @@ async function fetchKlines1mRange(startTime, endTime) {
     const lastOpenTime = safe(d[d.length - 1][0]);
     cursor = lastOpenTime + ONE_MIN_MS;
 
-    // se Binance ci ridà sempre la stessa ultima candela, stop
     if (!lastOpenTime) break;
     if (d.length < 1000) break;
   }
   return out.slice(0, DAY_MINUTES);
-}
-
-async function loadChartToday() {
-  if (!tfReady.d || !candle.d.t) return;
-
-  const start = candle.d.t;
-  const end = Date.now();
-  const kl = await fetchKlines1mRange(start, end);
-  if (!kl.length) return;
-
-  chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
-  chartData = kl.map(k => safe(k[4]));
-
-  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
-
-  // prezzo fallback
-  const lastClose = safe(kl[kl.length - 1][4]);
-  if (!targetPrice && lastClose) targetPrice = lastClose;
-
-  if (!chart && window.Chart) initChartToday();
-  else if (chart) {
-    chart.data.labels = chartLabels;
-    chart.data.datasets[0].data = chartData;
-    chart.update("none");
-  }
 }
 
 function initChartToday() {
@@ -355,27 +338,9 @@ function initChartToday() {
       animation: false,
       plugins: {
         legend: { display: false },
-        tooltip: {
-          enabled: true,
-          mode: "index",
-          intersect: false,
-          displayColors: false,
-          callbacks: {
-            title(items) {
-              // HH:MM della label
-              return items?.[0]?.label ? `⏱ ${items[0].label}` : "";
-            },
-            label(item) {
-              const v = safe(item.parsed?.y);
-              return `Price: $${v.toFixed(4)}`;
-            }
-          }
-        }
+        tooltip: { enabled: false } // IMPORTANT: niente prezzo vicino alla linea
       },
-      interaction: {
-        mode: "index",
-        intersect: false
-      },
+      interaction: { mode: "index", intersect: false },
       scales: {
         x: { display: false },
         y: { ticks: { color: "#9ca3af" } }
@@ -384,49 +349,92 @@ function initChartToday() {
     plugins: [verticalLinePlugin]
   });
 
+  setupChartInteractions();
   applyChartColorBySign(lastChartSign);
 }
 
-/* Aggiornamento realtime del grafico con kline_1m:
-   - stesso minuto: aggiorna ultimo punto
-   - minuto nuovo: push (e se supera 1440, shift) -> scorre da destra a sinistra
-   - se cambia giorno (openTime < candle.d.t oppure candle.d.t cambiata): ignora finché non resync
-*/
-function updateChartFrom1mKline(k) {
-  if (!chart || !tfReady.d || !candle.d.t) return;
+async function loadChartToday() {
+  if (!tfReady.d || !candle.d.t) return;
 
-  const openTime = safe(k.t);
-  const close = safe(k.c);
-  if (!openTime || !close) return;
+  const kl = await fetchKlines1mRange(candle.d.t, Date.now());
+  if (!kl.length) return;
 
-  // se è un minuto precedente all’inizio della giornata corrente, ignora
-  if (openTime < candle.d.t) return;
+  chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
+  chartData = kl.map(k => safe(k[4]));
 
-  // se è lo stesso minuto, aggiorna l’ultimo punto
-  if (lastChartMinuteStart === openTime) {
-    const idx = chart.data.datasets[0].data.length - 1;
-    if (idx >= 0) {
-      chart.data.datasets[0].data[idx] = close;
-      chart.update("none");
-    }
-    return;
+  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
+
+  const lastClose = safe(kl[kl.length - 1][4]);
+  if (!targetPrice && lastClose) targetPrice = lastClose;
+
+  if (!chart && window.Chart) initChartToday();
+  else if (chart) {
+    chart.data.labels = chartLabels;
+    chart.data.datasets[0].data = chartData;
+    chart.update("none");
   }
 
-  // nuovo minuto
-  lastChartMinuteStart = openTime;
-
-  chart.data.labels.push(fmtHHMM(openTime));
-  chart.data.datasets[0].data.push(close);
-
-  // scorre a sinistra (mantieni max 1440 punti)
-  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
-  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
-
-  chart.update("none");
+  chartBootstrappedToday = true;
 }
 
-// bootstrap + refresh periodico
-loadChartToday();
+/* ================= CHART: interactions (line + top-right price) ================= */
+function setHoverState(active, idx, price) {
+  hoverActive = active;
+  hoverIndex = active ? idx : null;
+  hoverPrice = active ? price : null;
+
+  // ridisegna per far apparire/sparire la linea gialla
+  if (chart) chart.update("none");
+}
+
+function setupChartInteractions() {
+  const canvas = $("priceChart");
+  if (!canvas) return;
+
+  const getIndexFromEvent = (evt) => {
+    if (!chart) return null;
+    const points = chart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
+    if (!points || !points.length) return null;
+    return points[0].index;
+  };
+
+  const handleMove = (evt) => {
+    const idx = getIndexFromEvent(evt);
+    if (idx == null) {
+      setHoverState(false);
+      return;
+    }
+    const v = safe(chart.data.datasets[0].data[idx]);
+    setHoverState(true, idx, v);
+  };
+
+  const handleLeave = () => {
+    setHoverState(false);
+  };
+
+  // Mouse
+  canvas.addEventListener("mousemove", handleMove, { passive: true });
+  canvas.addEventListener("mouseleave", handleLeave, { passive: true });
+
+  // Touch
+  canvas.addEventListener("touchstart", (e) => { handleMove(e); }, { passive: true });
+  canvas.addEventListener("touchmove", (e) => { handleMove(e); }, { passive: true });
+  canvas.addEventListener("touchend", handleLeave, { passive: true });
+  canvas.addEventListener("touchcancel", handleLeave, { passive: true });
+}
+
+/* ================= BOOTSTRAP ensure chart is never empty on reload ================= */
+async function ensureChartBootstrapped() {
+  if (chartBootstrappedToday) return;
+
+  if (!tfReady.d || !candle.d.t) {
+    await loadCandleSnapshot();
+  }
+  if (tfReady.d && candle.d.t) {
+    await loadChartToday();
+  }
+}
+setInterval(ensureChartBootstrapped, 1500);
 setInterval(loadChartToday, CHART_SYNC_MS);
 
 /* ================= WS TRADE (price realtime) ================= */
@@ -472,7 +480,6 @@ function startTradeWS() {
 
     targetPrice = p;
 
-    // aggiorna hi/low “al volo” solo se TF pronta
     if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
     if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
     if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
@@ -508,8 +515,40 @@ function applyKline(intervalKey, k) {
   }
 }
 
-async function resetDayAndReloadChart(newDayOpenTime) {
-  // reset grafico e ricarica dalla nuova giornata
+function updateChartFrom1mKline(k) {
+  if (!chart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
+
+  const openTime = safe(k.t);
+  const close = safe(k.c);
+  if (!openTime || !close) return;
+
+  if (openTime < candle.d.t) return;
+
+  // stesso minuto
+  if (lastChartMinuteStart === openTime) {
+    const idx = chart.data.datasets[0].data.length - 1;
+    if (idx >= 0) {
+      chart.data.datasets[0].data[idx] = close;
+      chart.update("none");
+    }
+    return;
+  }
+
+  // minuto nuovo
+  lastChartMinuteStart = openTime;
+
+  chart.data.labels.push(fmtHHMM(openTime));
+  chart.data.datasets[0].data.push(close);
+
+  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
+  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
+
+  chart.update("none");
+}
+
+async function resetDayAndReloadChart(nextOpenTime) {
+  chartBootstrappedToday = false;
+
   chartLabels = [];
   chartData = [];
   lastChartMinuteStart = 0;
@@ -520,11 +559,13 @@ async function resetDayAndReloadChart(newDayOpenTime) {
     chart.update("none");
   }
 
-  // aggiorna openTime day (se ce l’abbiamo)
-  if (newDayOpenTime) candle.d.t = newDayOpenTime;
+  if (nextOpenTime) candle.d.t = nextOpenTime;
 
-  // ricarica dalla REST (prima che arrivino i minuti WS)
+  await loadCandleSnapshot();
   await loadChartToday();
+
+  // reset hover
+  setHoverState(false);
 }
 
 function startKlineWS() {
@@ -569,27 +610,26 @@ function startKlineWS() {
     const stream = payload.stream || "";
     const k = data.k;
 
-    // GRAFICO: kline 1m realtime
     if (stream.includes("@kline_1m")) {
-      // crea chart se non esiste (ma meglio bootstrap via loadChartToday)
-      if (!chart && window.Chart && tfReady.d) initChartToday();
       updateChartFrom1mKline(k);
       return;
     }
 
-    // BARS: 1D/1W/1M
     if (stream.includes("@kline_1d")) {
       const prevDayOpen = candle.d.t;
       applyKline("d", k);
 
-      // Reset “giornata” quando la candela 1D chiude (k.x = true)
-      // Binance manda subito dopo la nuova candela inizia con openTime diverso.
+      // bootstrap chart appena abbiamo daily
+      if (!chartBootstrappedToday && tfReady.d && candle.d.t) {
+        await loadChartToday();
+      }
+
+      // reset quando candela 1D chiude
       if (k.x === true) {
-        // dopo close, la prossima giornata ha openTime = k.T + 1
         const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
-        await resetDayAndReloadChart(nextOpen || prevDayOpen + 24 * 60 * 60 * 1000);
+        await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
       } else {
-        // se per qualsiasi motivo cambia openTime (nuovo giorno) senza x, resetta
+        // se cambia openTime senza x
         if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
           await resetDayAndReloadChart(candle.d.t);
         }
@@ -607,14 +647,20 @@ function startKlineWS() {
 }
 startKlineWS();
 
+/* ================= BOOT ================= */
+(async function boot() {
+  await loadCandleSnapshot();
+  await loadChartToday();
+})();
+
 /* ================= LOOP ================= */
 function animate() {
-  /* PRICE (smooth visual) */
-  const prevDisp = displayed.price;
+  /* PRICE (card INJ Price) */
+  const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
-  colorNumber($("price"), displayed.price, prevDisp, 4);
+  colorNumber($("price"), displayed.price, op, 4);
 
-  /* PERFORMANCE (solo se TF pronta, altrimenti 0) */
+  /* PERFORMANCE */
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -623,7 +669,7 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* Colore grafico = colore performance giornaliera (candela 1D) */
+  /* Colore grafico = performance daily */
   const sign =
     !tfReady.d ? "neutral" :
     pD > 0 ? "up" :
@@ -634,7 +680,18 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* BARS (se non pronte -> neutre, vedi renderBar) */
+  /* TOP-RIGHT GRAPH PRICE:
+     - se hover attivo: mostra prezzo del punto
+     - altrimenti: torna al prezzo reale live (con animazione)
+  */
+  const chartEl = $("chartPrice");
+  const targetChartVal = hoverActive && Number.isFinite(hoverPrice) ? hoverPrice : displayed.price;
+  const prevChartVal = displayedChartPrice;
+  displayedChartPrice = tick(displayedChartPrice, targetChartVal);
+  // stessa animazione “digits” della card prezzo
+  if (chartEl) colorNumber(chartEl, displayedChartPrice, prevChartVal, 4);
+
+  /* BARS */
   renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high,
     "linear-gradient(to right,#22c55e,#10b981)",
     "linear-gradient(to left,#ef4444,#f87171)");
@@ -647,7 +704,7 @@ function animate() {
     "linear-gradient(to right,#8b5cf6,#c084fc)",
     "linear-gradient(to left,#6b21a8,#c084fc)");
 
-  /* Values under bars (finché non pronti, mostra --) */
+  /* Values under bars */
   $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
   $("priceOpen").textContent = tfReady.d ? safe(candle.d.open).toFixed(3) : "--";
   $("priceMax").textContent  = tfReady.d ? safe(candle.d.high).toFixed(3) : "--";
@@ -664,19 +721,19 @@ function animate() {
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
-  $("availableUsd").textContent = `≈ $${(displayed.available * targetPrice).toFixed(2)}`;
+  $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
 
   /* STAKE */
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-  $("stakeUsd").textContent = `≈ $${(displayed.stake * targetPrice).toFixed(2)}`;
+  $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
 
   /* REWARDS */
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
-  $("rewardsUsd").textContent = `≈ $${(displayed.rewards * targetPrice).toFixed(2)}`;
+  $("rewardsUsd").textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
 
   const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
@@ -684,8 +741,7 @@ function animate() {
   $("rewardBar").style.width = rp + "%";
   $("rewardLine").style.left = rp + "%";
   $("rewardPercent").textContent = rp.toFixed(1) + "%";
-  $("rewardBar").style.setProperty("--heat", rp);
-
+  $("rewardBar").style.background = heatColor(rp);
   $("rewardMin").textContent = "0";
   $("rewardMax").textContent = maxR.toFixed(1);
 
