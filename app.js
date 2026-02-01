@@ -57,7 +57,7 @@ const candle = {
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
-/* Flash tracking ATH/ATL */
+/* Flash tracking ATH/ATL (valori laterali) */
 const lastExtremes = {
   d: { low: null, high: null },
   w: { low: null, high: null },
@@ -99,7 +99,8 @@ let klineRetryTimer = null;
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
-let stakeMoves = []; // +1 up, -1 down, 0 neutral (punti evento)
+let stakeMoves = [];        // +1 up, -1 down, 0 neutral (punti evento)
+let stakeEventTypes = [];   // "Delegate", "Undelegate", "Mixed", "Delegate / Compound", "Initial"
 let lastStakeRecorded = null;
 let stakeBootstrapped = false;
 
@@ -248,7 +249,7 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  // aggiunge punto stake chart sia se sale che se scende (con soglia)
+  // punti evento su stake chart (su o giù)
   maybeAddStakePoint(stakeInj);
 }
 loadAccount();
@@ -681,7 +682,7 @@ function startKlineWS() {
 }
 startKlineWS();
 
-/* ================= STAKE CHART INIT (event points up/down) ================= */
+/* ================= STAKE CHART INIT (punti + tooltip con tipo) ================= */
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas) return;
@@ -727,9 +728,25 @@ function initStakeChart() {
       animation: false,
       plugins: {
         legend: { display: false },
-        tooltip: { enabled: false }
+        tooltip: {
+          enabled: true,
+          displayColors: false,
+          callbacks: {
+            title: (items) => {
+              const i = items?.[0]?.dataIndex ?? 0;
+              return stakeLabels[i] || "";
+            },
+            label: (item) => {
+              const i = item.dataIndex;
+              const v = safe(stakeData[i]);
+              const t = stakeEventTypes[i] || "Stake update";
+              return `${t} • ${v.toFixed(4)} INJ`;
+            }
+          }
+        }
       },
-      interaction: { mode: "index", intersect: false },
+      // tooltip SOLO se punti il pallino
+      interaction: { mode: "nearest", intersect: true },
       scales: {
         x: { display: false },
         y: { ticks: { color: "#9ca3af" } }
@@ -738,7 +755,7 @@ function initStakeChart() {
   });
 }
 
-/* aggiunge un punto quando stake cambia (su o giù) */
+/* aggiunge un punto quando stake cambia (su o giù) + tipo evento */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -749,7 +766,8 @@ function maybeAddStakePoint(currentStake) {
     lastStakeRecorded = s;
     stakeLabels.push(new Date().toLocaleTimeString());
     stakeData.push(s);
-    stakeMoves.push(0); // primo punto neutro
+    stakeMoves.push(0);
+    stakeEventTypes.push("Initial");
   } else {
     const delta = s - lastStakeRecorded;
     if (Math.abs(delta) > TH) {
@@ -757,11 +775,15 @@ function maybeAddStakePoint(currentStake) {
 
       stakeLabels.push(new Date().toLocaleTimeString());
       stakeData.push(s);
-      stakeMoves.push(delta > 0 ? 1 : -1); // ↑ verde / ↓ rosso
+
+      const isUp = delta > 0;
+      stakeMoves.push(isUp ? 1 : -1);
+      stakeEventTypes.push(isUp ? "Delegate / Compound" : "Undelegate");
 
       while (stakeLabels.length > 240) stakeLabels.shift();
       while (stakeData.length > 240) stakeData.shift();
       while (stakeMoves.length > 240) stakeMoves.shift();
+      while (stakeEventTypes.length > 240) stakeEventTypes.shift();
     }
   }
 
@@ -806,6 +828,7 @@ async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
   let offset = 0;
   const out = [];
 
+  // solo message.sender (deleghe sono quasi sempre inviate dal delegatore)
   const ev = encodeURIComponent(`message.sender='${addressInj}'`);
 
   for (let p = 0; p < maxPages; p++) {
@@ -834,9 +857,9 @@ async function bootstrapStakeHistory() {
   stakeLabels = [];
   stakeData = [];
   stakeMoves = [];
+  stakeEventTypes = [];
   lastStakeRecorded = null;
 
-  // tenta recupero storico completo
   const all = await fetchAllTxsBySenderCosmos(address, 60);
 
   if (all && all.length) {
@@ -851,14 +874,16 @@ async function bootstrapStakeHistory() {
 
       let changed = false;
       let net = 0;
+      let hadDelegate = false;
+      let hadUndelegate = false;
 
       for (const m of msgs) {
         if (isDelegateMsg(m)) {
           const a = readMsgAmount(m);
-          if (a > 0) { running += a; net += a; changed = true; }
+          if (a > 0) { running += a; net += a; changed = true; hadDelegate = true; }
         } else if (isUndelegateMsg(m)) {
           const a = readMsgAmount(m);
-          if (a > 0) { running -= a; net -= a; changed = true; }
+          if (a > 0) { running -= a; net -= a; changed = true; hadUndelegate = true; }
         }
       }
 
@@ -869,6 +894,12 @@ async function bootstrapStakeHistory() {
         );
         stakeData.push(Math.max(0, running));
         stakeMoves.push(net > 0 ? 1 : (net < 0 ? -1 : 0));
+
+        let type = "Stake update";
+        if (hadDelegate && hadUndelegate) type = "Mixed";
+        else if (hadDelegate) type = "Delegate";
+        else if (hadUndelegate) type = "Undelegate";
+        stakeEventTypes.push(type);
       }
     }
 
@@ -878,6 +909,7 @@ async function bootstrapStakeHistory() {
       while (stakeLabels.length > 240) stakeLabels.shift();
       while (stakeData.length > 240) stakeData.shift();
       while (stakeMoves.length > 240) stakeMoves.shift();
+      while (stakeEventTypes.length > 240) stakeEventTypes.shift();
 
       if (!stakeChart && window.Chart) initStakeChart();
       else if (stakeChart) {
