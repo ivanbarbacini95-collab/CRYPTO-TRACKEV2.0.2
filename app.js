@@ -3,35 +3,23 @@ const INITIAL_SETTLE_TIME = 2800; // ms
 let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
-const BINANCE_24H_POLL_MS = 5000;   // più frequente: % e OHLC 24h ultra allineati
-const TF_POLL_MS = 60000;           // 7D/30D refresh
-
-/* Rolling windows */
-const WEEK_HOURS = 24 * 7;          // 168
-const MONTH_HOURS = 24 * 30;        // 720
-const WEEK_INTERVAL = "1h";         // 168 candles
-const MONTH_INTERVAL = "2h";        // 360 candles
+const REST_SYNC_MS = 60000; // safety sync (se websocket perde un update)
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
 
-function pctChange(price, open) {
-  const p = safe(price), o = safe(open);
-  if (!o) return 0;
-  const v = ((p - o) / o) * 100;
-  return Number.isFinite(v) ? v : 0;
-}
-
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
 const statusText = $("statusText");
-let wsOnline = false;
+
+let wsTradeOnline = false;
+let wsKlineOnline = false;
 let accountOnline = false;
 
 function refreshConnUI() {
-  const ok = wsOnline && accountOnline;
+  const ok = wsTradeOnline && wsKlineOnline && accountOnline;
   statusText.textContent = ok ? "Online" : "Offline";
   statusDot.style.background = ok ? "#22c55e" : "#ef4444";
 }
@@ -39,26 +27,29 @@ function refreshConnUI() {
 /* ================= STATE ================= */
 let address = localStorage.getItem("inj_address") || "";
 
-/* Live price (WS) */
-let targetPrice = 0;                 // prezzo REALE live WS (Binance trade)
+/* live price */
+let targetPrice = 0; // prezzo reale (trade WS)
 let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 
-/* Account */
+/* Injective account */
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
-/* 24H (Binance OFFICIAL) */
-let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
-let binance24hLast = 0;              // lastPrice del 24hr ticker
-let binance24hPct = 0;               // priceChangePercent del 24hr ticker (ESATTO Binance)
+/* Candle state (current candles) */
+const candle = {
+  d: { open: 0, high: 0, low: 0 }, // 1D
+  w: { open: 0, high: 0, low: 0 }, // 1W
+  m: { open: 0, high: 0, low: 0 }, // 1M
+};
 
-/* 7D / 30D (Binance klines rolling) */
-let priceWeekOpen = 0, priceWeekLow = 0, priceWeekHigh = 0;
-let priceMonthOpen = 0, priceMonthLow = 0, priceMonthHigh = 0;
+/* chart */
+let chart = null;
+let chartData = [];
 
-/* Chart */
-let chart = null, chartData = [];
-let ws = null;
-let wsRetryTimer = null;
+/* ws */
+let wsTrade = null;
+let wsKline = null;
+let tradeRetryTimer = null;
+let klineRetryTimer = null;
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
@@ -83,7 +74,14 @@ function colorNumber(el, n, o, d) {
   }).join("");
 }
 
-/* ================= PERF ARROWS ================= */
+/* ================= PERF ================= */
+function pctChange(price, open) {
+  const p = safe(price), o = safe(open);
+  if (!o) return 0;
+  const v = ((p - o) / o) * 100;
+  return Number.isFinite(v) ? v : 0;
+}
+
 function updatePerf(arrowId, pctId, v) {
   const arrow = $(arrowId), pct = $(pctId);
 
@@ -96,8 +94,9 @@ function updatePerf(arrowId, pctId, v) {
 
 /* ================= BAR RENDER =================
    - open sempre al centro (50%)
-   - linea = posizione reale del prezzo sulla barra
-   - fill tira dal centro in verde/rosso
+   - low/high presi dalla candela (realtime)
+   - linea = posizione reale del prezzo
+   - fill tira dal centro (verde/rosso)
 */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   open = safe(open); low = safe(low); high = safe(high); val = safe(val);
@@ -143,7 +142,7 @@ $("addressInput").oninput = (e) => {
   loadAccount();
 };
 
-/* ================= ACCOUNT ================= */
+/* ================= ACCOUNT (Injective LCD) ================= */
 async function loadAccount() {
   if (!address) {
     accountOnline = false;
@@ -176,79 +175,53 @@ async function loadAccount() {
 loadAccount();
 setInterval(loadAccount, ACCOUNT_POLL_MS);
 
-/* ================= BINANCE 24H OFFICIAL =================
-   Usa esattamente gli stessi numeri che vedi su Binance:
-   openPrice / highPrice / lowPrice / lastPrice / priceChangePercent
+/* ================= BINANCE REST: initial candle snapshot =================
+   Serve solo per bootstrap (prima che arrivino i WS),
+   poi i WS aggiornano in realtime.
 */
-async function loadBinance24h() {
-  const t = await fetchJSON("https://api.binance.com/api/v3/ticker/24hr?symbol=INJUSDT");
-  if (!t) return;
+async function loadCandleSnapshot() {
+  const [d, w, m] = await Promise.all([
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1w&limit=1"),
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1M&limit=1"),
+  ]);
 
-  price24hOpen = safe(t.openPrice);
-  price24hHigh = safe(t.highPrice);
-  price24hLow  = safe(t.lowPrice);
+  if (Array.isArray(d) && d[0]) {
+    candle.d.open = safe(d[0][1]);
+    candle.d.high = safe(d[0][2]);
+    candle.d.low  = safe(d[0][3]);
+  }
+  if (Array.isArray(w) && w[0]) {
+    candle.w.open = safe(w[0][1]);
+    candle.w.high = safe(w[0][2]);
+    candle.w.low  = safe(w[0][3]);
+  }
+  if (Array.isArray(m) && m[0]) {
+    candle.m.open = safe(m[0][1]);
+    candle.m.high = safe(m[0][2]);
+    candle.m.low  = safe(m[0][3]);
+  }
 
-  binance24hLast = safe(t.lastPrice);
-  binance24hPct  = safe(t.priceChangePercent); // ESATTO BINANCE
-
-  // fallback prezzo se WS non è ancora partito
-  if (!targetPrice && binance24hLast) targetPrice = binance24hLast;
-
-  // stop shimmer quando abbiamo almeno dati prezzo
+  // stop shimmer quando abbiamo almeno OHLC
   const root = $("appRoot");
   if (root && root.classList.contains("loading")) {
     root.classList.remove("loading");
     root.classList.add("ready");
   }
 }
-loadBinance24h();
-setInterval(loadBinance24h, BINANCE_24H_POLL_MS);
+loadCandleSnapshot();
+setInterval(loadCandleSnapshot, REST_SYNC_MS);
 
-/* ================= BINANCE TF (7D/30D) ================= */
-async function klines(interval, limit) {
-  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${limit}`;
-  const j = await fetchJSON(url);
-  return Array.isArray(j) ? j : [];
-}
-function calcOHLCFromKlines(d) {
-  return {
-    open: safe(d[0]?.[1]),
-    high: Math.max(...d.map(x => safe(x[2]))),
-    low:  Math.min(...d.map(x => safe(x[3]))),
-    close: safe(d.at(-1)?.[4]),
-  };
-}
-
-async function loadRollingTF() {
-  const w = await klines(WEEK_INTERVAL, WEEK_HOURS);
-  if (w.length) {
-    const o = calcOHLCFromKlines(w);
-    priceWeekOpen = o.open;
-    priceWeekHigh = o.high;
-    priceWeekLow  = o.low;
-  }
-
-  const m = await klines(MONTH_INTERVAL, MONTH_HOURS / 2);
-  if (m.length) {
-    const o = calcOHLCFromKlines(m);
-    priceMonthOpen = o.open;
-    priceMonthHigh = o.high;
-    priceMonthLow  = o.low;
-  }
-}
-loadRollingTF();
-setInterval(loadRollingTF, TF_POLL_MS);
-
-/* ================= CHART (24H visual) ================= */
+/* ================= CHART (24h visual) ================= */
 async function loadChart24h() {
-  const d = await klines("1m", 1440);
-  if (!d.length) return;
+  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
+  if (!Array.isArray(d) || !d.length) return;
 
   chartData = d.map(x => safe(x[4]));
   if (!chart && window.Chart) initChart();
 }
 loadChart24h();
-setInterval(loadChart24h, TF_POLL_MS);
+setInterval(loadChart24h, 60000);
 
 function initChart() {
   const canvas = $("priceChart");
@@ -283,110 +256,172 @@ function updateChart(p) {
   chart.update("none");
 }
 
-/* ================= WS (RECONNECT) ================= */
-function clearWsRetry() {
-  if (wsRetryTimer) {
-    clearTimeout(wsRetryTimer);
-    wsRetryTimer = null;
-  }
+/* ================= WS TRADE (price realtime) ================= */
+function clearTradeRetry() {
+  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
 }
-function scheduleWsRetry() {
-  clearWsRetry();
-  wsRetryTimer = setTimeout(() => startWS(), 1200);
+function scheduleTradeRetry() {
+  clearTradeRetry();
+  tradeRetryTimer = setTimeout(() => startTradeWS(), 1200);
 }
 
-function startWS() {
-  try { if (ws) ws.close(); } catch {}
+function startTradeWS() {
+  try { if (wsTrade) wsTrade.close(); } catch {}
 
-  wsOnline = false;
+  wsTradeOnline = false;
   refreshConnUI();
 
-  ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
 
-  ws.onopen = () => {
-    wsOnline = true;
+  wsTrade.onopen = () => {
+    wsTradeOnline = true;
     refreshConnUI();
-    clearWsRetry();
+    clearTradeRetry();
   };
 
-  ws.onclose = () => {
-    wsOnline = false;
+  wsTrade.onclose = () => {
+    wsTradeOnline = false;
     refreshConnUI();
-    scheduleWsRetry();
+    scheduleTradeRetry();
   };
 
-  ws.onerror = () => {
-    wsOnline = false;
+  wsTrade.onerror = () => {
+    wsTradeOnline = false;
     refreshConnUI();
-    try { ws.close(); } catch {}
-    scheduleWsRetry();
+    try { wsTrade.close(); } catch {}
+    scheduleTradeRetry();
   };
 
-  ws.onmessage = (e) => {
-    const p = safe(JSON.parse(e.data).p);
+  wsTrade.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    const p = safe(msg.p);
     if (!p) return;
 
-    targetPrice = p;      // live tick
+    targetPrice = p;
     updateChart(p);
 
-    // aggiorniamo anche hi/low “live” per week/month (migliora reattività)
-    if (priceWeekHigh)  priceWeekHigh  = Math.max(priceWeekHigh, p);
-    if (priceWeekLow)   priceWeekLow   = Math.min(priceWeekLow, p);
-    if (priceMonthHigh) priceMonthHigh = Math.max(priceMonthHigh, p);
-    if (priceMonthLow)  priceMonthLow  = Math.min(priceMonthLow, p);
+    // aggiorna high/low "al volo" anche dal prezzo, per renderle super realtime
+    // (in ogni caso kline WS le corregge)
+    if (candle.d.open) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
+    if (candle.w.open) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
+    if (candle.m.open) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
   };
 }
-startWS();
+startTradeWS();
+
+/* ================= WS KLINES (1D / 1W / 1M realtime candles) ================= */
+function clearKlineRetry() {
+  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
+}
+function scheduleKlineRetry() {
+  clearKlineRetry();
+  klineRetryTimer = setTimeout(() => startKlineWS(), 1200);
+}
+
+function applyKline(intervalKey, k) {
+  // k = msg.k
+  const o = safe(k.o);
+  const h = safe(k.h);
+  const l = safe(k.l);
+
+  // Intervallo in corso: open resta fisso, high/low cambiano realtime
+  candle[intervalKey].open = o;
+  candle[intervalKey].high = h;
+  candle[intervalKey].low  = l;
+}
+
+function startKlineWS() {
+  try { if (wsKline) wsKline.close(); } catch {}
+
+  wsKlineOnline = false;
+  refreshConnUI();
+
+  // combined stream: 1d, 1w, 1M
+  const url = "wss://stream.binance.com:9443/stream?streams=injusdt@kline_1d/injusdt@kline_1w/injusdt@kline_1M";
+  wsKline = new WebSocket(url);
+
+  wsKline.onopen = () => {
+    wsKlineOnline = true;
+    refreshConnUI();
+    clearKlineRetry();
+  };
+
+  wsKline.onclose = () => {
+    wsKlineOnline = false;
+    refreshConnUI();
+    scheduleKlineRetry();
+  };
+
+  wsKline.onerror = () => {
+    wsKlineOnline = false;
+    refreshConnUI();
+    try { wsKline.close(); } catch {}
+    scheduleKlineRetry();
+  };
+
+  wsKline.onmessage = (e) => {
+    const payload = JSON.parse(e.data);
+    const data = payload.data;
+    if (!data || !data.k) return;
+
+    const stream = payload.stream || "";
+    const k = data.k;
+
+    if (stream.includes("@kline_1d")) applyKline("d", k);
+    else if (stream.includes("@kline_1w")) applyKline("w", k);
+    else if (stream.includes("@kline_1M")) applyKline("m", k);
+
+    // stop shimmer quando arrivano i primi OHLC realtime
+    const root = $("appRoot");
+    if (root && root.classList.contains("loading") && candle.d.open) {
+      root.classList.remove("loading");
+      root.classList.add("ready");
+    }
+  };
+}
+startKlineWS();
 
 /* ================= LOOP ================= */
 function animate() {
-  /* PRICE (visual smooth, WS) */
+  /* PRICE (smooth visual) */
   const prevDisp = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, prevDisp, 4);
 
-  /* ===== PERFORMANCE =====
-     24H: ESATTO Binance (priceChangePercent)
-     7D/30D: da Binance klines rolling con prezzo live WS
-  */
-  const p24 = binance24hPct; // esatto Binance
-  const pW  = pctChange(targetPrice, priceWeekOpen);
-  const pM  = pctChange(targetPrice, priceMonthOpen);
+  /* PERFORMANCE (realtime vs OPEN candela corrente) */
+  const pD = pctChange(targetPrice, candle.d.open);
+  const pW = pctChange(targetPrice, candle.w.open);
+  const pM = pctChange(targetPrice, candle.m.open);
 
-  updatePerf("arrow24h", "pct24h", p24);
+  updatePerf("arrow24h", "pct24h", pD);
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* ===== BARS =====
-     24H: usa lastPrice del 24hr ticker (stessa base di Binance)
-     7D/30D: usa prezzo live WS
-  */
-  const barPrice24 = binance24hLast || targetPrice;
-
-  renderBar($("priceBar"), $("priceLine"), barPrice24, price24hOpen, price24hLow, price24hHigh,
+  /* BARS (realtime candle OHLC) */
+  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high,
     "linear-gradient(to right,#22c55e,#10b981)",
     "linear-gradient(to left,#ef4444,#f87171)");
 
-  renderBar($("weekBar"), $("weekLine"), targetPrice, priceWeekOpen, priceWeekLow, priceWeekHigh,
+  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high,
     "linear-gradient(to right,#f59e0b,#fbbf24)",
     "linear-gradient(to left,#f97316,#f87171)");
 
-  renderBar($("monthBar"), $("monthLine"), targetPrice, priceMonthOpen, priceMonthLow, priceMonthHigh,
+  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high,
     "linear-gradient(to right,#8b5cf6,#c084fc)",
     "linear-gradient(to left,#6b21a8,#c084fc)");
 
   /* Values under bars */
-  $("priceMin").textContent  = safe(price24hLow).toFixed(3);
-  $("priceOpen").textContent = safe(price24hOpen).toFixed(3);
-  $("priceMax").textContent  = safe(price24hHigh).toFixed(3);
+  $("priceMin").textContent  = safe(candle.d.low).toFixed(3);
+  $("priceOpen").textContent = safe(candle.d.open).toFixed(3);
+  $("priceMax").textContent  = safe(candle.d.high).toFixed(3);
 
-  $("weekMin").textContent   = safe(priceWeekLow).toFixed(3);
-  $("weekOpen").textContent  = safe(priceWeekOpen).toFixed(3);
-  $("weekMax").textContent   = safe(priceWeekHigh).toFixed(3);
+  $("weekMin").textContent   = safe(candle.w.low).toFixed(3);
+  $("weekOpen").textContent  = safe(candle.w.open).toFixed(3);
+  $("weekMax").textContent   = safe(candle.w.high).toFixed(3);
 
-  $("monthMin").textContent  = safe(priceMonthLow).toFixed(3);
-  $("monthOpen").textContent = safe(priceMonthOpen).toFixed(3);
-  $("monthMax").textContent  = safe(priceMonthHigh).toFixed(3);
+  $("monthMin").textContent  = safe(candle.m.low).toFixed(3);
+  $("monthOpen").textContent = safe(candle.m.open).toFixed(3);
+  $("monthMax").textContent  = safe(candle.m.high).toFixed(3);
 
   /* AVAILABLE */
   const oa = displayed.available;
