@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="style.css">
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- Zoom/Pan plugin (per grafico price + reward) -->
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
 
   <script src="app.js" defer></script>
@@ -20,7 +19,7 @@
   <div class="header">
     <div class="header-grid">
 
-      <!-- LEFT: MENU (bigger) -->
+      <!-- LEFT: MENU -->
       <div class="header-left">
         <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
       </div>
@@ -38,10 +37,9 @@
           <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
         </div>
       </div>
-
     </div>
 
-    <!-- META: wallet + status (small, under right icons) -->
+    <!-- META: wallet + status -->
     <div class="header-meta-right">
       <div id="addressDisplay" class="address-display"></div>
 
@@ -51,6 +49,38 @@
       </div>
     </div>
   </div>
+
+  <!-- BACKDROP (blur + overlay) -->
+  <div class="backdrop" id="backdrop" aria-hidden="true"></div>
+
+  <!-- DRAWER MENU -->
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-top">
+      <div class="drawer-title">Menu</div>
+
+      <div class="drawer-toggles">
+        <button class="toggle-btn" id="themeToggle" aria-label="Tema">
+          <span id="themeIcon">🌙</span>
+        </button>
+
+        <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
+          <span id="liveIcon">📡</span>
+        </button>
+      </div>
+    </div>
+
+    <nav class="drawer-nav" id="drawerNav">
+      <button class="nav-item" data-page="home">HOME</button>
+      <button class="nav-item" data-page="market">MARKET</button>
+      <button class="nav-item active" data-page="dashboard">MY DASHBOARD</button>
+      <button class="nav-item" data-page="event">EVENT</button>
+      <button class="nav-item" data-page="settings">IMPOSTAZIONI</button>
+    </nav>
+
+    <div class="drawer-foot">
+      <div class="drawer-hint" id="modeHint">Mode: LIVE</div>
+    </div>
+  </aside>
 
   <div class="cards-wrapper">
 
@@ -159,7 +189,7 @@
         <span id="rewardMax" class="right">0.1</span>
       </div>
 
-      <!-- Reward Withdrawals chart -->
+      <!-- Reward withdrawals chart -->
       <div class="reward-chart-wrap">
         <canvas id="rewardChart"></canvas>
       </div>
