@@ -9,15 +9,19 @@ const CHART_SYNC_MS = 60000;
 const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
-/* stake range */
 const STAKE_TARGET_MAX = 1000;
 
-/* staked chart persistence */
+/* persistence */
 const STAKE_SERIES_MAX = 240;
 const STAKE_LOCAL_VER = 1;
-
-/* RESET POLICY: riparti da 0 da ORA (richiesta) */
 const RESET_STAKE_FROM_NOW_ON_BOOT = true;
+
+/* NEW: reward withdrawals persistence */
+const REWARD_WD_SERIES_MAX = 600;     // più alto: più storico
+const REWARD_WD_LOCAL_VER = 1;
+
+/* detection thresholds */
+const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ: evita falsi micro-cambi
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -29,10 +33,12 @@ function fmtHHMM(ms) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 function nowLabel() { return new Date().toLocaleTimeString(); }
+function fmtInj(x, d=4) { return `${safe(x).toFixed(d)} INJ`; }
 
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
 const statusText = $("statusText");
+
 let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
@@ -105,11 +111,9 @@ document.addEventListener("click", (e) => {
   if (searchWrap.contains(t)) return;
   closeSearch();
 });
-
-/* menu placeholder (per ora) */
 if (menuBtn) {
   menuBtn.addEventListener("click", () => {
-    // futuro: apri drawer/menu
+    // futuro menu
   });
 }
 
@@ -127,11 +131,7 @@ const candle = {
 const tfReady = { d: false, w: false, m: false };
 
 /* extremes flash */
-const lastExtremes = {
-  d: { low: null, high: null },
-  w: { low: null, high: null },
-  m: { low: null, high: null },
-};
+const lastExtremes = { d: { low: null, high: null }, w: { low: null, high: null }, m: { low: null, high: null } };
 function flash(el) {
   if (!el) return;
   el.classList.remove("flash-yellow");
@@ -214,7 +214,7 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   }
 }
 
-/* ================= HEAT COLOR (Rewards) ================= */
+/* ================= HEAT COLOR (Rewards bar) ================= */
 function heatColor(p) {
   const t = clamp(p, 0, 100) / 100;
   return `rgb(${14 + (239 - 14) * t},${165 - 165 * t},${233 - 233 * t})`;
@@ -231,15 +231,13 @@ async function fetchJSON(url) {
   }
 }
 
-/* ================= STAKED CHART STORAGE ================= */
+/* ================= STAKED CHART (persist) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
 let stakeMoves = [];
 let stakeTypes = [];
 let lastStakeRecorded = null;
-
-/* baseline logic for reset-from-now */
 let stakeBaselineCaptured = false;
 
 function stakeStoreKey(addr) {
@@ -263,12 +261,9 @@ function trimStakeSeries() {
 function saveStakeSeries() {
   const key = stakeStoreKey(address);
   if (!key) return;
-
   trimStakeSeries();
-  const payload = { v: STAKE_LOCAL_VER, t: Date.now(), labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes };
-
   try {
-    localStorage.setItem(key, JSON.stringify(payload));
+    localStorage.setItem(key, JSON.stringify({ v: STAKE_LOCAL_VER, t: Date.now(), labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes }));
   } catch {}
 }
 function clearStakeSeriesStorage() {
@@ -276,42 +271,6 @@ function clearStakeSeriesStorage() {
   if (!key) return;
   try { localStorage.removeItem(key); } catch {}
 }
-
-function loadStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return false;
-
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
-
-    const labels = Array.isArray(obj.labels) ? obj.labels : [];
-    const data = Array.isArray(obj.data) ? obj.data : [];
-    const moves = Array.isArray(obj.moves) ? obj.moves : [];
-    const types = Array.isArray(obj.types) ? obj.types : [];
-
-    if (!labels.length || !data.length || labels.length !== data.length) return false;
-
-    stakeLabels = labels.slice(-STAKE_SERIES_MAX);
-    stakeData = data.slice(-STAKE_SERIES_MAX);
-    stakeMoves = moves.slice(-STAKE_SERIES_MAX);
-    stakeTypes = types.slice(-STAKE_SERIES_MAX);
-
-    trimStakeSeries();
-    lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
-    stakeBaselineCaptured = true;
-
-    drawStakeChart();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* reset graph from now: start at 0 then capture real baseline at next account fetch */
 function resetStakeSeriesFromNow() {
   stakeLabels = [nowLabel()];
   stakeData = [0];
@@ -319,12 +278,9 @@ function resetStakeSeriesFromNow() {
   stakeTypes = ["Reset start"];
   lastStakeRecorded = null;
   stakeBaselineCaptured = false;
-
   saveStakeSeries();
   drawStakeChart();
 }
-
-/* ================= STAKE CHART INIT ================= */
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas) return;
@@ -339,28 +295,17 @@ function initStakeChart() {
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
         tension: 0.3,
-
-        pointRadius: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
-          return m === 0 ? 0 : 3;
-        },
-        pointHoverRadius: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
-          return m === 0 ? 0 : 5;
-        },
+        pointRadius: (ctx) => (stakeMoves[ctx.dataIndex] || 0) === 0 ? 0 : 3,
+        pointHoverRadius: (ctx) => (stakeMoves[ctx.dataIndex] || 0) === 0 ? 0 : 5,
         pointBackgroundColor: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
+          const m = stakeMoves[ctx.dataIndex] || 0;
           return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
         },
         pointBorderColor: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
+          const m = stakeMoves[ctx.dataIndex] || 0;
           return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
         },
-        pointBorderWidth: 1,
+        pointBorderWidth: 1
       }]
     },
     options: {
@@ -373,10 +318,7 @@ function initStakeChart() {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => {
-              const i = items?.[0]?.dataIndex ?? 0;
-              return stakeLabels[i] || "";
-            },
+            title: (items) => stakeLabels[items?.[0]?.dataIndex ?? 0] || "",
             label: (item) => {
               const i = item.dataIndex;
               const v = safe(stakeData[i]);
@@ -386,15 +328,10 @@ function initStakeChart() {
           }
         }
       },
-      interaction: { mode: "nearest", intersect: true },
-      scales: {
-        x: { display: false },
-        y: { ticks: { color: "#9ca3af" } }
-      }
+      scales: { x: { display: false }, y: { ticks: { color: "#9ca3af" } } }
     }
   });
 }
-
 function drawStakeChart() {
   if (!stakeChart && window.Chart) initStakeChart();
   else if (stakeChart) {
@@ -403,33 +340,25 @@ function drawStakeChart() {
     stakeChart.update("none");
   }
 }
-
-/* baseline + punti reali */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
 
-  // se abbiamo resettato e non abbiamo ancora baseline: aggiungi baseline reale (una volta)
   if (!stakeBaselineCaptured) {
     stakeLabels.push(nowLabel());
     stakeData.push(s);
     stakeMoves.push(1);
     stakeTypes.push("Baseline (current)");
-
     trimStakeSeries();
     lastStakeRecorded = s;
     stakeBaselineCaptured = true;
-
     saveStakeSeries();
     drawStakeChart();
     return;
   }
 
   const TH = 0.0005;
-  if (lastStakeRecorded == null) {
-    lastStakeRecorded = s;
-    return;
-  }
+  if (lastStakeRecorded == null) { lastStakeRecorded = s; return; }
 
   const delta = s - lastStakeRecorded;
   if (Math.abs(delta) <= TH) return;
@@ -446,6 +375,251 @@ function maybeAddStakePoint(currentStake) {
   drawStakeChart();
 }
 
+/* ================= NEW: REWARD WITHDRAWALS CHART + TIMELINE ================= */
+let rewardChart = null;
+let wdLabels = [];     // time strings
+let wdValues = [];     // withdrawn amounts (+)
+let wdTimes = [];      // timestamps ms (for ordering)
+let wdLastRewardsSeen = null;
+
+function wdStoreKey(addr) {
+  const a = (addr || "").trim();
+  return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
+}
+function trimWd() {
+  if (wdLabels.length > REWARD_WD_SERIES_MAX) {
+    wdLabels = wdLabels.slice(-REWARD_WD_SERIES_MAX);
+    wdValues = wdValues.slice(-REWARD_WD_SERIES_MAX);
+    wdTimes  = wdTimes.slice(-REWARD_WD_SERIES_MAX);
+  }
+  const n = wdValues.length;
+  if (wdLabels.length !== n) wdLabels = wdLabels.slice(0, n);
+  if (wdTimes.length !== n) wdTimes = wdTimes.slice(0, n);
+}
+function saveWd() {
+  const key = wdStoreKey(address);
+  if (!key) return;
+  trimWd();
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      v: REWARD_WD_LOCAL_VER,
+      t: Date.now(),
+      labels: wdLabels,
+      values: wdValues,
+      times: wdTimes
+    }));
+  } catch {}
+}
+function loadWd() {
+  const key = wdStoreKey(address);
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== REWARD_WD_LOCAL_VER) return false;
+
+    wdLabels = Array.isArray(obj.labels) ? obj.labels : [];
+    wdValues = Array.isArray(obj.values) ? obj.values : [];
+    wdTimes  = Array.isArray(obj.times)  ? obj.times  : [];
+
+    if (!wdLabels.length || wdLabels.length !== wdValues.length) return false;
+    trimWd();
+    drawRewardWdChart();
+    syncRewardTimelineUI(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function clearWd() {
+  const key = wdStoreKey(address);
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch {}
+  wdLabels = [];
+  wdValues = [];
+  wdTimes = [];
+  wdLastRewardsSeen = null;
+  drawRewardWdChart();
+  syncRewardTimelineUI(true);
+}
+
+/* plugin: label sopra ai punti (+0.0034 INJ) */
+const rewardPointLabelPlugin = {
+  id: "rewardPointLabelPlugin",
+  afterDatasetsDraw(ch) {
+    const ds = ch.data.datasets?.[0];
+    if (!ds) return;
+
+    const meta = ch.getDatasetMeta(0);
+    const dataEls = meta?.data || [];
+    if (!dataEls.length) return;
+
+    const ctx = ch.ctx;
+    const xScale = ch.scales?.x;
+    if (!xScale) return;
+
+    // disegna solo se non è troppo zoom-out (evita confusione)
+    // e limita max etichette visibili
+    let drawn = 0;
+    const maxDraw = 24;
+
+    ctx.save();
+    ctx.font = "700 11px Inter, sans-serif";
+    ctx.fillStyle = "rgba(249,250,251,0.92)";
+    ctx.textAlign = "center";
+
+    for (let i = 0; i < dataEls.length; i++) {
+      const el = dataEls[i];
+      if (!el) continue;
+
+      const x = el.x;
+      const y = el.y;
+
+      if (x < ch.chartArea.left || x > ch.chartArea.right) continue;
+
+      if (drawn >= maxDraw) break;
+
+      const v = safe(ds.data[i]);
+      if (!v) continue;
+
+      // piccolo “bubble text”
+      const text = `+${v.toFixed(4)} INJ`;
+      ctx.fillText(text, x, y - 10);
+      drawn++;
+    }
+
+    ctx.restore();
+  }
+};
+
+function initRewardWdChart() {
+  const canvas = $("rewardChart");
+  if (!canvas) return;
+
+  rewardChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: wdLabels,
+      datasets: [{
+        data: wdValues,
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59,130,246,.14)",
+        fill: true,
+        tension: 0.25,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: "#3b82f6",
+        pointBorderColor: "rgba(249,250,251,.6)",
+        pointBorderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          displayColors: false,
+          callbacks: {
+            title: (items) => wdLabels[items?.[0]?.dataIndex ?? 0] || "",
+            label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
+          }
+        },
+        zoom: {
+          pan: { enabled: true, mode: "x", threshold: 2 },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+        }
+      },
+      scales: {
+        x: { ticks: { color: "rgba(156,163,175,.85)", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 } },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    },
+    plugins: [rewardPointLabelPlugin]
+  });
+}
+
+function drawRewardWdChart() {
+  if (!rewardChart && window.Chart) initRewardWdChart();
+  else if (rewardChart) {
+    rewardChart.data.labels = wdLabels;
+    rewardChart.data.datasets[0].data = wdValues;
+    rewardChart.update("none");
+  }
+}
+
+/* timeline slider (scroll back in time) */
+function syncRewardTimelineUI(forceToEnd=false) {
+  const slider = $("rewardTimeline");
+  const meta = $("rewardTimelineMeta");
+  if (!slider || !meta) return;
+
+  const n = wdValues.length;
+  if (!n) {
+    slider.min = 0; slider.max = 0; slider.value = 0;
+    meta.textContent = "—";
+    return;
+  }
+
+  slider.min = 0;
+  slider.max = String(n - 1);
+
+  if (forceToEnd) slider.value = String(n - 1);
+
+  const idx = clamp(parseInt(slider.value || "0", 10), 0, n - 1);
+  const win = Math.min(60, n);
+  const minIdx = Math.max(0, idx - win + 1);
+  const maxIdx = idx;
+
+  // category scale accepts numeric index as min/max
+  if (rewardChart) {
+    rewardChart.options.scales.x.min = minIdx;
+    rewardChart.options.scales.x.max = maxIdx;
+    rewardChart.update("none");
+  }
+
+  const from = wdLabels[minIdx] || "";
+  const to = wdLabels[maxIdx] || "";
+  meta.textContent = n <= 1 ? `${to}` : `${from} → ${to}`;
+}
+
+function attachRewardTimelineHandlers() {
+  const slider = $("rewardTimeline");
+  if (!slider) return;
+  slider.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
+}
+
+/* detect “withdrawal” from rewards drop */
+function maybeRecordRewardWithdrawal(newRewards) {
+  const r = safe(newRewards);
+
+  if (wdLastRewardsSeen == null) {
+    wdLastRewardsSeen = r;
+    return;
+  }
+
+  const diff = wdLastRewardsSeen - r;
+  // se scende abbastanza -> prelievo/claim
+  if (diff > REWARD_WITHDRAW_THRESHOLD) {
+    const ts = Date.now();
+    wdTimes.push(ts);
+    wdLabels.push(nowLabel());
+    wdValues.push(diff);
+
+    trimWd();
+    saveWd();
+    drawRewardWdChart();
+
+    // auto focus su fine timeline
+    syncRewardTimelineUI(true);
+  }
+
+  wdLastRewardsSeen = r;
+}
+
 /* ================= ADDRESS COMMIT ================= */
 async function commitAddress(newAddr) {
   const a = (newAddr || "").trim();
@@ -458,13 +632,19 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
-  // reset valori display
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
 
-  // RESET richiesto: ripartiamo da 0 da ora per questo wallet
-  clearStakeSeriesStorage();
-  resetStakeSeriesFromNow();
+  // reset staked series from now
+  if (RESET_STAKE_FROM_NOW_ON_BOOT) {
+    clearStakeSeriesStorage();
+    resetStakeSeriesFromNow();
+  }
+
+  // load reward withdrawals history for this wallet
+  wdLastRewardsSeen = null;
+  loadWd();
+  syncRewardTimelineUI(true);
 
   await loadAccount();
 }
@@ -496,10 +676,17 @@ async function loadAccount() {
 
   availableInj = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
   stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
-  rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
+
+  const newRewards = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
+  rewardsInj = newRewards;
+
   apr = safe(i.inflation) * 100;
 
+  // staked points
   maybeAddStakePoint(stakeInj);
+
+  // NEW: reward withdrawals points (detect drop)
+  maybeRecordRewardWithdrawal(rewardsInj);
 }
 setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
 
@@ -810,107 +997,12 @@ function startTradeWS() {
 }
 startTradeWS();
 
-/* ================= WS KLINES ================= */
-function startKlineWS() {
-  wsKlineOnline = false;
-  refreshConnUI();
-
-  const url =
-    "wss://stream.binance.com:9443/stream?streams=" +
-    "injusdt@kline_1m/" +
-    "injusdt@kline_1d/" +
-    "injusdt@kline_1w/" +
-    "injusdt@kline_1M";
-
-  const wsKline = new WebSocket(url);
-
-  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); };
-  wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); setTimeout(startKlineWS, 1200); };
-  wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} };
-
-  wsKline.onmessage = async (e) => {
-    const payload = JSON.parse(e.data);
-    const data = payload.data;
-    if (!data || !data.k) return;
-
-    const stream = payload.stream || "";
-    const k = data.k;
-
-    if (stream.includes("@kline_1m")) {
-      // update chart (solo se già bootstrap)
-      if (chart && chartBootstrappedToday && tfReady.d && candle.d.t) {
-        const openTime = safe(k.t);
-        const close = safe(k.c);
-        if (!openTime || !close) return;
-
-        if (lastChartMinuteStart === openTime) {
-          const idx = chart.data.datasets[0].data.length - 1;
-          if (idx >= 0) {
-            chart.data.datasets[0].data[idx] = close;
-            chart.update("none");
-            updatePinnedOverlay();
-          }
-          return;
-        }
-
-        lastChartMinuteStart = openTime;
-        chart.data.labels.push(fmtHHMM(openTime));
-        chart.data.datasets[0].data.push(close);
-
-        while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
-        while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
-
-        chart.update("none");
-        updatePinnedOverlay();
-      }
-      return;
-    }
-
-    if (stream.includes("@kline_1d")) {
-      const o = safe(k.o), h = safe(k.h), l = safe(k.l), t = safe(k.t);
-      if (o && h && l) {
-        candle.d.t = t || candle.d.t;
-        candle.d.open = o;
-        candle.d.high = h;
-        candle.d.low = l;
-        tfReady.d = true;
-      }
-      if (!chartBootstrappedToday && tfReady.d && candle.d.t) await loadChartToday();
-    }
-    else if (stream.includes("@kline_1w")) {
-      const o = safe(k.o), h = safe(k.h), l = safe(k.l), t = safe(k.t);
-      if (o && h && l) {
-        candle.w.t = t || candle.w.t;
-        candle.w.open = o;
-        candle.w.high = h;
-        candle.w.low = l;
-        tfReady.w = true;
-      }
-    }
-    else if (stream.includes("@kline_1M")) {
-      const o = safe(k.o), h = safe(k.h), l = safe(k.l), t = safe(k.t);
-      if (o && h && l) {
-        candle.m.t = t || candle.m.t;
-        candle.m.open = o;
-        candle.m.high = h;
-        candle.m.low = l;
-        tfReady.m = true;
-      }
-    }
-
-    const root = $("appRoot");
-    if (root && root.classList.contains("loading") && tfReady.d) {
-      root.classList.remove("loading");
-      root.classList.add("ready");
-    }
-  };
-}
-startKlineWS();
-
 /* ================= BOOT ================= */
 (async function boot() {
   await loadCandleSnapshot();
   await loadChartToday();
+
+  attachRewardTimelineHandlers();
 
   if (addressInput) addressInput.value = address || "";
   pendingAddress = address || "";
@@ -920,9 +1012,9 @@ startKlineWS();
     if (RESET_STAKE_FROM_NOW_ON_BOOT) {
       clearStakeSeriesStorage();
       resetStakeSeriesFromNow();
-    } else {
-      loadStakeSeries();
     }
+    loadWd();               // load reward withdrawals
+    syncRewardTimelineUI(true);
     await loadAccount();
   }
 })();
@@ -943,20 +1035,18 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* Chart color by 24h performance */
+  /* chart color by 24h perf */
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   if (sign !== lastChartSign) {
     lastChartSign = sign;
     applyChartColorBySign(sign);
   }
 
-  /* BARS gradients: 1D/1W/1M diverse */
+  /* BARS gradients */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
-
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
   const wDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(59,130,246,.55))";
-
   const mUp   = "linear-gradient(to right, rgba(249,115,22,.92), rgba(236,72,153,.78))";
   const mDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(236,72,153,.55))";
 
@@ -964,7 +1054,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* Values under bars + flash extremes */
+  /* values + flash extremes */
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -974,7 +1064,6 @@ function animate() {
     $("priceMin").textContent  = low.toFixed(3);
     $("priceOpen").textContent = safe(candle.d.open).toFixed(3);
     $("priceMax").textContent  = high.toFixed(3);
-
     if (lastExtremes.d.low !== null && low !== lastExtremes.d.low) flash(pMinEl);
     if (lastExtremes.d.high !== null && high !== lastExtremes.d.high) flash(pMaxEl);
     lastExtremes.d.low = low; lastExtremes.d.high = high;
@@ -989,7 +1078,6 @@ function animate() {
     $("weekMin").textContent   = low.toFixed(3);
     $("weekOpen").textContent  = safe(candle.w.open).toFixed(3);
     $("weekMax").textContent   = high.toFixed(3);
-
     if (lastExtremes.w.low !== null && low !== lastExtremes.w.low) flash(wMinEl);
     if (lastExtremes.w.high !== null && high !== lastExtremes.w.high) flash(wMaxEl);
     lastExtremes.w.low = low; lastExtremes.w.high = high;
@@ -1004,7 +1092,6 @@ function animate() {
     $("monthMin").textContent  = low.toFixed(3);
     $("monthOpen").textContent = safe(candle.m.open).toFixed(3);
     $("monthMax").textContent  = high.toFixed(3);
-
     if (lastExtremes.m.low !== null && low !== lastExtremes.m.low) flash(mMinEl);
     if (lastExtremes.m.high !== null && high !== lastExtremes.m.high) flash(mMaxEl);
     lastExtremes.m.low = low; lastExtremes.m.high = high;
@@ -1033,7 +1120,7 @@ function animate() {
   $("stakeMin").textContent = "0";
   $("stakeMax").textContent = String(STAKE_TARGET_MAX);
 
-  /* REWARDS */
+  /* REWARDS (pending) */
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
