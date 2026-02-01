@@ -6,7 +6,11 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
+
+  <!-- Chart.js + Zoom/Pan -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -143,7 +147,7 @@
     <div class="card chart-card">
       <div class="label">1D Price Chart</div>
 
-      <div class="chart-overlay">
+      <div class="chart-overlay" id="chartOverlay">
         <span id="chartPrice">--</span>
       </div>
 
