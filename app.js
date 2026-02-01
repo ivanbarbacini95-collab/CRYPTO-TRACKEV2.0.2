@@ -41,6 +41,9 @@ const candle = {
   m: { open: 0, high: 0, low: 0 }, // 1M
 };
 
+/* Ready flags (evita barre “-100” all’avvio) */
+const tfReady = { d: false, w: false, m: false };
+
 /* chart */
 let chart = null;
 let chartData = [];
@@ -97,10 +100,19 @@ function updatePerf(arrowId, pctId, v) {
    - low/high presi dalla candela (realtime)
    - linea = posizione reale del prezzo
    - fill tira dal centro (verde/rosso)
+   - SE NON PRONTO: barra neutra (mai -100 o valori falsi)
 */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   open = safe(open); low = safe(low); high = safe(high); val = safe(val);
-  if (!open || !low || !high || high === low) return;
+
+  // Candle non pronta => stato neutro elegante
+  if (!open || !low || !high || high === low) {
+    line.style.left = "50%";
+    bar.style.left = "50%";
+    bar.style.width = "0%";
+    bar.style.background = "rgba(255,255,255,0.08)";
+    return;
+  }
 
   const range = Math.max(Math.abs(high - open), Math.abs(open - low));
   const min = open - range;
@@ -176,8 +188,7 @@ loadAccount();
 setInterval(loadAccount, ACCOUNT_POLL_MS);
 
 /* ================= BINANCE REST: initial candle snapshot =================
-   Serve solo per bootstrap (prima che arrivino i WS),
-   poi i WS aggiornano in realtime.
+   Bootstrap (prima dei WS), poi i WS aggiornano realtime.
 */
 async function loadCandleSnapshot() {
   const [d, w, m] = await Promise.all([
@@ -190,21 +201,24 @@ async function loadCandleSnapshot() {
     candle.d.open = safe(d[0][1]);
     candle.d.high = safe(d[0][2]);
     candle.d.low  = safe(d[0][3]);
+    if (candle.d.open && candle.d.high && candle.d.low) tfReady.d = true;
   }
   if (Array.isArray(w) && w[0]) {
     candle.w.open = safe(w[0][1]);
     candle.w.high = safe(w[0][2]);
     candle.w.low  = safe(w[0][3]);
+    if (candle.w.open && candle.w.high && candle.w.low) tfReady.w = true;
   }
   if (Array.isArray(m) && m[0]) {
     candle.m.open = safe(m[0][1]);
     candle.m.high = safe(m[0][2]);
     candle.m.low  = safe(m[0][3]);
+    if (candle.m.open && candle.m.high && candle.m.low) tfReady.m = true;
   }
 
-  // stop shimmer quando abbiamo almeno OHLC
+  // stop shimmer quando abbiamo almeno daily valido
   const root = $("appRoot");
-  if (root && root.classList.contains("loading")) {
+  if (root && root.classList.contains("loading") && tfReady.d) {
     root.classList.remove("loading");
     root.classList.add("ready");
   }
@@ -300,11 +314,10 @@ function startTradeWS() {
     targetPrice = p;
     updateChart(p);
 
-    // aggiorna high/low "al volo" anche dal prezzo, per renderle super realtime
-    // (in ogni caso kline WS le corregge)
-    if (candle.d.open) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
-    if (candle.w.open) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
-    if (candle.m.open) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
+    // aggiorna hi/low “al volo” solo se TF pronta (evita valori sballati all’avvio)
+    if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
+    if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
+    if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
   };
 }
 startTradeWS();
@@ -319,15 +332,22 @@ function scheduleKlineRetry() {
 }
 
 function applyKline(intervalKey, k) {
-  // k = msg.k
   const o = safe(k.o);
   const h = safe(k.h);
   const l = safe(k.l);
 
-  // Intervallo in corso: open resta fisso, high/low cambiano realtime
-  candle[intervalKey].open = o;
-  candle[intervalKey].high = h;
-  candle[intervalKey].low  = l;
+  // valida candela in corso
+  if (o && h && l) {
+    candle[intervalKey].open = o;
+    candle[intervalKey].high = h;
+    candle[intervalKey].low  = l;
+
+    // al primo dato valido, abilita TF e fai “settle” elegante
+    if (!tfReady[intervalKey]) {
+      tfReady[intervalKey] = true;
+      settleStart = Date.now();
+    }
+  }
 }
 
 function startKlineWS() {
@@ -336,7 +356,6 @@ function startKlineWS() {
   wsKlineOnline = false;
   refreshConnUI();
 
-  // combined stream: 1d, 1w, 1M
   const url = "wss://stream.binance.com:9443/stream?streams=injusdt@kline_1d/injusdt@kline_1w/injusdt@kline_1M";
   wsKline = new WebSocket(url);
 
@@ -371,9 +390,9 @@ function startKlineWS() {
     else if (stream.includes("@kline_1w")) applyKline("w", k);
     else if (stream.includes("@kline_1M")) applyKline("m", k);
 
-    // stop shimmer quando arrivano i primi OHLC realtime
+    // stop shimmer quando daily è pronta
     const root = $("appRoot");
-    if (root && root.classList.contains("loading") && candle.d.open) {
+    if (root && root.classList.contains("loading") && tfReady.d) {
       root.classList.remove("loading");
       root.classList.add("ready");
     }
@@ -388,16 +407,16 @@ function animate() {
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, prevDisp, 4);
 
-  /* PERFORMANCE (realtime vs OPEN candela corrente) */
-  const pD = pctChange(targetPrice, candle.d.open);
-  const pW = pctChange(targetPrice, candle.w.open);
-  const pM = pctChange(targetPrice, candle.m.open);
+  /* PERFORMANCE (solo se TF pronta, altrimenti 0) */
+  const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
+  const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
+  const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
 
   updatePerf("arrow24h", "pct24h", pD);
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* BARS (realtime candle OHLC) */
+  /* BARS (se non pronte -> neutre, vedi renderBar) */
   renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high,
     "linear-gradient(to right,#22c55e,#10b981)",
     "linear-gradient(to left,#ef4444,#f87171)");
@@ -410,18 +429,18 @@ function animate() {
     "linear-gradient(to right,#8b5cf6,#c084fc)",
     "linear-gradient(to left,#6b21a8,#c084fc)");
 
-  /* Values under bars */
-  $("priceMin").textContent  = safe(candle.d.low).toFixed(3);
-  $("priceOpen").textContent = safe(candle.d.open).toFixed(3);
-  $("priceMax").textContent  = safe(candle.d.high).toFixed(3);
+  /* Values under bars (finché non pronti, mostra --) */
+  $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
+  $("priceOpen").textContent = tfReady.d ? safe(candle.d.open).toFixed(3) : "--";
+  $("priceMax").textContent  = tfReady.d ? safe(candle.d.high).toFixed(3) : "--";
 
-  $("weekMin").textContent   = safe(candle.w.low).toFixed(3);
-  $("weekOpen").textContent  = safe(candle.w.open).toFixed(3);
-  $("weekMax").textContent   = safe(candle.w.high).toFixed(3);
+  $("weekMin").textContent   = tfReady.w ? safe(candle.w.low).toFixed(3)  : "--";
+  $("weekOpen").textContent  = tfReady.w ? safe(candle.w.open).toFixed(3) : "--";
+  $("weekMax").textContent   = tfReady.w ? safe(candle.w.high).toFixed(3) : "--";
 
-  $("monthMin").textContent  = safe(candle.m.low).toFixed(3);
-  $("monthOpen").textContent = safe(candle.m.open).toFixed(3);
-  $("monthMax").textContent  = safe(candle.m.high).toFixed(3);
+  $("monthMin").textContent  = tfReady.m ? safe(candle.m.low).toFixed(3)  : "--";
+  $("monthOpen").textContent = tfReady.m ? safe(candle.m.open).toFixed(3) : "--";
+  $("monthMax").textContent  = tfReady.m ? safe(candle.m.high).toFixed(3) : "--";
 
   /* AVAILABLE */
   const oa = displayed.available;
