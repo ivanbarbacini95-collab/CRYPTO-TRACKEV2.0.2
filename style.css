@@ -14,19 +14,45 @@ body {
   gap: 1rem;
 }
 
-/* ===== HEADER ===== */
-.header { display: flex; flex-direction: column; gap: .6rem; }
-
-.header-top {
+/* ================= HEADER (LATEST) ================= */
+.header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: .8rem;
+  flex-direction: column;
+  gap: .45rem;
 }
 
-.title-wrap { display: flex; flex-direction: column; gap: .15rem; }
+.header-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: .6rem;
+}
 
-.header h1 {
+/* LEFT */
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.menu-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 24px;
+  font-weight: 700;
+  border-radius: 14px;
+  border: none;
+  background: transparent;
+  color: rgba(249,250,251,.95);
+  cursor: pointer;
+  outline: none;
+}
+
+.menu-btn:active { transform: translateY(1px); }
+
+/* CENTER */
+.header-center { text-align: center; }
+
+.header-center h1 {
   margin: 0;
   font-size: 1.9rem;
   font-weight: 800;
@@ -41,17 +67,17 @@ body {
   color: #9ca3af;
 }
 
-.header-actions {
+/* RIGHT */
+.header-right {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: .35rem;
+  justify-content: flex-end;
 }
 
-.header-actions > .icon-row {
+/* search */
+.search-wrap {
   display: flex;
   align-items: center;
-  gap: .55rem;
+  gap: .35rem;
 }
 
 .icon-btn {
@@ -70,13 +96,6 @@ body {
 
 .icon-btn:active { transform: translateY(1px); }
 
-/* SEARCH minimal: input si espande verso sinistra */
-.search-wrap {
-  display: flex;
-  align-items: center;
-  gap: .35rem;
-}
-
 .search-wrap input {
   width: 0px;
   opacity: 0;
@@ -92,7 +111,7 @@ body {
 }
 
 .search-wrap.open input {
-  width: 320px;
+  width: 300px;
   opacity: 1;
   pointer-events: auto;
   padding: 0 .9rem;
@@ -100,30 +119,29 @@ body {
 }
 
 @media (max-width: 520px) {
-  .search-wrap.open input { width: 210px; }
+  .search-wrap.open input { width: 200px; }
 }
 
-/* META sotto le icone: wallet + status piccolo e pro */
-.header-meta {
+/* META under right */
+.header-meta-right {
   display: flex;
-  align-items: center;
   justify-content: flex-end;
+  align-items: center;
   gap: .55rem;
-  margin-top: .1rem;
 }
 
 .address-display .tag {
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   color: rgba(249,250,251,.82);
   background: rgba(255,255,255,0.06);
   border-radius: 999px;
-  padding: .25rem .55rem;
+  padding: .22rem .55rem;
   display: inline-flex;
   align-items: center;
   gap: .35rem;
 }
 
-/* status più piccolo */
+/* status smaller */
 .connection-status {
   display: inline-flex;
   align-items: center;
@@ -140,7 +158,7 @@ body {
 }
 
 .status-text {
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   color: rgba(249,250,251,.78);
 }
 
@@ -150,7 +168,7 @@ body {
   100% { transform: scale(1); opacity: 0.75; }
 }
 
-/* ===== CARDS ===== */
+/* ================= CARDS ================= */
 .cards-wrapper {
   display: flex;
   flex-direction: column;
@@ -195,7 +213,7 @@ body {
 .pct.down { color: #ef4444; }
 .pct.flat { color: #9ca3af; }
 
-/* ===== BARS ===== */
+/* ================= BARS ================= */
 .bar-container {
   position: relative;
   height: 24px;
@@ -213,6 +231,7 @@ body {
   transition: width 0.25s ease, left 0.25s ease, background 0.22s ease;
 }
 
+/* open marker (center) */
 .open-marker {
   position: absolute;
   left: 50%;
@@ -233,6 +252,7 @@ body {
   transition: left 0.25s ease;
 }
 
+/* timeframe label */
 .bar-label {
   position: absolute;
   left: 50%;
@@ -293,12 +313,27 @@ body {
 
 .stake-card .bar-label { display: none; }
 
-.stake-chart-wrap { height: 150px; margin-top: 0.7rem; position: relative; }
+.stake-chart-wrap {
+  height: 150px;
+  margin-top: 0.7rem;
+  position: relative;
+}
 
-#stakeChart, #priceChart { width: 100% !important; height: 100% !important; }
+#stakeChart {
+  width: 100% !important;
+  height: 100% !important;
+}
 
-/* chart */
-.chart-card { height: 300px; position: relative; }
+/* ================= CHART ================= */
+.chart-card {
+  height: 300px;
+  position: relative;
+}
+
+#priceChart {
+  width: 100% !important;
+  height: 100% !important;
+}
 
 .chart-overlay {
   position: absolute;
@@ -315,7 +350,10 @@ body {
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.chart-overlay.show { opacity: .98; transform: translateY(0); }
+.chart-overlay.show {
+  opacity: .98;
+  transform: translateY(0);
+}
 
 .last-update {
   font-size: 0.8rem;
@@ -323,12 +361,17 @@ body {
   color: #9ca3af;
 }
 
-/* ===== Loading shimmer ===== */
+/* ================= LOADING ================= */
 .container.loading .value-row span,
 .container.loading .sub-row,
-.container.loading .bar-values { opacity: 0; }
+.container.loading .bar-values {
+  opacity: 0;
+}
 
-.container.loading .card { position: relative; overflow: hidden; }
+.container.loading .card {
+  position: relative;
+  overflow: hidden;
+}
 
 .container.loading .card::after {
   content: "";
@@ -357,7 +400,7 @@ body {
   transition: opacity 450ms ease;
 }
 
-/* flash yellow extremes */
+/* flash extremes */
 .flash-yellow { animation: flashY 650ms ease; }
 
 @keyframes flashY {
