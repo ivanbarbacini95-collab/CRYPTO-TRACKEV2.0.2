@@ -26,6 +26,9 @@ function fmtHHMM(ms) {
   const d = new Date(ms);
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+function nowLabel() {
+  return new Date().toLocaleTimeString();
+}
 
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
@@ -56,6 +59,7 @@ function setAddressDisplay(addr) {
   const short = addr.length > 18 ? (addr.slice(0, 10) + "…" + addr.slice(-6)) : addr;
   addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${short}</span>`;
 }
+setAddressDisplay(address);
 
 function openSearch() {
   if (!searchWrap) return;
@@ -81,6 +85,7 @@ const candle = {
 };
 const tfReady = { d: false, w: false, m: false };
 
+/* Flash giallo su estremi */
 const lastExtremes = {
   d: { low: null, high: null },
   w: { low: null, high: null },
@@ -118,8 +123,8 @@ let klineRetryTimer = null;
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
-let stakeMoves = [];
-let stakeEventTypes = [];
+let stakeMoves = [];      // 1 up, -1 down, 0 none
+let stakeEventTypes = []; // "Delegate / Compound", "Undelegate", ...
 let lastStakeRecorded = null;
 
 /* ================= STAKE PERSISTENCE ================= */
@@ -127,7 +132,6 @@ function stakeStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
 }
-
 function trimStakeSeries() {
   if (stakeLabels.length > STAKE_SERIES_MAX) stakeLabels = stakeLabels.slice(-STAKE_SERIES_MAX);
   if (stakeData.length > STAKE_SERIES_MAX) stakeData = stakeData.slice(-STAKE_SERIES_MAX);
@@ -138,10 +142,10 @@ function trimStakeSeries() {
   if (stakeLabels.length > n) stakeLabels = stakeLabels.slice(0, n);
   if (stakeMoves.length > n) stakeMoves = stakeMoves.slice(0, n);
   if (stakeEventTypes.length > n) stakeEventTypes = stakeEventTypes.slice(0, n);
+
   while (stakeMoves.length < n) stakeMoves.push(0);
   while (stakeEventTypes.length < n) stakeEventTypes.push("Stake update");
 }
-
 function saveStakeSeries() {
   const key = stakeStoreKey(address);
   if (!key) return;
@@ -160,11 +164,13 @@ function saveStakeSeries() {
   try {
     localStorage.setItem(key, JSON.stringify(payload));
   } catch {
+    // se localStorage pieno: dimezza serie e riprova
     try {
-      stakeLabels = stakeLabels.slice(-Math.floor(STAKE_SERIES_MAX / 2));
-      stakeData = stakeData.slice(-Math.floor(STAKE_SERIES_MAX / 2));
-      stakeMoves = stakeMoves.slice(-Math.floor(STAKE_SERIES_MAX / 2));
-      stakeEventTypes = stakeEventTypes.slice(-Math.floor(STAKE_SERIES_MAX / 2));
+      const half = Math.floor(STAKE_SERIES_MAX / 2);
+      stakeLabels = stakeLabels.slice(-half);
+      stakeData = stakeData.slice(-half);
+      stakeMoves = stakeMoves.slice(-half);
+      stakeEventTypes = stakeEventTypes.slice(-half);
       localStorage.setItem(key, JSON.stringify({
         v: STAKE_LOCAL_VER,
         t: Date.now(),
@@ -176,7 +182,6 @@ function saveStakeSeries() {
     } catch {}
   }
 }
-
 function loadStakeSeries() {
   const key = stakeStoreKey(address);
   if (!key) return false;
@@ -220,19 +225,32 @@ function commitAddress(newAddr) {
   localStorage.setItem("inj_address", address);
 
   setAddressDisplay(address);
-
   settleStart = Date.now();
 
-  // carica subito punti salvati per quel wallet (se esistono)
+  // reset stato account (verrà ricaricato)
+  availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
+  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
+
+  // carica serie salvata (se c'è). Se non c'è, verrà creata nel boot/seed.
   loadStakeSeries();
 
-  // refresh dati
-  loadAccount();
-  bootstrapStakeHistory();
+  // fetch account + ricostruzione (real)
+  loadAccount().then(async () => {
+    const hasSaved = !!stakeData.length;
+    if (!hasSaved) {
+      // prima tenta ricostruzione completa da tx reali
+      const okFull = await bootstrapStakeHistoryFullFromTxs();
+      if (!okFull) {
+        // se fallisce, seed da oggi (ultimi 2 up reali)
+        const okSeed = await seedStakeSeriesFromTodayLast2Ups();
+        if (!okSeed) seedFallback0ToCurrent();
+      }
+    }
+  });
 }
 
+/* hook UI search */
 if (addressInput) addressInput.value = pendingAddress;
-setAddressDisplay(address);
 
 if (searchBtn) {
   searchBtn.addEventListener("click", () => {
@@ -240,14 +258,9 @@ if (searchBtn) {
     else addressInput?.focus();
   });
 }
-
 if (addressInput) {
   addressInput.addEventListener("focus", openSearch);
-
-  addressInput.addEventListener("input", (e) => {
-    pendingAddress = e.target.value.trim();
-  });
-
+  addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); });
   addressInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -261,7 +274,6 @@ if (addressInput) {
     }
   });
 }
-
 document.addEventListener("click", (e) => {
   const t = e.target;
   if (!searchWrap) return;
@@ -299,7 +311,6 @@ function pctChange(price, open) {
   const v = ((p - o) / o) * 100;
   return Number.isFinite(v) ? v : 0;
 }
-
 function updatePerf(arrowId, pctId, v) {
   const arrow = $(arrowId), pct = $(pctId);
   if (!arrow || !pct) return;
@@ -392,9 +403,9 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
+  // punto live quando cambia davvero (valore reale)
   maybeAddStakePoint(stakeInj);
 }
-
 setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
 
 /* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
@@ -473,7 +484,6 @@ function applyChartColorBySign(sign) {
     ds.borderColor = "#ef4444";
     ds.backgroundColor = "rgba(239,68,68,.18)";
   } else {
-    // se flat: leggero blu (non grigio)
     ds.borderColor = "#3b82f6";
     ds.backgroundColor = "rgba(59,130,246,.14)";
   }
@@ -509,20 +519,21 @@ function updatePinnedOverlay() {
 
   if (pinnedIndex == null) {
     overlay.classList.remove("show");
+    chartEl.textContent = "--";
     return;
   }
 
   const ds = chart.data.datasets?.[0]?.data || [];
   const lbs = chart.data.labels || [];
-  if (!ds.length || !lbs.length) { overlay.classList.remove("show"); return; }
+  if (!ds.length || !lbs.length) { overlay.classList.remove("show"); chartEl.textContent = "--"; return; }
 
   let idx = Number.isFinite(+pinnedIndex) ? +pinnedIndex : null;
-  if (idx == null) { overlay.classList.remove("show"); return; }
+  if (idx == null) { overlay.classList.remove("show"); chartEl.textContent = "--"; return; }
   idx = clamp(Math.round(idx), 0, ds.length - 1);
 
   const price = safe(ds[idx]);
   const label = lbs[idx];
-  if (!Number.isFinite(price) || !label) { overlay.classList.remove("show"); return; }
+  if (!Number.isFinite(price) || !label) { overlay.classList.remove("show"); chartEl.textContent = "--"; return; }
 
   chartEl.textContent = `${label} • $${price.toFixed(4)}`;
   overlay.classList.add("show");
@@ -853,7 +864,6 @@ function startKlineWS() {
         await loadChartToday();
       }
 
-      // chiusura candle -> nuovo giorno
       if (k.x === true) {
         const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
         await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
@@ -875,7 +885,7 @@ function startKlineWS() {
 }
 startKlineWS();
 
-/* ================= STAKE CHART INIT ================= */
+/* ================= STAKE CHART DRAW ================= */
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas) return;
@@ -932,7 +942,7 @@ function initStakeChart() {
               const i = item.dataIndex;
               const v = safe(stakeData[i]);
               const t = stakeEventTypes[i] || "Stake update";
-              return `${t} • ${v.toFixed(4)} INJ`;
+              return `${t} • ${v.toFixed(6)} INJ`;
             }
           }
         }
@@ -955,20 +965,16 @@ function drawStakeChart() {
   }
 }
 
+/* punto live SOLO se il valore reale cambia */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
 
-  const TH = 0.0005;
+  const TH = 0.0005; // soglia per evitare rumore
 
   if (lastStakeRecorded == null) {
     lastStakeRecorded = s;
-    stakeLabels.push(new Date().toLocaleTimeString());
-    stakeData.push(s);
-    stakeMoves.push(0);
-    stakeEventTypes.push("Initial");
-    saveStakeSeries();
-    drawStakeChart();
+    // non aggiungo subito (evito duplicare seed/serie)
     return;
   }
 
@@ -977,18 +983,17 @@ function maybeAddStakePoint(currentStake) {
 
   lastStakeRecorded = s;
 
-  stakeLabels.push(new Date().toLocaleTimeString());
+  stakeLabels.push(nowLabel());
   stakeData.push(s);
+  stakeMoves.push(delta > 0 ? 1 : -1);
+  stakeEventTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
 
-  const isUp = delta > 0;
-  stakeMoves.push(isUp ? 1 : -1);
-  stakeEventTypes.push(isUp ? "Delegate / Compound" : "Undelegate");
-
+  trimStakeSeries();
   saveStakeSeries();
   drawStakeChart();
 }
 
-/* ================= STAKE FULL HISTORY (best-effort) ================= */
+/* ================= STAKE TX PARSING (REAL) ================= */
 function isDelegateMsg(m) {
   const t = (m?.["@type"] || m?.type || "").toLowerCase();
   return t.includes("msgdelegate");
@@ -1012,21 +1017,45 @@ function readMsgAmount(m) {
   return amt / 1e18;
 }
 
-async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
+function netStakeDeltaFromMsgs(msgs) {
+  let net = 0;
+  let hadDelegate = false;
+  let hadUndelegate = false;
+
+  for (const m of msgs) {
+    if (isDelegateMsg(m)) {
+      const a = readMsgAmount(m);
+      if (a > 0) { net += a; hadDelegate = true; }
+    } else if (isUndelegateMsg(m)) {
+      const a = readMsgAmount(m);
+      if (a > 0) { net -= a; hadUndelegate = true; }
+    }
+  }
+
+  let type = "Stake update";
+  if (hadDelegate && hadUndelegate) type = "Mixed";
+  else if (hadDelegate) type = "Delegate / Compound";
+  else if (hadUndelegate) type = "Undelegate";
+
+  return { net, type };
+}
+
+async function fetchAllTxsBySenderCosmosAsc(addressInj, maxPages = 80) {
   const base = "https://lcd.injective.network";
   const limit = 100;
   let offset = 0;
   const out = [];
-
   const ev = encodeURIComponent(`message.sender='${addressInj}'`);
 
   for (let p = 0; p < maxPages; p++) {
     const url = `${base}/cosmos/tx/v1beta1/txs?events=${ev}&pagination.offset=${offset}&pagination.limit=${limit}&order_by=ORDER_BY_ASC`;
     const data = await fetchJSON(url);
+
     const txs = data?.txs || [];
     const resps = data?.tx_responses || [];
 
     if (!Array.isArray(txs) || !Array.isArray(resps) || !txs.length) break;
+
     for (let i = 0; i < txs.length; i++) out.push({ tx: txs[i], resp: resps[i] });
 
     if (txs.length < limit) break;
@@ -1035,14 +1064,48 @@ async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
   return out;
 }
 
-async function bootstrapStakeHistory() {
-  if (!address) return;
+async function fetchRecentTxsBySenderCosmosDesc(addressInj, maxPages = 10) {
+  const base = "https://lcd.injective.network";
+  const limit = 100;
+  let offset = 0;
+  const out = [];
+  const ev = encodeURIComponent(`message.sender='${addressInj}'`);
 
-  const all = await fetchAllTxsBySenderCosmos(address, 60);
-  if (!all || !all.length) return;
+  for (let p = 0; p < maxPages; p++) {
+    const url = `${base}/cosmos/tx/v1beta1/txs?events=${ev}&pagination.offset=${offset}&pagination.limit=${limit}&order_by=ORDER_BY_DESC`;
+    const data = await fetchJSON(url);
+
+    const txs = data?.txs || [];
+    const resps = data?.tx_responses || [];
+
+    if (!Array.isArray(txs) || !Array.isArray(resps) || !txs.length) break;
+
+    for (let i = 0; i < txs.length; i++) out.push({ tx: txs[i], resp: resps[i] });
+
+    if (txs.length < limit) break;
+    offset += limit;
+  }
+  return out;
+}
+
+function startOfTodayMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/* ================= FULL RECONSTRUCTION (REAL TXS) =================
+   Ricostruisce "running stake" cumulando delegate/undelegate reali.
+   Nota: è best-effort (redelegate/slash/commissioni non sono sempre deducibili).
+   Però i punti sono basati su tx reali dell'indirizzo.
+*/
+async function bootstrapStakeHistoryFullFromTxs() {
+  if (!address) return false;
+
+  const all = await fetchAllTxsBySenderCosmosAsc(address, 60);
+  if (!all || !all.length) return false;
 
   let running = 0;
-
   const newLabels = [];
   const newData = [];
   const newMoves = [];
@@ -1050,43 +1113,34 @@ async function bootstrapStakeHistory() {
 
   for (const item of all) {
     const tx = item?.tx;
-    const when = item?.resp?.timestamp ? new Date(item.resp.timestamp) : null;
+    const whenStr = item?.resp?.timestamp || null;
+    const when = whenStr ? new Date(whenStr) : null;
 
     const msgs = tx?.body?.messages || tx?.body?.msgs || [];
     if (!Array.isArray(msgs) || !msgs.length) continue;
 
-    let changed = false;
-    let net = 0;
-    let hadDelegate = false;
-    let hadUndelegate = false;
+    const { net, type } = netStakeDeltaFromMsgs(msgs);
+    if (Math.abs(net) <= 0.00001) continue;
 
-    for (const m of msgs) {
-      if (isDelegateMsg(m)) {
-        const a = readMsgAmount(m);
-        if (a > 0) { running += a; net += a; changed = true; hadDelegate = true; }
-      } else if (isUndelegateMsg(m)) {
-        const a = readMsgAmount(m);
-        if (a > 0) { running -= a; net -= a; changed = true; hadUndelegate = true; }
-      }
-    }
+    running += net;
+    running = Math.max(0, running);
 
-    if (changed) {
-      newLabels.push(
-        when ? when.toLocaleDateString() + " " + when.toLocaleTimeString()
-             : new Date().toLocaleTimeString()
-      );
-      newData.push(Math.max(0, running));
-      newMoves.push(net > 0 ? 1 : (net < 0 ? -1 : 0));
-
-      let type = "Stake update";
-      if (hadDelegate && hadUndelegate) type = "Mixed";
-      else if (hadDelegate) type = "Delegate";
-      else if (hadUndelegate) type = "Undelegate";
-      newTypes.push(type);
-    }
+    newLabels.push(when ? (when.toLocaleDateString() + " " + when.toLocaleTimeString()) : nowLabel());
+    newData.push(running);
+    newMoves.push(net > 0 ? 1 : -1);
+    newTypes.push(type);
   }
 
-  if (!newData.length) return;
+  if (newData.length < 2) return false;
+
+  // allinea l'ultimo punto al valore reale attuale (per rimanere "reale" rispetto all'LCD)
+  const realNow = safe(stakeInj);
+  if (Number.isFinite(realNow) && realNow > 0) {
+    newLabels.push(nowLabel());
+    newData.push(realNow);
+    newMoves.push(realNow >= newData[newData.length - 2] ? 1 : -1);
+    newTypes.push("Current (LCD)");
+  }
 
   stakeLabels = newLabels.slice(-STAKE_SERIES_MAX);
   stakeData = newData.slice(-STAKE_SERIES_MAX);
@@ -1098,22 +1152,143 @@ async function bootstrapStakeHistory() {
 
   saveStakeSeries();
   drawStakeChart();
+  return true;
+}
+
+/* ================= SEED TODAY LAST 2 UPS (REAL) ================= */
+async function seedStakeSeriesFromTodayLast2Ups() {
+  if (!address) return false;
+  const current = safe(stakeInj);
+  if (!Number.isFinite(current) || current <= 0) return false;
+
+  const today0 = startOfTodayMs();
+  const recent = await fetchRecentTxsBySenderCosmosDesc(address, 8);
+  if (!recent || !recent.length) return false;
+
+  const ups = [];
+  for (const item of recent) {
+    const ts = item?.resp?.timestamp ? new Date(item.resp.timestamp).getTime() : 0;
+    if (!ts || ts < today0) continue;
+
+    const msgs = item?.tx?.body?.messages || item?.tx?.body?.msgs || [];
+    if (!Array.isArray(msgs) || !msgs.length) continue;
+
+    const { net, type } = netStakeDeltaFromMsgs(msgs);
+    if (net > 0.00001) {
+      ups.push({ ts, amt: net, type });
+      if (ups.length >= 2) break;
+    }
+  }
+
+  // ordine cronologico
+  ups.reverse();
+
+  stakeLabels = [];
+  stakeData = [];
+  stakeMoves = [];
+  stakeEventTypes = [];
+
+  if (ups.length >= 2) {
+    const a = safe(ups[0].amt);
+    const b = safe(ups[1].amt);
+    const base = Math.max(0, current - a - b);
+
+    stakeLabels.push("Start");
+    stakeData.push(0);
+    stakeMoves.push(0);
+    stakeEventTypes.push("Seed");
+
+    stakeLabels.push("≈ Before 2x");
+    stakeData.push(base);
+    stakeMoves.push(1);
+    stakeEventTypes.push("Seed base");
+
+    stakeLabels.push(new Date(ups[0].ts).toLocaleTimeString());
+    stakeData.push(Math.max(0, base + a));
+    stakeMoves.push(1);
+    stakeEventTypes.push(ups[0].type);
+
+    stakeLabels.push(new Date(ups[1].ts).toLocaleTimeString());
+    stakeData.push(Math.max(0, base + a + b));
+    stakeMoves.push(1);
+    stakeEventTypes.push(ups[1].type);
+
+    stakeLabels.push(nowLabel());
+    stakeData.push(current);
+    stakeMoves.push(0);
+    stakeEventTypes.push("Current (LCD)");
+  }
+  else if (ups.length === 1) {
+    const a = safe(ups[0].amt);
+    const base = Math.max(0, current - a);
+
+    stakeLabels.push("Start");
+    stakeData.push(0);
+    stakeMoves.push(0);
+    stakeEventTypes.push("Seed");
+
+    stakeLabels.push("≈ Before");
+    stakeData.push(base);
+    stakeMoves.push(1);
+    stakeEventTypes.push("Seed base");
+
+    stakeLabels.push(new Date(ups[0].ts).toLocaleTimeString());
+    stakeData.push(Math.max(0, base + a));
+    stakeMoves.push(1);
+    stakeEventTypes.push(ups[0].type);
+
+    stakeLabels.push(nowLabel());
+    stakeData.push(current);
+    stakeMoves.push(0);
+    stakeEventTypes.push("Current (LCD)");
+  }
+  else {
+    return false;
+  }
+
+  trimStakeSeries();
+  lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
+
+  saveStakeSeries();
+  drawStakeChart();
+  return true;
+}
+
+function seedFallback0ToCurrent() {
+  const current = safe(stakeInj);
+  stakeLabels = ["Start", nowLabel()];
+  stakeData = [0, current];
+  stakeMoves = [0, 1];
+  stakeEventTypes = ["Seed", "Current (LCD)"];
+  trimStakeSeries();
+  lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
+  saveStakeSeries();
+  drawStakeChart();
 }
 
 /* ================= BOOT ================= */
 (async function boot() {
-  if (address) loadStakeSeries();
+  // 1) carica serie salvata (se esiste)
+  const hasSaved = address ? loadStakeSeries() : false;
 
   await loadCandleSnapshot();
   await loadChartToday();
 
   if (address) {
     await loadAccount();
-    await bootstrapStakeHistory();
+
+    // Se non ho serie salvata, creo serie "reale" per wallet
+    if (!hasSaved || !stakeData.length) {
+      const okFull = await bootstrapStakeHistoryFullFromTxs();
+      if (!okFull) {
+        const okSeed = await seedStakeSeriesFromTodayLast2Ups();
+        if (!okSeed) seedFallback0ToCurrent();
+      }
+    }
   }
 })();
 
-/* ================= LOOP ================= */
+/* ================= LOOP UI ================= */
 function animate() {
   /* PRICE */
   const op = displayed.price;
@@ -1136,7 +1311,7 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* BARS gradients (diversi per timeframe) */
+  /* BARS gradients */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
 
@@ -1236,7 +1411,7 @@ function animate() {
   $("rewardMax").textContent = maxR.toFixed(1);
 
   $("apr").textContent = safe(apr).toFixed(2) + "%";
-  $("updated").textContent = "Last update: " + new Date().toLocaleTimeString();
+  $("updated").textContent = "Last update: " + nowLabel();
 
   requestAnimationFrame(animate);
 }
