@@ -6,21 +6,20 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="app.js" defer></script>
 </head>
 <body>
 
-<div class="container">
+<div class="container loading" id="appRoot">
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
-    <!-- Connection Status -->
-    <div class="connection-status offline" id="connectionStatus">
-      <span class="status-dot"></span>
-      <span class="status-text">Offline</span>
+    <div class="connection-status" id="connectionStatus">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">Offline</span>
     </div>
   </div>
 
@@ -28,53 +27,110 @@
 
   <div class="cards-wrapper">
 
+    <!-- PRICE CARD -->
     <div class="card price-card">
       <div class="label">INJ Price</div>
       <div class="value-row"><span id="price">0.0000</span></div>
-      <div class="sub-row"><span id="price24h" class="sub">±0.00%</span></div>
 
-      <div class="price-bar-container">
-        <div id="priceBar" class="price-bar"></div>
-        <div id="priceLine" class="price-line"></div>
+      <!-- 1D -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrow24h">►</span>
+        <span class="pct" id="pct24h">0.00%</span>
+      </div>
+      <div class="price-bar-container bar-container">
+        <span class="bar-label">1D</span>
+        <div id="priceBar" class="bar-fill"></div>
+        <div class="open-marker" aria-hidden="true"></div>
+        <div id="priceLine" class="bar-line"></div>
+      </div>
+      <div class="bar-values">
+        <span id="priceMin" class="left">--</span>
+        <span id="priceOpen" class="center">--</span>
+        <span id="priceMax" class="right">--</span>
       </div>
 
-      <div class="price-values">
-        <span id="priceMin" class="price-extremes left">0.000</span>
-        <span id="priceOpen" class="price-extremes center">0.000</span>
-        <span id="priceMax" class="price-extremes right">0.000</span>
+      <!-- 1W -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrowWeek">►</span>
+        <span class="pct" id="pctWeek">0.00%</span>
+      </div>
+      <div class="week-bar-container bar-container">
+        <span class="bar-label">1W</span>
+        <div id="weekBar" class="bar-fill"></div>
+        <div class="open-marker" aria-hidden="true"></div>
+        <div id="weekLine" class="bar-line"></div>
+      </div>
+      <div class="bar-values">
+        <span id="weekMin" class="left">--</span>
+        <span id="weekOpen" class="center">--</span>
+        <span id="weekMax" class="right">--</span>
+      </div>
+
+      <!-- 1M -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrowMonth">►</span>
+        <span class="pct" id="pctMonth">0.00%</span>
+      </div>
+      <div class="month-bar-container bar-container">
+        <span class="bar-label">1M</span>
+        <div id="monthBar" class="bar-fill"></div>
+        <div class="open-marker" aria-hidden="true"></div>
+        <div id="monthLine" class="bar-line"></div>
+      </div>
+      <div class="bar-values">
+        <span id="monthMin" class="left">--</span>
+        <span id="monthOpen" class="center">--</span>
+        <span id="monthMax" class="right">--</span>
       </div>
     </div>
 
+    <!-- AVAILABLE -->
     <div class="card">
       <div class="label">Available</div>
       <div class="value-row"><span id="available">0.000000</span></div>
-      <div class="sub-row"><span id="availableUsd">≈ $0.00</span></div>
+      <div class="sub-row" id="availableUsd">≈ $0.00</div>
     </div>
 
+    <!-- STAKED -->
     <div class="card">
       <div class="label">Staked</div>
       <div class="value-row"><span id="stake">0.0000</span></div>
-      <div class="sub-row"><span id="stakeUsd">≈ $0.00</span></div>
+      <div class="sub-row" id="stakeUsd">≈ $0.00</div>
     </div>
 
-    <div class="card">
+    <!-- REWARDS -->
+    <div class="card reward-card">
       <div class="label">Rewards</div>
       <div class="value-row"><span id="rewards">0.0000000</span></div>
-      <div class="sub-row"><span id="rewardsUsd">≈ $0.00</span></div>
+      <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
 
-      <div class="reward-bar-container">
-        <div id="rewardBar" class="reward-bar"></div>
+      <div class="reward-bar-container bar-container reward-container">
+        <span class="bar-label">REWARD</span>
+        <div id="rewardBar" class="bar-fill reward-fill"></div>
+        <div id="rewardLine" class="bar-line"></div>
         <span id="rewardPercent" class="reward-percent">0%</span>
+      </div>
+
+      <div class="bar-values reward-values">
+        <span id="rewardMin" class="left">0</span>
+        <span id="rewardMax" class="right">0.1</span>
       </div>
     </div>
 
+    <!-- APR -->
     <div class="card">
       <div class="label">APR</div>
       <div class="value-row"><span id="apr">0%</span></div>
     </div>
 
+    <!-- CHART -->
     <div class="card chart-card">
-      <div class="label">24h Price Chart</div>
+      <div class="label">1D Price Chart</div>
+
+      <div class="chart-overlay">
+        <span id="chartPrice">--</span>
+      </div>
+
       <canvas id="priceChart"></canvas>
     </div>
 
@@ -83,6 +139,5 @@
   <div id="updated" class="last-update">Last update: --:--</div>
 
 </div>
-
 </body>
 </html>
