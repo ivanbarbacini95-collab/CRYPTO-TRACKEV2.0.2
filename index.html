@@ -6,20 +6,22 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Chart.js con defer per evitare race -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
 
-<div class="container">
+<div class="container loading" id="appRoot">
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
     <div class="connection-status" id="connectionStatus">
-      <span class="status-dot"></span>
-      <span class="status-text">Offline</span>
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">Offline</span>
     </div>
   </div>
 
@@ -102,7 +104,6 @@
       <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
 
       <div class="reward-bar-container bar-container reward-container">
-        <!-- bar-label presente ma nascosta via CSS -->
         <span class="bar-label">REWARD</span>
         <div id="rewardBar" class="bar-fill reward-fill"></div>
         <div id="rewardLine" class="bar-line"></div>
