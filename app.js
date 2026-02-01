@@ -48,12 +48,6 @@ let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
 /* Candle state (current candles) */
-const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 }, // 1D (t = openTime ms)
-  w: { t: 0, open: 0, high: 0, low: 0 }, // 1W
-  m: { t: 0, open: 0, high: 0, low: 0 }, // 1M
-};
-
 const lastHL = {
   d: { h: 0, l: 0 },
   w: { h: 0, l: 0 },
@@ -66,7 +60,6 @@ function flash(el) {
   void el.offsetWidth;
   el.classList.add("flash");
 }
-
 
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
@@ -106,7 +99,6 @@ let stakeBootstrapped = false;
 
 // segue il valore VISIBILE nella card stake
 let lastDisplayedStakeForChart = 0;
-
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
