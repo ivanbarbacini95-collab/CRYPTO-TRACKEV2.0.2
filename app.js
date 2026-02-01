@@ -1,10 +1,10 @@
 /* ================= CONFIG ================= */
-const INITIAL_SETTLE_TIME = 4200; // ms (più lungo -> numeri scorrono di più)
+const INITIAL_SETTLE_TIME = 4200; // ms
 let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
-const REST_SYNC_MS = 60000;     // safety sync candele 1D/1W/1M
-const CHART_SYNC_MS = 60000;    // safety sync grafico giornata
+const REST_SYNC_MS = 60000;
+const CHART_SYNC_MS = 60000;
 
 const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
@@ -19,6 +19,39 @@ function fmtHHMM(ms) {
   const d = new Date(ms);
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+
+/* ================= ATH/ATL FLASH (yellow blink on min/max) ================= */
+const FLASH_MS = 650;
+const EPS = 1e-10;
+
+(function injectFlashCSS() {
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes yellowBlink {
+      0%   { color:#facc15; text-shadow: 0 0 14px rgba(250,204,21,.85); }
+      35%  { color:#fef9c3; text-shadow: 0 0 22px rgba(250,204,21,1); }
+      70%  { color:#facc15; text-shadow: 0 0 14px rgba(250,204,21,.85); }
+      100% { color: inherit; text-shadow:none; }
+    }
+    .flash-yellow { animation: yellowBlink ${FLASH_MS}ms ease-out 1; }
+  `;
+  document.head.appendChild(style);
+})();
+
+function flashYellow(el) {
+  if (!el) return;
+  el.classList.remove("flash-yellow");
+  void el.offsetWidth; // restart animation
+  el.classList.add("flash-yellow");
+  setTimeout(() => el.classList.remove("flash-yellow"), FLASH_MS);
+}
+
+// memorizza estremi precedenti per capire quando si fa un nuovo ATH/ATL
+const prevExt = {
+  d: { high: null, low: null },
+  w: { high: null, low: null },
+  m: { high: null, low: null },
+};
 
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
@@ -37,21 +70,17 @@ function refreshConnUI() {
 /* ================= STATE ================= */
 let address = localStorage.getItem("inj_address") || "";
 
-/* live price */
-let targetPrice = 0; // prezzo reale (trade WS)
+let targetPrice = 0;
 let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 
-/* Injective account */
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
-/* Candle state (current candles) */
 const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 }, // 1D (t = openTime ms)
-  w: { t: 0, open: 0, high: 0, low: 0 }, // 1W
-  m: { t: 0, open: 0, high: 0, low: 0 }, // 1M
+  d: { t: 0, open: 0, high: 0, low: 0 },
+  w: { t: 0, open: 0, high: 0, low: 0 },
+  m: { t: 0, open: 0, high: 0, low: 0 },
 };
 
-/* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
 /* ================= CHART ================= */
@@ -59,18 +88,14 @@ let chart = null;
 let chartLabels = [];
 let chartData = [];
 let lastChartMinuteStart = 0;
-
 let chartBootstrappedToday = false;
 
-/* Hover interaction state (solo per vertical line) */
 let hoverActive = false;
 let hoverIndex = null;
-let hoverPrice = null; // mantenuto per compatibilità, non mostrato in UI
+let hoverPrice = null;
 
-/* Color state (performance daily) */
 let lastChartSign = "neutral";
 
-/* ws */
 let wsTrade = null;
 let wsKline = null;
 let tradeRetryTimer = null;
@@ -78,10 +103,9 @@ let klineRetryTimer = null;
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
-  // più soft all’inizio, poi accelera gradualmente
   const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
-  const base = 0.08;           // più lento all’inizio
-  const maxExtra = 0.80;       // tende a 0.88 circa
+  const base = 0.08;
+  const maxExtra = 0.80;
   return base + (t * t) * maxExtra;
 }
 
@@ -123,11 +147,7 @@ function updatePerf(arrowId, pctId, v) {
   pct.textContent = Math.abs(v).toFixed(2) + "%";
 }
 
-/* ================= BAR RENDER =================
-   - open è al centro (marker CSS)
-   - bar fill: da centro verso dx (positivo) oppure verso sx (negativo)
-   - bar-line gialla: posizione del prezzo reale (val)
-*/
+/* ================= BAR RENDER ================= */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   if (!bar || !line) return;
 
@@ -141,7 +161,6 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
     return;
   }
 
-  // range simmetrico intorno all’open -> open sempre centrale
   const range = Math.max(Math.abs(high - open), Math.abs(open - low));
   const min = open - range;
   const max = open + range;
@@ -408,10 +427,7 @@ function setupChartInteractions() {
 
   const handleMove = (evt) => {
     const idx = getIndexFromEvent(evt);
-    if (idx == null) {
-      setHoverState(false);
-      return;
-    }
+    if (idx == null) { setHoverState(false); return; }
     const v = safe(chart.data.datasets[0].data[idx]);
     setHoverState(true, idx, v);
   };
@@ -653,7 +669,7 @@ startKlineWS();
 
 /* ================= LOOP ================= */
 function animate() {
-  /* PRICE (card INJ Price) */
+  /* PRICE */
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
@@ -667,7 +683,7 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* Colore grafico = performance daily */
+  /* Chart color by daily sign */
   const sign =
     !tfReady.d ? "neutral" :
     pD > 0 ? "up" :
@@ -678,7 +694,7 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* ===== BARS – TUTTE UGUALI (ROSSO/VERDE) + GRADIENT “INTENSO” STILE REWARD ===== */
+  /* ===== BARS – tutte uguali rosso/verde ===== */
   const upGradAll = "linear-gradient(90deg,#065f46 0%,#22c55e 45%,#a7f3d0 100%)";
   const dnGradAll = "linear-gradient(270deg,#7f1d1d 0%,#ef4444 45%,#fecaca 100%)";
 
@@ -698,6 +714,23 @@ function animate() {
   $("monthMin").textContent  = tfReady.m ? safe(candle.m.low).toFixed(3)  : "--";
   $("monthOpen").textContent = tfReady.m ? safe(candle.m.open).toFixed(3) : "--";
   $("monthMax").textContent  = tfReady.m ? safe(candle.m.high).toFixed(3) : "--";
+
+  /* ===== ATH/ATL flash (solo quando cambia davvero) ===== */
+  if (tfReady.d) {
+    if (prevExt.d.high != null && candle.d.high > prevExt.d.high + EPS) flashYellow($("priceMax"));
+    if (prevExt.d.low  != null && candle.d.low  < prevExt.d.low  - EPS) flashYellow($("priceMin"));
+    prevExt.d.high = candle.d.high; prevExt.d.low = candle.d.low;
+  }
+  if (tfReady.w) {
+    if (prevExt.w.high != null && candle.w.high > prevExt.w.high + EPS) flashYellow($("weekMax"));
+    if (prevExt.w.low  != null && candle.w.low  < prevExt.w.low  - EPS) flashYellow($("weekMin"));
+    prevExt.w.high = candle.w.high; prevExt.w.low = candle.w.low;
+  }
+  if (tfReady.m) {
+    if (prevExt.m.high != null && candle.m.high > prevExt.m.high + EPS) flashYellow($("monthMax"));
+    if (prevExt.m.low  != null && candle.m.low  < prevExt.m.low  - EPS) flashYellow($("monthMin"));
+    prevExt.m.high = candle.m.high; prevExt.m.low = candle.m.low;
+  }
 
   /* AVAILABLE */
   const oa = displayed.available;
@@ -724,7 +757,6 @@ function animate() {
   $("rewardLine").style.left = rp + "%";
   $("rewardPercent").textContent = rp.toFixed(1) + "%";
 
-  /* reward: gradient più deciso + heat */
   const heat = heatColor(rp);
   $("rewardBar").style.background = `linear-gradient(90deg, ${heat} 0%, #2563eb 45%, #7c3aed 100%)`;
 
