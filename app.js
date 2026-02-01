@@ -679,15 +679,17 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* BARS con gradient differenti per timeframe */
+  /* BARS con gradient diversi (1W e 1M NON usano verde/rosso del giornaliero) */
   const upGradD = "linear-gradient(to right,#22c55e,#10b981)";
   const dnGradD = "linear-gradient(to left,#ef4444,#f87171)";
 
-  const upGradW = "linear-gradient(to right,#38bdf8,#3b82f6)";
-  const dnGradW = "linear-gradient(to left,#f97316,#fb7185)";
+  // 1W: palette fredda (azzurro -> blu) / palette calda (ambra -> viola)
+  const upGradW = "linear-gradient(to right,#22d3ee,#3b82f6)";
+  const dnGradW = "linear-gradient(to left,#f59e0b,#8b5cf6)";
 
-  const upGradM = "linear-gradient(to right,#a78bfa,#6366f1)";
-  const dnGradM = "linear-gradient(to left,#fb7185,#ef4444)";
+  // 1M: palette “neon” (fucsia -> viola) / palette “tramonto” (arancio -> rosa)
+  const upGradM = "linear-gradient(to right,#f472b6,#a855f7)";
+  const dnGradM = "linear-gradient(to left,#fb923c,#ec4899)";
 
   renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, upGradD, dnGradD);
   renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, upGradW, dnGradW);
@@ -731,7 +733,6 @@ function animate() {
   $("rewardLine").style.left = rp + "%";
   $("rewardPercent").textContent = rp.toFixed(1) + "%";
 
-  /* reward: gradient più deciso + heat sovrapposta (più “strong”) */
   const heat = heatColor(rp);
   $("rewardBar").style.background = `linear-gradient(90deg, ${heat} 0%, #2563eb 45%, #7c3aed 100%)`;
 
