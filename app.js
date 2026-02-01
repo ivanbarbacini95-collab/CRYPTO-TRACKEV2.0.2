@@ -5,10 +5,19 @@ let settleStart = Date.now();
 const ACCOUNT_POLL_MS = 2000;
 const REST_SYNC_MS = 60000; // safety sync (se websocket perde un update)
 
+// Chart: ultime 34 ore a 1m
+const CHART_MINUTES = 34 * 60; // 2040 punti
+
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+function fmtHHMM(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
@@ -44,9 +53,11 @@ const candle = {
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
-/* chart */
+/* ================= CHART STATE (34H) ================= */
 let chart = null;
-let chartData = [];
+let chartLabels = []; // HH:MM
+let chartData = [];   // close price
+let lastChartMinuteStart = 0; // open time della candela 1m corrente
 
 /* ws */
 let wsTrade = null;
@@ -187,9 +198,7 @@ async function loadAccount() {
 loadAccount();
 setInterval(loadAccount, ACCOUNT_POLL_MS);
 
-/* ================= BINANCE REST: initial candle snapshot =================
-   Bootstrap (prima dei WS), poi i WS aggiornano realtime.
-*/
+/* ================= BINANCE REST: initial candle snapshot ================= */
 async function loadCandleSnapshot() {
   const [d, w, m] = await Promise.all([
     fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
@@ -226,25 +235,60 @@ async function loadCandleSnapshot() {
 loadCandleSnapshot();
 setInterval(loadCandleSnapshot, REST_SYNC_MS);
 
-/* ================= CHART (24h visual) ================= */
-async function loadChart24h() {
-  const d = await fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1440");
-  if (!Array.isArray(d) || !d.length) return;
-
-  chartData = d.map(x => safe(x[4]));
-  if (!chart && window.Chart) initChart();
+/* ================= CHART 34H (REST bootstrap) =================
+   Binance limita a 1000 klines per richiesta, quindi facciamo 3 chunk.
+*/
+async function fetchKlines1mChunk(limit, endTime) {
+  const url =
+    `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=${limit}` +
+    (endTime ? `&endTime=${endTime}` : "");
+  const d = await fetchJSON(url);
+  return Array.isArray(d) ? d : [];
 }
-loadChart24h();
-setInterval(loadChart24h, 60000);
 
-function initChart() {
+async function loadChart34h() {
+  // vogliamo CHART_MINUTES = 2040 punti
+  // chunk: 1000 + 1000 + 40
+  const now = Date.now();
+
+  const c1 = await fetchKlines1mChunk(1000, now); // ultimi 1000
+  if (!c1.length) return;
+
+  const firstOfC1 = safe(c1[0][0]); // openTime del primo in c1
+  const c2 = await fetchKlines1mChunk(1000, firstOfC1 - 1);
+  const firstOfC2 = c2.length ? safe(c2[0][0]) : 0;
+  const remaining = Math.max(0, CHART_MINUTES - (c1.length + c2.length)); // ~40
+  const c3 = remaining ? await fetchKlines1mChunk(remaining, firstOfC2 ? (firstOfC2 - 1) : undefined) : [];
+
+  // unisci in ordine cronologico
+  const all = [...c3, ...c2, ...c1].slice(-CHART_MINUTES);
+
+  chartLabels = all.map(k => fmtHHMM(safe(k[0])));
+  chartData = all.map(k => safe(k[4]));
+
+  // minuto corrente (ultimo openTime)
+  lastChartMinuteStart = all.length ? safe(all[all.length - 1][0]) : 0;
+
+  // prezzo fallback
+  const lastClose = all.length ? safe(all[all.length - 1][4]) : 0;
+  if (!targetPrice && lastClose) targetPrice = lastClose;
+
+  if (!chart && window.Chart) initChart34h();
+  else if (chart) {
+    chart.data.labels = chartLabels;
+    chart.data.datasets[0].data = chartData;
+    chart.update("none");
+  }
+}
+
+function initChart34h() {
   const canvas = $("priceChart");
   if (!canvas) return;
 
   chart = new Chart(canvas, {
     type: "line",
     data: {
-      labels: Array(1440).fill(""),
+      labels: chartLabels,
       datasets: [{
         data: chartData,
         borderColor: "#22c55e",
@@ -258,17 +302,57 @@ function initChart() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { x: { display: false }, y: { ticks: { color: "#9ca3af" } } }
+      scales: {
+        x: {
+          display: false  // se vuoi, possiamo farlo visibile (ma non tocchiamo UI adesso)
+        },
+        y: {
+          ticks: { color: "#9ca3af" }
+        }
+      },
+      animation: false
     }
   });
 }
 
-function updateChart(p) {
+/* realtime chart update from kline_1m:
+   - se è lo stesso minuto: aggiorna l’ultimo punto (si muove “live”)
+   - se è un nuovo minuto: shift + push (scorrimento destra->sinistra)
+*/
+function updateChartFrom1mKline(k) {
   if (!chart) return;
-  chart.data.datasets[0].data.push(p);
+
+  const openTime = safe(k.t);   // start time 1m
+  const close = safe(k.c);      // close aggiornato realtime
+  if (!openTime || !close) return;
+
+  const label = fmtHHMM(openTime);
+
+  // stesso minuto -> aggiorna ultimo punto
+  if (lastChartMinuteStart === openTime) {
+    const lastIdx = chart.data.datasets[0].data.length - 1;
+    if (lastIdx >= 0) {
+      chart.data.datasets[0].data[lastIdx] = close;
+      chart.update("none");
+    }
+    return;
+  }
+
+  // nuovo minuto -> scorre a sinistra: shift e push
+  lastChartMinuteStart = openTime;
+
+  chart.data.labels.push(label);
+  chart.data.labels.shift();
+
+  chart.data.datasets[0].data.push(close);
   chart.data.datasets[0].data.shift();
+
   chart.update("none");
 }
+
+// bootstrap + refresh periodico
+loadChart34h();
+setInterval(loadChart34h, 60000);
 
 /* ================= WS TRADE (price realtime) ================= */
 function clearTradeRetry() {
@@ -312,7 +396,6 @@ function startTradeWS() {
     if (!p) return;
 
     targetPrice = p;
-    updateChart(p);
 
     // aggiorna hi/low “al volo” solo se TF pronta (evita valori sballati all’avvio)
     if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
@@ -322,7 +405,7 @@ function startTradeWS() {
 }
 startTradeWS();
 
-/* ================= WS KLINES (1D / 1W / 1M realtime candles) ================= */
+/* ================= WS KLINES (1D / 1W / 1M + 1m chart realtime) ================= */
 function clearKlineRetry() {
   if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
 }
@@ -356,7 +439,14 @@ function startKlineWS() {
   wsKlineOnline = false;
   refreshConnUI();
 
-  const url = "wss://stream.binance.com:9443/stream?streams=injusdt@kline_1d/injusdt@kline_1w/injusdt@kline_1M";
+  // aggiungiamo anche kline_1m per il grafico 34h realtime
+  const url =
+    "wss://stream.binance.com:9443/stream?streams=" +
+    "injusdt@kline_1m/" +
+    "injusdt@kline_1d/" +
+    "injusdt@kline_1w/" +
+    "injusdt@kline_1M";
+
   wsKline = new WebSocket(url);
 
   wsKline.onopen = () => {
@@ -385,6 +475,14 @@ function startKlineWS() {
 
     const stream = payload.stream || "";
     const k = data.k;
+
+    // grafico 34h realtime (1m)
+    if (stream.includes("@kline_1m")) {
+      // assicura chart bootstrap se non ancora pronto
+      if (!chart && window.Chart) initChart34h();
+      updateChartFrom1mKline(k);
+      return;
+    }
 
     if (stream.includes("@kline_1d")) applyKline("d", k);
     else if (stream.includes("@kline_1w")) applyKline("w", k);
