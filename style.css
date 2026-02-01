@@ -67,18 +67,9 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
-.status-text { color: #f9fafb; }
-
-/* Stati reali online/offline */
-.connection-status.online .status-dot {
-  background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25);
+.status-text {
+  color: #f9fafb;
 }
-.connection-status.offline .status-dot {
-  background: #ef4444;
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.20);
-}
-.connection-status.online .status-text { color: #22c55e; }
 
 /* INPUT */
 #addressInput {
@@ -109,7 +100,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  border: 1px solid rgba(255,255,255,.06);
 }
 
 .label {
@@ -122,7 +112,6 @@ body {
   justify-content: flex-end;
   font-size: 1.4rem;
   font-weight: bold;
-  line-height: 1.1;
 }
 
 .sub-row {
@@ -144,21 +133,8 @@ body {
 .price-bar {
   position: absolute;
   height: 100%;
-  transition: width 0.35s ease, left 0.35s ease, background 0.35s ease;
+  transition: width 0.3s ease, left 0.3s ease, background 0.3s ease;
   border-radius: 0.3rem;
-
-  /* default neutro */
-  width: 50%;
-  left: 25%;
-  background: #374151;
-}
-
-.price-bar.upbar {
-  background: linear-gradient(90deg, rgba(34,197,94,.25), rgba(34,197,94,.95));
-}
-
-.price-bar.downbar {
-  background: linear-gradient(90deg, rgba(239,68,68,.25), rgba(239,68,68,.95));
 }
 
 .price-line {
@@ -166,8 +142,7 @@ body {
   width: 2px;
   height: 100%;
   background: #facc15;
-  transition: left 0.35s ease;
-  box-shadow: 0 0 10px rgba(250, 204, 21, 0.45);
+  transition: left 0.3s ease;
 }
 
 .price-values {
@@ -175,7 +150,6 @@ body {
   color: #9ca3af;
   position: relative;
   height: 18px;
-  margin-top: 6px;
 }
 
 .price-extremes.left { position: absolute; left: 0; }
@@ -193,10 +167,8 @@ body {
 
 .reward-bar {
   height: 100%;
-  width: 0%;
-  transition: width 0.45s ease;
+  transition: width 0.3s ease;
   border-radius: 0.3rem;
-  background: linear-gradient(90deg, #3b82f6, #facc15, #ef4444);
 }
 
 .reward-percent {
@@ -205,16 +177,11 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 0.85rem;
-  color: #f9fafb;
-  text-shadow: 0 1px 0 rgba(0,0,0,.55);
-  font-weight: 700;
 }
 
 /* CHART */
 .chart-card {
   height: 300px;
-  position: relative;
-  overflow: hidden;
 }
 
 #priceChart {
@@ -222,68 +189,9 @@ body {
   height: 100% !important;
 }
 
-/* Hover badge top-right (compare solo su interazione) */
-.chart-hover {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(0,0,0,.55);
-  border: 1px solid rgba(255,255,255,.10);
-  backdrop-filter: blur(8px);
-  pointer-events: none;
-  z-index: 5;
-}
-
-.chart-hover.hidden {
-  opacity: 0;
-  transform: translateY(-6px);
-  transition: opacity .16s ease, transform .16s ease;
-}
-
-.chart-hover:not(.hidden) {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity .16s ease, transform .16s ease;
-}
-
-#chartHoverTime {
-  font-size: 0.75rem;
-  color: #9ca3af;
-  line-height: 1;
-}
-
-#chartHoverPrice {
-  font-size: 0.95rem;
-  font-weight: 800;
-  color: #f9fafb;
-  line-height: 1.1;
-}
-
 /* MISC */
 .up { color: #22c55e; }
 .down { color: #ef4444; }
-
-/* micro pulse numeri */
-.pulse-up { animation: pulseUp .35s ease; }
-.pulse-down { animation: pulseDown .35s ease; }
-
-@keyframes pulseUp {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.06); }
-  100% { transform: scale(1); }
-}
-
-@keyframes pulseDown {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.06); }
-  100% { transform: scale(1); }
-}
 
 .last-update {
   font-size: 0.8rem;
