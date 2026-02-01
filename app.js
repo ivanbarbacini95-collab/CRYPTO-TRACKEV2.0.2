@@ -3,11 +3,12 @@ let startTime = Date.now();
 
 const $ = id => document.getElementById(id);
 const clamp = (n,a,b)=>Math.min(Math.max(n,a),b);
-const safe = n => Number.isFinite(+n)?+n:0;
+const safe = n => Number.isFinite(+n) ? +n : 0;
 
 let address = localStorage.getItem("inj_address") || "";
 
 let targetPrice = 0;
+
 let price24hOpen=0,price24hLow=0,price24hHigh=0;
 let priceWeekOpen=0,priceWeekLow=0,priceWeekHigh=0;
 let priceMonthOpen=0,priceMonthLow=0,priceMonthHigh=0;
@@ -15,20 +16,21 @@ let priceMonthOpen=0,priceMonthLow=0,priceMonthHigh=0;
 let availableInj=0, stakeInj=0, rewardsInj=0, apr=0;
 let displayed={price:0,available:0,stake:0,rewards:0};
 
-let chart, chartData=[], ws;
+let chart=null, chartData=[], ws;
 
 function isInitialLoad(){
   return Date.now()-startTime < INITIAL_LOAD_DURATION;
 }
 
-function tick(c,t){
-  const s=isInitialLoad()?0.25:0.85;
-  return Math.abs(c-t)<1e-6?t:c+(t-c)*s;
+function tick(current,target){
+  const speed = isInitialLoad() ? 0.25 : 0.85;
+  if (Math.abs(current-target) < 1e-6) return target;
+  return current + (target-current)*speed;
 }
 
 function colorNumber(el,n,o,d=4){
   const ns=n.toFixed(d), os=o.toFixed(d);
-  if(ns===os){el.textContent=ns;return;}
+  if(ns===os){ el.textContent=ns; return; }
   el.innerHTML=[...ns].map((c,i)=>{
     const col=c!==os[i]?(n>o?"#22c55e":"#ef4444"):"#f9fafb";
     return `<span style="color:${col}">${c}</span>`;
@@ -44,33 +46,35 @@ function updatePerf(a,p,v){
 }
 
 async function fetchJSON(u){
-  try{return await(await fetch(u,{cache:"no-store"})).json();}
-  catch{return{};}
+  try{ return await (await fetch(u,{cache:"no-store"})).json(); }
+  catch{ return {}; }
 }
 
 /* ACCOUNT */
-$("addressInput").value=address;
-$("addressInput").oninput=e=>{
-  address=e.target.value.trim();
+$("addressInput").value = address;
+$("addressInput").oninput = e=>{
+  address = e.target.value.trim();
   localStorage.setItem("inj_address",address);
-  startTime=Date.now();
+  startTime = Date.now();
   loadAccount();
 };
 
 async function loadAccount(){
   if(!address) return;
-  const [b,s,r,i]=await Promise.all([
+  const [b,s,r,i] = await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
-  availableInj=safe(b.balances?.find(x=>x.denom==="inj")?.amount)/1e18;
-  stakeInj=(s.delegation_responses||[]).reduce((a,d)=>a+safe(d.balance.amount),0)/1e18;
-  rewardsInj=(r.rewards||[]).reduce((a,x)=>a+x.reward.reduce((s,y)=>s+safe(y.amount),0),0)/1e18;
-  apr=safe(i.inflation)*100;
+
+  availableInj = safe(b.balances?.find(x=>x.denom==="inj")?.amount)/1e18;
+  stakeInj = (s.delegation_responses||[]).reduce((a,d)=>a+safe(d.balance.amount),0)/1e18;
+  rewardsInj = (r.rewards||[]).reduce((a,x)=>a+x.reward.reduce((s,y)=>s+safe(y.amount),0),0)/1e18;
+  apr = safe(i.inflation)*100;
 }
-loadAccount(); setInterval(loadAccount,2000);
+loadAccount();
+setInterval(loadAccount,2000);
 
 /* BINANCE */
 async function klines(i,l){
@@ -103,16 +107,30 @@ async function loadTF(){
 }
 
 loadPrices(); loadTF();
-setInterval(loadPrices,60000); setInterval(loadTF,60000);
+setInterval(loadPrices,60000);
+setInterval(loadTF,60000);
 
 /* CHART */
 function initChart(){
-  chart=new Chart($("priceChart"),{
+  chart = new Chart($("priceChart"),{
     type:"line",
-    data:{labels:Array(1440).fill(""),datasets:[{data:chartData,borderColor:"#22c55e",backgroundColor:"rgba(34,197,94,.2)",fill:true,pointRadius:0}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{ticks:{color:"#9ca3af"}}}}
+    data:{labels:Array(1440).fill(""),datasets:[{
+      data:chartData,
+      borderColor:"#22c55e",
+      backgroundColor:"rgba(34,197,94,.2)",
+      fill:true,
+      pointRadius:0,
+      tension:0.3
+    }]},
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{display:false},y:{ticks:{color:"#9ca3af"}}}
+    }
   });
 }
+
 function updateChart(p){
   if(!chart) return;
   chart.data.datasets[0].data.push(p);
@@ -122,10 +140,10 @@ function updateChart(p){
 
 /* WS */
 function startWS(){
-  ws=new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
-  ws.onmessage=e=>{
-    const p=safe(JSON.parse(e.data).p);
-    targetPrice=p;
+  ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  ws.onmessage = e=>{
+    const p = safe(JSON.parse(e.data).p);
+    targetPrice = p;
     price24hHigh=Math.max(price24hHigh,p);
     price24hLow=Math.min(price24hLow,p);
     priceWeekHigh=Math.max(priceWeekHigh,p);
@@ -143,8 +161,15 @@ function renderBar(bar,line,v,o,l,h,up,down){
   const r=Math.max(Math.abs(h-o),Math.abs(o-l));
   const p=clamp((v-(o-r))/(2*r)*100,0,100);
   line.style.left=p+"%";
-  if(v>=o){bar.style.left="50%";bar.style.width=(p-50)+"%";bar.style.background=up;}
-  else{bar.style.left=p+"%";bar.style.width=(50-p)+"%";bar.style.background=down;}
+  if(v>=o){
+    bar.style.left="50%";
+    bar.style.width=(p-50)+"%";
+    bar.style.background=up;
+  } else {
+    bar.style.left=p+"%";
+    bar.style.width=(50-p)+"%";
+    bar.style.background=down;
+  }
 }
 
 /* LOOP */
@@ -194,12 +219,12 @@ function animate(){
   $("stakeUsd").textContent=`≈ $${(displayed.stake*displayed.price).toFixed(2)}`;
 
   const or=displayed.rewards;
-  if(rewardsInj<or){displayed.rewards=0;}
+  if(rewardsInj<or) displayed.rewards=0;
   else displayed.rewards=tick(displayed.rewards,rewardsInj);
   colorNumber($("rewards"),displayed.rewards,or,7);
   $("rewardsUsd").textContent=`≈ $${(displayed.rewards*displayed.price).toFixed(2)}`;
 
-  const maxR=Math.max(.1,Math.ceil(displayed.rewards*10)/10);
+  const maxR=Math.max(0.1,Math.ceil(displayed.rewards*10)/10);
   const rp=Math.min(displayed.rewards/maxR*100,100);
   $("rewardBar").style.width=rp+"%";
   $("rewardLine").style.left=rp+"%";
