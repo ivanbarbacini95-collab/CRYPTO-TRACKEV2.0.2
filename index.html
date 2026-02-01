@@ -6,14 +6,12 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
-
-  <!-- Chart.js con defer per evitare race -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="app.js" defer></script>
 </head>
 <body>
 
-<div class="container loading" id="appRoot">
+<div class="container" id="appRoot">
 
   <div class="header">
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
@@ -34,20 +32,20 @@
       <div class="label">INJ Price</div>
       <div class="value-row"><span id="price">0.0000</span></div>
 
-      <!-- 24H -->
+      <!-- 1D -->
       <div class="sub-row perf">
         <span class="arrow" id="arrow24h">►</span>
         <span class="pct" id="pct24h">0.00%</span>
       </div>
       <div class="price-bar-container bar-container">
-        <span class="bar-label">24H</span>
+        <span class="bar-label">1D</span>
         <div id="priceBar" class="bar-fill"></div>
         <div id="priceLine" class="bar-line"></div>
       </div>
       <div class="bar-values">
-        <span id="priceMin" class="left">0.000</span>
-        <span id="priceOpen" class="center">0.000</span>
-        <span id="priceMax" class="right">0.000</span>
+        <span id="priceMin" class="left">--</span>
+        <span id="priceOpen" class="center">--</span>
+        <span id="priceMax" class="right">--</span>
       </div>
 
       <!-- 1W -->
@@ -61,9 +59,9 @@
         <div id="weekLine" class="bar-line"></div>
       </div>
       <div class="bar-values">
-        <span id="weekMin" class="left">0.000</span>
-        <span id="weekOpen" class="center">0.000</span>
-        <span id="weekMax" class="right">0.000</span>
+        <span id="weekMin" class="left">--</span>
+        <span id="weekOpen" class="center">--</span>
+        <span id="weekMax" class="right">--</span>
       </div>
 
       <!-- 1M -->
@@ -77,9 +75,9 @@
         <div id="monthLine" class="bar-line"></div>
       </div>
       <div class="bar-values">
-        <span id="monthMin" class="left">0.000</span>
-        <span id="monthOpen" class="center">0.000</span>
-        <span id="monthMax" class="right">0.000</span>
+        <span id="monthMin" class="left">--</span>
+        <span id="monthOpen" class="center">--</span>
+        <span id="monthMax" class="right">--</span>
       </div>
     </div>
 
@@ -124,7 +122,13 @@
 
     <!-- CHART -->
     <div class="card chart-card">
-      <div class="label">24H Price Chart</div>
+      <div class="label">1D Price Chart</div>
+
+      <!-- prezzo top-right: live quando non tocchi, hover quando interagisci -->
+      <div class="chart-overlay">
+        <span id="chartPrice">--</span>
+      </div>
+
       <canvas id="priceChart"></canvas>
     </div>
 
