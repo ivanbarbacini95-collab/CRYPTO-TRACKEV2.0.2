@@ -54,7 +54,7 @@ const candle = {
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
-/* ================= CHART ================= */
+/* ================= CHART (Price) ================= */
 let chart = null;
 let chartLabels = [];
 let chartData = [];
@@ -67,9 +67,6 @@ let hoverActive = false;
 let hoverIndex = null;
 let hoverPrice = null;
 
-/* Overlay price (top-right) */
-let displayedChartPrice = 0;
-
 /* Color state (performance daily) */
 let lastChartSign = "neutral";
 
@@ -78,6 +75,66 @@ let wsTrade = null;
 let wsKline = null;
 let tradeRetryTimer = null;
 let klineRetryTimer = null;
+
+/* ================= STAKED PROGRESS + CHART ================= */
+const STAKE_TARGET = 1000; // range 0 - 1000
+
+let stakeChart = null;
+let stakeEventLabels = [];
+let stakeEventData = [];
+let lastStakeSeen = null; // per capire quando aumenta e aggiungere un punto
+
+function initStakeChart() {
+  const canvas = $("stakeChart");
+  if (!canvas || !window.Chart) return;
+
+  stakeChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: stakeEventLabels,
+      datasets: [{
+        data: stakeEventData,
+        borderColor: "#22c55e",
+        backgroundColor: "rgba(34,197,94,.18)",
+        fill: true,
+        pointRadius: 2,
+        tension: 0.25
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false }
+      },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    }
+  });
+}
+
+function pushStakePoint(val) {
+  const v = safe(val);
+  if (!v) return;
+
+  const label = fmtHHMM(Date.now());
+  stakeEventLabels.push(label);
+  stakeEventData.push(v);
+
+  while (stakeEventLabels.length > 220) stakeEventLabels.shift();
+  while (stakeEventData.length > 220) stakeEventData.shift();
+
+  if (!stakeChart) initStakeChart();
+  if (stakeChart) {
+    stakeChart.data.labels = stakeEventLabels;
+    stakeChart.data.datasets[0].data = stakeEventData;
+    stakeChart.update("none");
+  }
+}
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
@@ -221,6 +278,22 @@ async function loadAccount() {
   stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
+
+  /* ✅ stake chart: aggiunge un punto quando lo stake aumenta */
+  if (Number.isFinite(stakeInj)) {
+    if (lastStakeSeen == null) {
+      lastStakeSeen = stakeInj;
+      if (stakeInj > 0) pushStakePoint(stakeInj);
+    } else {
+      const diff = stakeInj - lastStakeSeen;
+      if (diff > 0.0001) {
+        lastStakeSeen = stakeInj;
+        pushStakePoint(stakeInj);
+      } else {
+        lastStakeSeen = stakeInj;
+      }
+    }
+  }
 }
 loadAccount();
 setInterval(loadAccount, ACCOUNT_POLL_MS);
@@ -366,7 +439,6 @@ function initChartToday() {
   setupChartInteractions();
   applyChartColorBySign(lastChartSign);
 
-  /* ✅ overlay nascosta finché non interagisci */
   const overlay = $("chartPrice")?.parentElement;
   if (overlay) overlay.style.display = "none";
 }
@@ -667,6 +739,7 @@ startKlineWS();
 (async function boot() {
   await loadCandleSnapshot();
   await loadChartToday();
+  initStakeChart();
 })();
 
 /* ================= LOOP ================= */
@@ -728,6 +801,16 @@ function animate() {
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
   $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
+
+  /* ✅ STAKE BAR (0 - 1000) */
+  const stakeMax = STAKE_TARGET;
+  const sp = clamp((displayed.stake / stakeMax) * 100, 0, 100);
+
+  $("stakeBar").style.width = sp + "%";
+  $("stakeLine").style.left = sp + "%";
+  $("stakePercent").textContent = sp.toFixed(1) + "%";
+  $("stakeMin").textContent = "0";
+  $("stakeMax").textContent = "1000";
 
   /* REWARDS */
   const or = displayed.rewards;
