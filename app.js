@@ -1,5 +1,5 @@
 /* ================= CONFIG ================= */
-const LCD_BASE = "https://sentry.lcd.injective.network:443";
+const LCD_BASE = "https://sentry.lcd.injective.network:443"; // Injective LCD
 const BINANCE_REST = "https://api.binance.com";
 const BINANCE_WS_BASE = "wss://stream.binance.com:9443/ws";
 
@@ -65,7 +65,7 @@ function tweenNumber(el, toValue, decimals, opts={}){
   const duration = opts.duration ?? (inSettle ? 950 : 420);
 
   const start = performance.now();
-  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const ease = (t) => 1 - Math.pow(1 - t, 3); // easeOutCubic
 
   function frame(ts){
     const t = clamp((ts - start) / duration, 0, 1);
@@ -109,11 +109,6 @@ const elPriceLine = $("priceLine");
 
 const elRewardBar = $("rewardBar");
 const elRewardPercent = $("rewardPercent");
-
-/* Hover badge grafico */
-const elChartHover = $("chartHover");
-const elChartHoverTime = $("chartHoverTime");
-const elChartHoverPrice = $("chartHoverPrice");
 
 /* ================= STATE ================= */
 let address = "";
@@ -253,47 +248,6 @@ async function fetchChartHistory(){
   setConnection(allOnline());
 }
 
-/* ================= CHART HOVER BADGE ================= */
-function showChartHover(timeLabel, priceValue){
-  if(!elChartHover) return;
-  elChartHoverTime.textContent = timeLabel;
-  elChartHoverPrice.textContent = `$${safe(priceValue).toFixed(4)}`;
-  elChartHover.classList.remove("hidden");
-}
-
-function hideChartHover(){
-  if(!elChartHover) return;
-  elChartHover.classList.add("hidden");
-}
-
-function bindChartHoverEvents(canvas){
-  if(!canvas) return;
-
-  const updateFromEvent = (evt) => {
-    if(!chart || !chartData.length) return;
-
-    const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true);
-    if(!points || !points.length){
-      hideChartHover();
-      return;
-    }
-
-    const idx = points[0].index;
-    const p = chartData[idx];
-    if(!p){ hideChartHover(); return; }
-
-    showChartHover(fmtHHMM(p.t), p.c);
-  };
-
-  canvas.addEventListener("mousemove", updateFromEvent);
-  canvas.addEventListener("mouseleave", hideChartHover);
-
-  canvas.addEventListener("touchstart", (e) => updateFromEvent(e), { passive: true });
-  canvas.addEventListener("touchmove", (e) => updateFromEvent(e), { passive: true });
-  canvas.addEventListener("touchend", hideChartHover);
-  canvas.addEventListener("touchcancel", hideChartHover);
-}
-
 /* ================= CHART.JS ================= */
 function buildOrUpdateChart(soft=false){
   const canvas = $("priceChart");
@@ -321,7 +275,11 @@ function buildOrUpdateChart(soft=false){
         animation: soft ? false : { duration: 450 },
         plugins: {
           legend: { display: false },
-          tooltip: { enabled: false } // usiamo solo il badge custom
+          tooltip: {
+            callbacks: {
+              label: (c) => ` $${safe(c.raw).toFixed(4)}`
+            }
+          }
         },
         scales: {
           x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
@@ -332,9 +290,6 @@ function buildOrUpdateChart(soft=false){
         }
       }
     });
-
-    hideChartHover();
-    bindChartHoverEvents(canvas);
     return;
   }
 
@@ -344,6 +299,12 @@ function buildOrUpdateChart(soft=false){
 }
 
 /* ================= PRICE BAR LOGIC ================= */
+/*
+  - min / max: da 24h ticker
+  - open: primo candle del range 24h (da fetchChartHistory)
+  - linea gialla: posizione prezzo reale dentro [min,max]
+  - barra: “spinta” rispetto all’open, verde sopra open, rossa sotto open
+*/
 function updatePriceBarAndLine(){
   const min = safe(price24h.low);
   const max = safe(price24h.high);
@@ -359,9 +320,11 @@ function updatePriceBarAndLine(){
   const container = elPriceBar.parentElement;
   const w = container.getBoundingClientRect().width;
 
+  // linea prezzo reale
   const pos = clamp((price - min) / (max - min), 0, 1);
   elPriceLine.style.left = `${Math.round(pos * (w - 2))}px`;
 
+  // open position (non deve per forza essere centro)
   const openPos = (open > 0) ? clamp((open - min) / (max - min), 0, 1) : 0.5;
   const delta = pos - openPos;
 
@@ -369,17 +332,23 @@ function updatePriceBarAndLine(){
   elPriceBar.classList.toggle("upbar", isUp);
   elPriceBar.classList.toggle("downbar", !isUp);
 
-  const abs = clamp(Math.abs(delta) * 2, 0, 1);
-  const widthPct = 12 + abs * 88;
+  // ampiezza barra: più ti allontani dall’open, più “si estende”
+  const abs = clamp(Math.abs(delta) * 2, 0, 1); // *2 per percezione
+  const widthPct = 12 + abs * 88;               // minimo 12% sempre visibile
   elPriceBar.style.width = `${widthPct.toFixed(2)}%`;
 
+  // posizione barra: ancoriamo visivamente attorno all’open
+  // - se isUp: parte da open e va verso destra
+  // - se down: parte da open e va verso sinistra
   const openX = openPos * w;
   const barW = (widthPct / 100) * w;
 
   let leftPx;
-  if(isUp) leftPx = openX;
-  else leftPx = openX - barW;
-
+  if(isUp){
+    leftPx = openX;                 // start da open
+  }else{
+    leftPx = openX - barW;          // estendi a sinistra
+  }
   leftPx = clamp(leftPx, 0, Math.max(0, w - barW));
   elPriceBar.style.left = `${Math.round(leftPx)}px`;
 }
@@ -394,20 +363,26 @@ async function lcdJson(path){
 }
 
 async function fetchAccountSnapshot(addr){
+  // available
   const balances = await lcdJson(`/cosmos/bank/v1beta1/balances/${addr}`);
   const coins = balances?.balances || [];
   const injCoin = coins.find(c => c.denom === "inj");
   const availableInj = injCoin ? injFromBaseAmount(injCoin.amount) : 0;
 
+  // staked
   const dels = await lcdJson(`/cosmos/staking/v1beta1/delegations/${addr}`);
   const ds = dels?.delegation_responses || [];
-  const stakedInj = ds.reduce((sum, d) => sum + injFromBaseAmount(d?.balance?.amount || 0), 0);
+  const stakedInj = ds.reduce((sum, d) => {
+    return sum + injFromBaseAmount(d?.balance?.amount || 0);
+  }, 0);
 
+  // rewards
   const rew = await lcdJson(`/cosmos/distribution/v1beta1/delegators/${addr}/rewards`);
   const total = rew?.total || [];
   const injTotal = total.find(c => c.denom === "inj");
   const rewardsInj = injTotal ? injFromBaseAmount(injTotal.amount) : 0;
 
+  // APR estimate (inflation / bonded_ratio)
   let apr = 0;
   try{
     const inf = await lcdJson(`/cosmos/mint/v1beta1/inflation`);
@@ -419,7 +394,9 @@ async function fetchAccountSnapshot(addr){
     const bondedRatio = (bonded + notBonded) > 0 ? bonded / (bonded + notBonded) : 0;
 
     if(bondedRatio > 0) apr = (inflation / bondedRatio) * 100;
-  }catch{}
+  }catch{
+    // ok se fallisce: apr resta 0
+  }
 
   return { availableInj, stakedInj, rewardsInj, apr };
 }
@@ -454,10 +431,12 @@ function applyAccountUI(s, price){
 
   elApr.textContent = `${safe(s.apr).toFixed(2)}%`;
 
+  // reward percent: rewards vs staked (in %)
   const base = Math.max(s.stakedInj, 0.000001);
   const ratio = (s.rewardsInj / base) * 100;
   elRewardPercent.textContent = `${ratio.toFixed(2)}%`;
 
+  // barra "temperatura": cap visual (5% => 100% barra) per non essere sempre piena
   const maxVisual = 5;
   const width = clamp((ratio / maxVisual) * 100, 0, 100);
   elRewardBar.style.width = `${width.toFixed(2)}%`;
@@ -483,17 +462,22 @@ async function tickAccount(){
 async function boot(){
   settleStart = nowMs();
 
+  // ws
   connectTradeWS();
   connectKlineWS();
 
+  // preload chart + ticker
   try{ await fetchChartHistory(); } catch{}
   try{ await fetch24hTicker(); } catch{}
 
+  // safety sync
   setInterval(() => fetch24hTicker().catch(()=>{}), TICKER24H_POLL_MS);
   setInterval(() => fetchChartHistory().catch(()=>{}), CHART_SYNC_MS);
 
+  // account poll
   setInterval(tickAccount, ACCOUNT_POLL_MS);
 
+  // saved address
   const saved = localStorage.getItem("inj_addr") || "";
   if(saved){
     elAddress.value = saved;
@@ -501,6 +485,7 @@ async function boot(){
     setTimeout(tickAccount, 350);
   }
 
+  // change address
   elAddress.addEventListener("change", () => {
     const v = elAddress.value.trim();
     if(isValidInjAddress(v)){
@@ -513,7 +498,6 @@ async function boot(){
 
   setConnection(false);
   elUpdated.textContent = "Last update: --:--";
-  hideChartHover();
 }
 
 boot();
