@@ -52,40 +52,33 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
-/* ===== SEARCH: lente che si allunga ===== */
+/* ===== SEARCH: pro minimal (lente a destra) ===== */
 .search-wrap {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.55rem;
-  background: #0a0f1f;
-  border: 2px solid #4b5563;
+  height: 44px;
+  width: 44px;
+  margin-left: auto;
   border-radius: 999px;
-  padding: 0.38rem 0.45rem;
-  height: 46px;
-  width: 52px;              /* COLLASSATO (solo lente) */
   overflow: hidden;
-  transition: width 240ms ease, border-color 240ms ease, box-shadow 240ms ease;
+  transition: width 240ms ease, background 240ms ease, border-color 240ms ease, box-shadow 240ms ease;
 }
 
-.search-wrap.open {
-  width: 100%;
-  border-color: rgba(34,197,94,0.55);
-  box-shadow: 0 0 0 4px rgba(34,197,94,0.08);
-}
-
-.search-btn {
-  width: 38px;
-  height: 38px;
+.search-wrap.minimal {
+  background: transparent;
   border: 0;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.06);
-  color: #f9fafb;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
+  box-shadow: none;
 }
 
-.search-btn:active { transform: scale(0.98); }
+.search-wrap.minimal.open {
+  width: 100%;
+  background: rgba(10, 15, 31, 0.92);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 0 0 4px rgba(34,197,94,0.08);
+  padding: 0.35rem 0.45rem;
+}
 
 .search-input {
   flex: 1;
@@ -94,24 +87,47 @@ body {
   outline: 0;
   color: #f9fafb;
   font-size: 0.95rem;
+
   opacity: 0;
-  transform: translateX(-4px);
+  width: 0;
+  transform: translateX(8px);
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.search-wrap.open .search-input {
+.search-wrap.minimal.open .search-input {
   opacity: 1;
+  width: auto;
   transform: translateX(0px);
 }
+
+.search-btn {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(249,250,251,0.92);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform 120ms ease, background 160ms ease;
+}
+
+.search-wrap.minimal.open .search-btn {
+  background: rgba(255,255,255,0.06);
+}
+
+.search-btn:active { transform: scale(0.98); }
 
 /* indirizzo confermato sotto */
 .address-display {
   font-size: 0.86rem;
   color: rgba(249,250,251,0.72);
-  margin-top: -0.25rem;
+  margin-top: -0.35rem;
   padding-left: 0.25rem;
   min-height: 18px;
 }
+
 .address-display .tag {
   display: inline-block;
   padding: 0.18rem 0.6rem;
@@ -295,7 +311,7 @@ body {
   height: 100% !important;
 }
 
-/* overlay: show only during interaction */
+/* overlay (compare quando interagisci) */
 .chart-overlay {
   position: absolute;
   top: 12px;
