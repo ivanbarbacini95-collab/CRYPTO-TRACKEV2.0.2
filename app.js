@@ -12,7 +12,6 @@ const TICKER24H_POLL_MS = 15000;
 const CHART_SYNC_MS = 60000;
 
 const INJ_DECIMALS = 18;
-
 const INITIAL_SETTLE_TIME = 3200;
 let settleStart = Date.now();
 
@@ -45,7 +44,8 @@ function setConnection(online){
   if(!box) return;
   box.classList.toggle("online", !!online);
   box.classList.toggle("offline", !online);
-  box.querySelector(".status-text").textContent = online ? "Online" : "Offline";
+  const t = box.querySelector(".status-text");
+  if(t) t.textContent = online ? "Online" : "Offline";
 }
 
 function addPulse(el, dir){
@@ -102,13 +102,14 @@ const elPriceMin = $("priceMin");
 const elPriceMax = $("priceMax");
 const elPriceOpen = $("priceOpen");
 
+const elPriceBarContainer = $("priceBarContainer");
 const elPriceBar = $("priceBar");
 const elPriceLine = $("priceLine");
 
 const elRewardBar = $("rewardBar");
 const elRewardPercent = $("rewardPercent");
 
-/* Badge top-right */
+/* Chart badge */
 const elChartBadge = $("chartBadge");
 const elChartBadgeTime = $("chartBadgeTime");
 const elChartBadgePrice = $("chartBadgePrice");
@@ -120,10 +121,9 @@ let wsKline = null;
 
 let wsTradeOnline = false;
 let wsKlineOnline = false;
-
 let lastRestOkAt = 0;
-let lastPrice = 0;
 
+let lastPrice = 0;
 let price24h = { changePercent:0, high:0, low:0, open:0 };
 
 let chart = null;
@@ -156,7 +156,6 @@ function connectTradeWS(){
       const dir = (lastPrice && p < lastPrice) ? "down" : "up";
       lastPrice = p;
 
-      // SOLO questa è realtime (card prezzo). Il grafico NON mostra prezzo realtime fisso.
       tweenNumber(elPrice, p, 4);
       elPrice.classList.toggle("up", dir === "up");
       elPrice.classList.toggle("down", dir === "down");
@@ -242,7 +241,7 @@ async function fetchChartHistory(){
   setConnection(allOnline());
 }
 
-/* ================= CHART BADGE (only interaction) ================= */
+/* ================= CHART BADGE (top-right only on interaction) ================= */
 function badgeShow(){
   if(!elChartBadge) return;
   elChartBadge.classList.remove("hidden");
@@ -254,6 +253,7 @@ function badgeHide(){
   elChartBadge.setAttribute("aria-hidden", "true");
 }
 function badgeSet(timeMs, price){
+  if(!elChartBadgeTime || !elChartBadgePrice) return;
   elChartBadgeTime.textContent = fmtHHMM(timeMs);
   elChartBadgePrice.textContent = `$${safe(price).toFixed(4)}`;
 }
@@ -261,23 +261,24 @@ function badgeSet(timeMs, price){
 function nearestPointFromEvent(evt){
   if(!chart || !chartData.length) return null;
 
-  const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true);
-  if(!points || !points.length) return null;
+  const pts = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true);
+  if(!pts || !pts.length) return null;
 
-  const idx = points[0].index;
+  const idx = pts[0].index;
   const p = chartData[idx];
   if(!p) return null;
   return { t: p.t, c: p.c };
 }
 
 function bindBadgeEvents(canvas){
+  if(!canvas) return;
+
   const onMove = (evt) => {
     const p = nearestPointFromEvent(evt);
     if(!p){ badgeHide(); return; }
     badgeSet(p.t, p.c);
     badgeShow();
   };
-
   const onLeave = () => badgeHide();
 
   canvas.addEventListener("mousemove", onMove);
@@ -291,7 +292,7 @@ function bindBadgeEvents(canvas){
   badgeHide();
 }
 
-/* ================= CHART.JS ================= */
+/* ================= CHART.JS (grafico come prima) ================= */
 function buildOrUpdateChart(soft=false){
   const canvas = $("priceChart");
   if(!canvas) return;
@@ -316,19 +317,11 @@ function buildOrUpdateChart(soft=false){
         responsive: true,
         maintainAspectRatio: false,
         animation: soft ? false : { duration: 450 },
-
-        // DISATTIVO tooltip Chart.js in modo “hard”
         plugins: {
           legend: { display: false },
-          tooltip: {
-            enabled: false,
-            external: () => {} // evita qualsiasi render esterno
-          }
+          tooltip: { enabled: false } // niente tooltip standard
         },
-
         interaction: { mode: "nearest", intersect: false },
-        events: ["mousemove","mouseout","touchstart","touchmove","touchend","touchcancel"],
-
         scales: {
           x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
           y: {
@@ -348,8 +341,20 @@ function buildOrUpdateChart(soft=false){
   chart.update(soft ? "none" : undefined);
 }
 
-/* ================= PRICE BAR LOGIC ================= */
+/* ================= PRICE BAR LOGIC (fix disallineamento) ================= */
+let _pendingBarUpdate = false;
+function schedulePriceBarUpdate(){
+  if(_pendingBarUpdate) return;
+  _pendingBarUpdate = true;
+  requestAnimationFrame(() => {
+    _pendingBarUpdate = false;
+    updatePriceBarAndLine();
+  });
+}
+
 function updatePriceBarAndLine(){
+  if(!elPriceBar || !elPriceLine || !elPriceBarContainer) return;
+
   const min = safe(price24h.low);
   const max = safe(price24h.high);
   const open = safe(price24h.open);
@@ -357,12 +362,12 @@ function updatePriceBarAndLine(){
 
   if(!(min > 0 && max > 0 && max > min)) return;
 
+  const w = elPriceBarContainer.getBoundingClientRect().width;
+  if(!(w > 5)) return; // evita calcoli a width=0 (disallineamento)
+
   elPriceMin.textContent = fmtNum(min, 3);
   elPriceMax.textContent = fmtNum(max, 3);
   elPriceOpen.textContent = fmtNum(open || ((min + max) / 2), 3);
-
-  const container = elPriceBar.parentElement;
-  const w = container.getBoundingClientRect().width;
 
   const pos = clamp((price - min) / (max - min), 0, 1);
   elPriceLine.style.left = `${Math.round(pos * (w - 2))}px`;
@@ -488,12 +493,11 @@ async function boot(){
   connectTradeWS();
   connectKlineWS();
 
-  try{ await fetchChartHistory(); } catch{}
-  try{ await fetch24hTicker(); } catch{}
+  try{ await fetchChartHistory(); }catch{}
+  try{ await fetch24hTicker(); }catch{}
 
   setInterval(() => fetch24hTicker().catch(()=>{}), TICKER24H_POLL_MS);
   setInterval(() => fetchChartHistory().catch(()=>{}), CHART_SYNC_MS);
-
   setInterval(tickAccount, ACCOUNT_POLL_MS);
 
   const saved = localStorage.getItem("inj_addr") || "";
@@ -512,6 +516,13 @@ async function boot(){
       tickAccount();
     }
   });
+
+  // fix disallineamento su resize/orientamento
+  window.addEventListener("resize", schedulePriceBarUpdate);
+  window.addEventListener("orientationchange", schedulePriceBarUpdate);
+
+  // primo ricalcolo dopo paint
+  requestAnimationFrame(schedulePriceBarUpdate);
 
   setConnection(false);
   elUpdated.textContent = "Last update: --:--";
