@@ -111,7 +111,7 @@ body {
   background: #111827;
   border-radius: 0.35rem;
   overflow: hidden;
-  margin-top: 0.95rem; /* un filo più aria per label sopra */
+  margin-top: 0.75rem;
   margin-bottom: 0.15rem;
 }
 
@@ -143,17 +143,19 @@ body {
   transition: left 0.25s ease;
 }
 
-/* timeframe label SEMPRE leggibile: sopra barra e centrato */
+/* timeframe label DENTRO la barra (solo price bars, perché stake/reward la nascondono) */
 .bar-label {
   position: absolute;
   left: 50%;
-  top: -16px;
-  transform: translateX(-50%);
-  font-size: 0.72rem;
-  font-weight: 800;
-  color: rgba(249, 250, 251, 0.70);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  color: rgba(249, 250, 251, 0.82);
   pointer-events: none;
-  text-shadow: 0 1px 10px rgba(0,0,0,0.65);
+  text-shadow: 0 1px 10px rgba(0,0,0,0.75);
+  z-index: 5;
 }
 
 .bar-values {
@@ -231,7 +233,7 @@ body {
   height: 100% !important;
 }
 
-/* prezzo top-right grafico */
+/* overlay: mostra solo quando interagisci (classe .show) */
 .chart-overlay {
   position: absolute;
   top: 12px;
@@ -242,8 +244,10 @@ body {
   color: #f9fafb;
   pointer-events: none;
   text-shadow: 0 1px 10px rgba(0,0,0,0.55);
-  opacity: 0.95;
+  opacity: 0;
+  transition: opacity 180ms ease;
 }
+.chart-overlay.show { opacity: 0.95; }
 
 .last-update {
   font-size: 0.8rem;
@@ -288,4 +292,14 @@ body {
 .container.ready .bar-values {
   opacity: 1;
   transition: opacity 450ms ease;
+}
+
+/* ===== Flash giallo per ATH/ATL laterali ===== */
+.flash-yellow {
+  animation: flashYellow 700ms ease;
+}
+@keyframes flashYellow {
+  0%   { color: #facc15; transform: scale(1.08); text-shadow: 0 0 12px rgba(250,204,21,.35); }
+  50%  { color: #facc15; transform: scale(1.12); text-shadow: 0 0 18px rgba(250,204,21,.45); }
+  100% { color: #9ca3af; transform: scale(1.00); text-shadow: none; }
 }
