@@ -115,16 +115,11 @@ body {
   margin-bottom: 0.15rem;
 }
 
-/* assicurati che la linea gialla stia SEMPRE sopra */
-.bar-fill { z-index: 1; }
-.bar-line { z-index: 2; }
-.bar-label, .reward-percent { z-index: 3; }
-
 .bar-fill {
   position: absolute;
   height: 100%;
   width: 0;
-  transition: width 0.15s ease, left 0.15s ease, background 0.18s ease;
+  transition: width 0.25s ease, left 0.25s ease, background 0.22s ease;
 }
 
 .bar-line {
@@ -132,6 +127,7 @@ body {
   width: 2px;
   height: 100%;
   background: #facc15;
+  transition: left 0.25s ease;
 }
 
 .bar-label {
@@ -158,21 +154,13 @@ body {
 .bar-values .center { position: absolute; left: 50%; transform: translateX(-50%); }
 .bar-values .right { position: absolute; right: 0; }
 
-/* un pelo più respiro (non cambia dimensione card) */
-.price-card .perf { margin-top: 0.55rem; }
-.price-card .bar-container { margin-top: 0.55rem; }
-.price-card .bar-values { margin-top: 0.45rem; margin-bottom: 0.85rem; }
+.price-card .perf { margin-top: 0.35rem; }
+.price-card .bar-values { margin-bottom: 0.65rem; }
 
 /* reward */
 .reward-container { height: 26px; }
-
-/* temperatura: controllata da --heat (0..100) */
 .reward-fill {
-  background: linear-gradient(
-    90deg,
-    hsl(calc(200 - (var(--heat, 0) * 2)), 85%, 55%),
-    hsl(calc(200 - (var(--heat, 0) * 2)), 95%, 45%)
-  );
+  background: linear-gradient(to right, #0ea5e9, #3b82f6);
 }
 
 .reward-percent {
@@ -189,11 +177,28 @@ body {
 .reward-card .bar-label { display: none; }
 
 /* CHART */
-.chart-card { height: 300px; }
+.chart-card {
+  height: 300px;
+  position: relative;
+}
 
 #priceChart {
   width: 100% !important;
   height: 100% !important;
+}
+
+/* prezzo top-right grafico */
+.chart-overlay {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 10;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #f9fafb;
+  pointer-events: none;
+  text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+  opacity: 0.95;
 }
 
 .last-update {
