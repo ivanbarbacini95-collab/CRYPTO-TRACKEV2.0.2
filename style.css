@@ -115,6 +115,11 @@ body {
   margin-bottom: 0.15rem;
 }
 
+/* assicurati che la linea gialla stia SEMPRE sopra */
+.bar-fill { z-index: 1; }
+.bar-line { z-index: 2; }
+.bar-label, .reward-percent { z-index: 3; }
+
 .bar-fill {
   position: absolute;
   height: 100%;
@@ -153,13 +158,21 @@ body {
 .bar-values .center { position: absolute; left: 50%; transform: translateX(-50%); }
 .bar-values .right { position: absolute; right: 0; }
 
-.price-card .perf { margin-top: 0.35rem; }
-.price-card .bar-values { margin-bottom: 0.65rem; }
+/* un pelo più respiro (non cambia dimensione card) */
+.price-card .perf { margin-top: 0.55rem; }
+.price-card .bar-container { margin-top: 0.55rem; }
+.price-card .bar-values { margin-top: 0.45rem; margin-bottom: 0.85rem; }
 
 /* reward */
 .reward-container { height: 26px; }
+
+/* temperatura: controllata da --heat (0..100) */
 .reward-fill {
-  background: linear-gradient(to right, #0ea5e9, #3b82f6);
+  background: linear-gradient(
+    90deg,
+    hsl(calc(200 - (var(--heat, 0) * 2)), 85%, 55%),
+    hsl(calc(200 - (var(--heat, 0) * 2)), 95%, 45%)
+  );
 }
 
 .reward-percent {
