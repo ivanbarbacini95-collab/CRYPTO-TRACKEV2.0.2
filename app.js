@@ -2,11 +2,11 @@
    Injective • Portfolio — app.js (FULL)
    - Price realtime (Binance WS) + 1D/1W/1M bars
    - Account (Injective LCD) available / staked / rewards / apr
-   - 1D Price Chart (REST bootstrap + WS 1m) + pan/zoom + overlay
-   - Stake Chart (ALL points) + Y ticks step 1 + persistence chunked
-   - Reward Withdrawals Chart (ALL points) + labels always visible (no overlap) + persistence chunked
-   - Online/Offline: Offline ONLY if no internet
-   - Live/Refresh mode (optional UI hooks)
+   - 1D Price Chart (REST bootstrap + WS 1m) + pan/zoom + overlay pinned
+   - Stake Chart: ALL points (saved), Y step=1, auto-scale on visible window, PAD=6
+   - Reward Withdrawals Chart: ALL points (saved), Y step=1, auto-scale on visible window, labels visible (no invade Y axis), no overlap
+   - Persistence: localStorage chunked append-only
+   - Offline indicator: Offline ONLY when no internet
 ========================================================= */
 
 /* ===================== CONFIG ===================== */
@@ -21,17 +21,21 @@ const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
 
-/* Reward withdrawal detection */
+/* Withdrawal detection */
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
-/* Persistence (chunked append-only) */
+/* Persistence (append-only chunks) */
 const STORE_VER = 1;
 const CHUNK_SIZE = 220;
 
-/* "No overlap" windowing */
+/* No-overlap readable window */
 const MAX_LABELS_VISIBLE = 80;
-const MIN_PX_PER_POINT_STAKE = 46;  // label "COMPOUND/DELEGATE"
-const MIN_PX_PER_POINT_REWARD = 56; // label "+0.0034 INJ"
+const MIN_PX_PER_POINT_STAKE = 46;
+const MIN_PX_PER_POINT_REWARD = 56;
+
+/* AXIS PADDING */
+const STAKE_PAD = 6;       // ✅ richiesto: pad 6
+const REWARD_PAD = 1;      // reward: pad “soft” (step 1 rimane)
 
 /* ===================== HELPERS ===================== */
 const $ = (id) => document.getElementById(id);
@@ -45,73 +49,30 @@ function nowTS() { return Date.now(); }
 function hasInternet() { return navigator.onLine === true; }
 
 function fgColor() {
-  // compatibile sia dark che light senza rompere la tua palette
   const isLight = document.body?.dataset?.theme === "light";
   return isLight ? "#111827" : "#f9fafb";
 }
 
-/* ===================== OPTIONAL UI HOOKS (menu/search) ===================== */
+/* Inject small CSS for flash if missing */
+(function injectFlashCSS() {
+  const id = "inj_flash_css";
+  if (document.getElementById(id)) return;
+  const st = document.createElement("style");
+  st.id = id;
+  st.textContent = `
+  .flash-yellow { animation: injFlashYellow 650ms ease; }
+  @keyframes injFlashYellow {
+    0% { transform: scale(1); color: inherit; }
+    30% { transform: scale(1.12); color: #facc15; }
+    100% { transform: scale(1); color: inherit; }
+  }`;
+  document.head.appendChild(st);
+})();
+
+/* ===================== OPTIONAL UI (if present) ===================== */
 const statusDot = $("statusDot");
 const statusText = $("statusText");
-
-const menuBtn = $("menuBtn");
-const backdrop = $("backdrop");
-const drawer = $("drawer");
-const drawerNav = $("drawerNav");
-
-const themeToggle = $("themeToggle");
-const themeIcon = $("themeIcon");
-
-const liveToggle = $("liveToggle");
-const liveIcon = $("liveIcon");
-const modeHint = $("modeHint");
-
-const searchWrap = $("searchWrap");
-const searchBtn = $("searchBtn");
 const addressInput = $("addressInput");
-const addressDisplay = $("addressDisplay");
-
-/* ===================== THEME ===================== */
-const THEME_KEY = "inj_theme";
-let theme = localStorage.getItem(THEME_KEY) || "dark";
-
-function applyTheme(t) {
-  theme = (t === "light") ? "light" : "dark";
-  document.body.dataset.theme = theme;
-  localStorage.setItem(THEME_KEY, theme);
-  if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
-}
-applyTheme(theme);
-
-themeToggle?.addEventListener("click", () => applyTheme(theme === "dark" ? "light" : "dark"), { passive: true });
-
-/* ===================== LIVE/REFRESH MODE ===================== */
-const MODE_KEY = "inj_mode"; // "live" | "refresh"
-let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
-
-function setMode(isLive) {
-  liveMode = !!isLive;
-  localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
-
-  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
-  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-
-  if (liveMode) {
-    startAllTimers();
-    startTradeWS();
-    startKlineWS();
-    loadAccount(false);
-    loadCandleSnapshot(false);
-    loadChartToday(false);
-  } else {
-    stopAllTimers();
-    stopAllSockets();
-    // in refresh mode: carichi una volta al refresh pagina
-    oneShotRefresh().catch(() => {});
-  }
-  refreshConnUI();
-}
-liveToggle?.addEventListener("click", () => setMode(!liveMode), { passive: true });
 
 /* ===================== CONNECTION UI ===================== */
 let wsTradeOnline = false;
@@ -128,14 +89,7 @@ function refreshConnUI() {
     return;
   }
 
-  // Se refresh mode -> online se internet
-  if (!liveMode) {
-    statusText.textContent = "Online";
-    statusDot.style.background = "#22c55e";
-    return;
-  }
-
-  // Live mode: ok solo se WS+LCD ok
+  // In questa versione: sempre LIVE (se vuoi toggle, lo reinseriamo nel menu)
   const ok = wsTradeOnline && wsKlineOnline && accountOnline;
   if (ok) {
     statusText.textContent = "Online";
@@ -148,11 +102,9 @@ function refreshConnUI() {
 
 window.addEventListener("online", () => {
   refreshConnUI();
-  if (liveMode) {
-    startTradeWS();
-    startKlineWS();
-    loadAccount(false);
-  }
+  startTradeWS();
+  startKlineWS();
+  loadAccount();
 }, { passive: true });
 
 window.addEventListener("offline", () => {
@@ -161,93 +113,6 @@ window.addEventListener("offline", () => {
   accountOnline = false;
   refreshConnUI();
 }, { passive: true });
-
-/* ===================== SEARCH (optional lens UX) ===================== */
-let address = localStorage.getItem("inj_address") || "";
-let pendingAddress = address || "";
-
-function shortAddr(a) {
-  a = (a || "").trim();
-  if (!a) return "";
-  return a.length > 18 ? `${a.slice(0, 10)}…${a.slice(-6)}` : a;
-}
-function setAddressDisplay(addr) {
-  if (!addressDisplay) return;
-  if (!addr) { addressDisplay.innerHTML = ""; return; }
-  addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${shortAddr(addr)}</span>`;
-}
-
-function openSearch() {
-  if (!searchWrap) return;
-  searchWrap.classList.add("open");
-  setTimeout(() => addressInput?.focus(), 20);
-}
-function closeSearch() {
-  if (!searchWrap) return;
-  searchWrap.classList.remove("open");
-  addressInput?.blur();
-}
-
-if (addressInput) addressInput.value = pendingAddress;
-
-searchBtn?.addEventListener("click", () => {
-  if (!searchWrap?.classList.contains("open")) openSearch();
-  else addressInput?.focus();
-}, { passive: true });
-
-addressInput?.addEventListener("focus", openSearch, { passive: true });
-addressInput?.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
-
-addressInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    commitAddress(pendingAddress);
-    closeSearch();
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    addressInput.value = address || "";
-    pendingAddress = address || "";
-    closeSearch();
-  }
-});
-
-document.addEventListener("click", (e) => {
-  if (!searchWrap) return;
-  if (searchWrap.contains(e.target)) return;
-  closeSearch();
-});
-
-/* ===================== DRAWER MENU (optional) ===================== */
-let drawerOpen = false;
-function openDrawer() {
-  drawerOpen = true;
-  document.body.classList.add("drawer-open");
-  drawer?.setAttribute("aria-hidden", "false");
-  backdrop?.setAttribute("aria-hidden", "false");
-}
-function closeDrawer() {
-  drawerOpen = false;
-  document.body.classList.remove("drawer-open");
-  drawer?.setAttribute("aria-hidden", "true");
-  backdrop?.setAttribute("aria-hidden", "true");
-}
-function toggleDrawer() { drawerOpen ? closeDrawer() : openDrawer(); }
-
-menuBtn?.addEventListener("click", toggleDrawer, { passive: true });
-backdrop?.addEventListener("click", closeDrawer, { passive: true });
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDrawer();
-});
-
-drawerNav?.addEventListener("click", (e) => {
-  const btn = e.target?.closest(".nav-item");
-  if (!btn) return;
-  // pagina futura: per ora solo evidenzia
-  const items = drawerNav.querySelectorAll(".nav-item");
-  items.forEach(x => x.classList.toggle("active", x === btn));
-  closeDrawer();
-});
 
 /* ===================== SMOOTH DISPLAY ===================== */
 let settleStart = Date.now();
@@ -331,10 +196,22 @@ function heatColor(p) {
   return `rgb(${14 + (239 - 14) * t},${165 - 165 * t},${233 - 233 * t})`;
 }
 
-/* ===================== STATE ===================== */
-let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
+/* ===================== FETCH ===================== */
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
+/* ===================== STATE ===================== */
+let address = localStorage.getItem("inj_address") || "";
+let targetPrice = 0;
+
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
 const candle = {
@@ -344,7 +221,7 @@ const candle = {
 };
 const tfReady = { d: false, w: false, m: false };
 
-/* flash extremes (optional) */
+/* flash extremes */
 const lastExtremes = {
   d: { low: null, high: null },
   w: { low: null, high: null },
@@ -357,171 +234,36 @@ function flash(el) {
   el.classList.add("flash-yellow");
 }
 
-/* ===================== FETCH ===================== */
-async function fetchJSON(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  } catch {
-    return null;
-  }
+/* ===================== ADDRESS INPUT ===================== */
+if (addressInput) {
+  addressInput.value = address;
+  addressInput.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const next = (addressInput.value || "").trim();
+    if (!next) return;
+
+    address = next;
+    localStorage.setItem("inj_address", address);
+
+    // reset detectors (non perdi i punti salvati: sono per address)
+    lastRewardsSeenForWithdraw = null;
+    lastStakeForType = null;
+    lastRewardsForType = null;
+
+    // carica punti storici e ridisegna
+    loadStakePointsForAddress(address);
+    loadRewardPointsForAddress(address);
+    if (stakeChart) redrawStakeChart(true);
+    if (rewardChart) redrawRewardChart(true);
+
+    settleStart = Date.now();
+    loadAccount();
+  });
 }
 
-/* ===================== TIMERS & SOCKETS ===================== */
-let accountPollTimer = null;
-let restSyncTimer = null;
-let chartSyncTimer = null;
-let ensureChartTimer = null;
-
-let wsTrade = null;
-let wsKline = null;
-let tradeRetryTimer = null;
-let klineRetryTimer = null;
-
-function stopAllTimers() {
-  if (accountPollTimer) { clearInterval(accountPollTimer); accountPollTimer = null; }
-  if (restSyncTimer) { clearInterval(restSyncTimer); restSyncTimer = null; }
-  if (chartSyncTimer) { clearInterval(chartSyncTimer); chartSyncTimer = null; }
-  if (ensureChartTimer) { clearInterval(ensureChartTimer); ensureChartTimer = null; }
-}
-function startAllTimers() {
-  stopAllTimers();
-  accountPollTimer = setInterval(() => loadAccount(false), ACCOUNT_POLL_MS);
-  restSyncTimer = setInterval(() => loadCandleSnapshot(false), REST_SYNC_MS);
-  chartSyncTimer = setInterval(() => loadChartToday(false), CHART_SYNC_MS);
-  ensureChartTimer = setInterval(ensureChartBootstrapped, 1500);
-}
-
-function stopAllSockets() {
-  try { wsTrade?.close(); } catch {}
-  try { wsKline?.close(); } catch {}
-  wsTrade = null; wsKline = null;
-
-  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
-  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
-
-  wsTradeOnline = false;
-  wsKlineOnline = false;
-}
-
-/* One-shot refresh (refresh mode) */
-async function oneShotRefresh() {
-  await loadCandleSnapshot(true);
-  await loadChartToday(true);
-  if (address) await loadAccount(true);
-  refreshConnUI();
-}
-
-/* ===================== ACCOUNT (Injective LCD) ===================== */
-let lastRewardsSeenForWithdraw = null;
-let lastStakeSeenForType = null;
-let lastRewardsSeenForType = null;
-
-function inferStakeType(newStake, newRewards) {
-  if (lastStakeSeenForType == null) return "START";
-  const ds = safe(newStake) - safe(lastStakeSeenForType);
-  if (ds === 0) return null;
-
-  if (ds > 0) {
-    if (lastRewardsSeenForType != null) {
-      const dr = safe(lastRewardsSeenForType) - safe(newRewards);
-      if (dr > REWARD_WITHDRAW_THRESHOLD) return "COMPOUND";
-    }
-    return "DELEGATE";
-  }
-  return "UNDELEGATE";
-}
-
-async function loadAccount(forceOnce = false) {
-  if (!liveMode && !forceOnce) return;
-  if (!address || !hasInternet()) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
-
-  const base = "https://lcd.injective.network";
-  const [b, s, r, i] = await Promise.all([
-    fetchJSON(`${base}/cosmos/bank/v1beta1/balances/${address}`),
-    fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`),
-    fetchJSON(`${base}/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
-    fetchJSON(`${base}/cosmos/mint/v1beta1/inflation`)
-  ]);
-
-  if (!b || !s || !r || !i) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
-
-  accountOnline = true;
-  refreshConnUI();
-
-  availableInj = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
-  stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
-  rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
-  apr = safe(i.inflation) * 100;
-
-  // 1) record withdrawal event
-  if (lastRewardsSeenForWithdraw == null) lastRewardsSeenForWithdraw = rewardsInj;
-  const diff = safe(lastRewardsSeenForWithdraw) - safe(rewardsInj);
-  if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    addRewardWithdrawalPoint(address, diff);
-  }
-  lastRewardsSeenForWithdraw = rewardsInj;
-
-  // 2) record stake point on EVERY change
-  const type = inferStakeType(stakeInj, rewardsInj);
-  addStakePoint(address, stakeInj, type || "");
-
-  lastStakeSeenForType = stakeInj;
-  lastRewardsSeenForType = rewardsInj;
-}
-
-/* ===================== BINANCE REST SNAPSHOT (1D/1W/1M) ===================== */
-async function loadCandleSnapshot(forceOnce = false) {
-  if (!liveMode && !forceOnce) return;
-  if (!hasInternet()) return;
-
-  const [d, w, m] = await Promise.all([
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1w&limit=1"),
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1M&limit=1"),
-  ]);
-
-  if (Array.isArray(d) && d[0]) {
-    candle.d.t = safe(d[0][0]);
-    candle.d.open = safe(d[0][1]);
-    candle.d.high = safe(d[0][2]);
-    candle.d.low  = safe(d[0][3]);
-    if (candle.d.open && Number.isFinite(candle.d.high) && Number.isFinite(candle.d.low)) tfReady.d = true;
-  }
-  if (Array.isArray(w) && w[0]) {
-    candle.w.t = safe(w[0][0]);
-    candle.w.open = safe(w[0][1]);
-    candle.w.high = safe(w[0][2]);
-    candle.w.low  = safe(w[0][3]);
-    if (candle.w.open && Number.isFinite(candle.w.high) && Number.isFinite(candle.w.low)) tfReady.w = true;
-  }
-  if (Array.isArray(m) && m[0]) {
-    candle.m.t = safe(m[0][0]);
-    candle.m.open = safe(m[0][1]);
-    candle.m.high = safe(m[0][2]);
-    candle.m.low  = safe(m[0][3]);
-    if (candle.m.open && Number.isFinite(candle.m.high) && Number.isFinite(candle.m.low)) tfReady.m = true;
-  }
-
-  const root = $("appRoot");
-  if (root && root.classList.contains("loading") && tfReady.d) {
-    root.classList.remove("loading");
-    root.classList.add("ready");
-  }
-}
-
-/* ===================== AUTO-LOAD ZOOM PLUGIN ===================== */
+/* ===================== CHARTJS ZOOM PLUGIN AUTOLOAD ===================== */
 async function ensureZoomPlugin() {
-  // If already available, try register
   try {
     if (window.Chart && window.ChartZoom) {
       window.Chart.register(window.ChartZoom);
@@ -529,7 +271,6 @@ async function ensureZoomPlugin() {
     }
   } catch {}
 
-  // Load from CDN
   await new Promise((resolve) => {
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js";
@@ -541,418 +282,6 @@ async function ensureZoomPlugin() {
   try {
     if (window.Chart && window.ChartZoom) window.Chart.register(window.ChartZoom);
   } catch {}
-}
-
-/* ===================== PRICE CHART 1D ===================== */
-let priceChart = null;
-let chartLabels = [];
-let chartData = [];
-let lastChartMinuteStart = 0;
-let chartBootstrappedToday = false;
-
-let hoverActive = false;
-let hoverIndex = null;
-let pinnedIndex = null;
-let lastChartSign = "neutral";
-
-const verticalLinePlugin = {
-  id: "verticalLinePlugin",
-  afterDraw(ch) {
-    if (!hoverActive || hoverIndex == null) return;
-    const meta = ch.getDatasetMeta(0);
-    const el = meta?.data?.[hoverIndex];
-    if (!el) return;
-
-    const ctx = ch.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(el.x, ch.chartArea.top);
-    ctx.lineTo(el.x, ch.chartArea.bottom);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(250,204,21,0.9)";
-    ctx.stroke();
-    ctx.restore();
-  }
-};
-
-function applyPriceChartColorBySign(sign) {
-  if (!priceChart) return;
-  const ds = priceChart.data.datasets?.[0];
-  if (!ds) return;
-
-  if (sign === "up") {
-    ds.borderColor = "#22c55e";
-    ds.backgroundColor = "rgba(34,197,94,.20)";
-  } else if (sign === "down") {
-    ds.borderColor = "#ef4444";
-    ds.backgroundColor = "rgba(239,68,68,.18)";
-  } else {
-    ds.borderColor = "#3b82f6";
-    ds.backgroundColor = "rgba(59,130,246,.14)";
-  }
-  priceChart.update("none");
-}
-
-function updatePriceOverlayFromPinned() {
-  const chartEl = $("chartPrice");
-  const overlay = $("chartOverlay");
-  if (!chartEl || !overlay || !priceChart) return;
-
-  if (pinnedIndex == null) {
-    overlay.classList.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
-
-  const ds = priceChart.data.datasets?.[0]?.data || [];
-  const lbs = priceChart.data.labels || [];
-  if (!ds.length || !lbs.length) {
-    overlay.classList.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
-
-  let idx = clamp(Math.round(+pinnedIndex), 0, ds.length - 1);
-  const price = safe(ds[idx]);
-  const label = lbs[idx];
-  if (!Number.isFinite(price) || !label) {
-    overlay.classList.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
-
-  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
-  overlay.classList.add("show");
-}
-
-async function fetchKlines1mRange(startTime, endTime) {
-  const out = [];
-  let cursor = startTime;
-  const end = endTime || Date.now();
-
-  while (cursor < end && out.length < DAY_MINUTES) {
-    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
-    const d = await fetchJSON(url);
-    if (!Array.isArray(d) || !d.length) break;
-
-    out.push(...d);
-
-    const lastOpenTime = safe(d[d.length - 1][0]);
-    cursor = lastOpenTime + ONE_MIN_MS;
-
-    if (!lastOpenTime) break;
-    if (d.length < 1000) break;
-  }
-  return out.slice(0, DAY_MINUTES);
-}
-
-async function initPriceChart() {
-  await ensureZoomPlugin();
-
-  const canvas = $("priceChart");
-  if (!canvas || !window.Chart) return;
-
-  priceChart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: chartLabels,
-      datasets: [{
-        data: chartData,
-        borderColor: "#3b82f6",
-        backgroundColor: "rgba(59,130,246,.14)",
-        fill: true,
-        pointRadius: 0,
-        tension: 0.3
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false },
-        zoom: {
-          pan: {
-            enabled: true,
-            mode: "x",
-            threshold: 2,
-            onPanComplete: ({ chart }) => {
-              const xScale = chart.scales.x;
-              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(centerPx);
-              updatePriceOverlayFromPinned();
-            }
-          },
-          zoom: {
-            wheel: { enabled: true },
-            pinch: { enabled: true },
-            mode: "x",
-            onZoomComplete: ({ chart }) => {
-              const xScale = chart.scales.x;
-              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(centerPx);
-              updatePriceOverlayFromPinned();
-            }
-          }
-        }
-      },
-      interaction: { mode: "index", intersect: false },
-      scales: {
-        x: { display: false },
-        y: { ticks: { color: "#9ca3af" } }
-      }
-    },
-    plugins: [verticalLinePlugin]
-  });
-
-  setupPriceChartInteractions();
-}
-
-function setupPriceChartInteractions() {
-  const canvas = $("priceChart");
-  if (!canvas || !priceChart) return;
-
-  const getIndexFromEvent = (evt) => {
-    const points = priceChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
-    if (!points || !points.length) return null;
-    return points[0].index;
-  };
-
-  const handleMove = (evt) => {
-    const idx = getIndexFromEvent(evt);
-    if (idx == null) return;
-
-    hoverActive = true;
-    hoverIndex = idx;
-
-    pinnedIndex = idx;
-    updatePriceOverlayFromPinned();
-    priceChart.update("none");
-  };
-
-  const handleLeave = () => {
-    hoverActive = false;
-    hoverIndex = null;
-    pinnedIndex = null;
-    updatePriceOverlayFromPinned();
-    priceChart.update("none");
-  };
-
-  canvas.addEventListener("mousemove", handleMove, { passive: true });
-  canvas.addEventListener("mouseleave", handleLeave, { passive: true });
-
-  canvas.addEventListener("touchstart", (e) => { handleMove(e); }, { passive: true });
-  canvas.addEventListener("touchmove", (e) => { handleMove(e); }, { passive: true });
-  canvas.addEventListener("touchend", handleLeave, { passive: true });
-  canvas.addEventListener("touchcancel", handleLeave, { passive: true });
-}
-
-async function loadChartToday(forceOnce = false) {
-  if (!liveMode && !forceOnce) return;
-  if (!hasInternet()) return;
-  if (!tfReady.d || !candle.d.t) return;
-
-  const kl = await fetchKlines1mRange(candle.d.t, Date.now());
-  if (!kl.length) return;
-
-  chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
-  chartData = kl.map(k => safe(k[4]));
-
-  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
-  const lastClose = safe(kl[kl.length - 1][4]);
-  if (!targetPrice && lastClose) targetPrice = lastClose;
-
-  if (!priceChart && window.Chart) await initPriceChart();
-  if (priceChart) {
-    priceChart.data.labels = chartLabels;
-    priceChart.data.datasets[0].data = chartData;
-    priceChart.update("none");
-  }
-
-  chartBootstrappedToday = true;
-}
-
-function updateChartFrom1mKline(k) {
-  if (!liveMode) return;
-  if (!priceChart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
-
-  const openTime = safe(k.t);
-  const close = safe(k.c);
-  if (!openTime || !close) return;
-  if (openTime < candle.d.t) return;
-
-  if (lastChartMinuteStart === openTime) {
-    const idx = priceChart.data.datasets[0].data.length - 1;
-    if (idx >= 0) {
-      priceChart.data.datasets[0].data[idx] = close;
-      priceChart.update("none");
-    }
-    return;
-  }
-
-  lastChartMinuteStart = openTime;
-
-  priceChart.data.labels.push(fmtHHMM(openTime));
-  priceChart.data.datasets[0].data.push(close);
-
-  while (priceChart.data.labels.length > DAY_MINUTES) priceChart.data.labels.shift();
-  while (priceChart.data.datasets[0].data.length > DAY_MINUTES) priceChart.data.datasets[0].data.shift();
-
-  priceChart.update("none");
-}
-
-async function resetDayAndReloadChart(nextOpenTime) {
-  chartBootstrappedToday = false;
-  chartLabels = [];
-  chartData = [];
-  lastChartMinuteStart = 0;
-
-  if (priceChart) {
-    priceChart.data.labels = [];
-    priceChart.data.datasets[0].data = [];
-    priceChart.update("none");
-  }
-
-  if (nextOpenTime) candle.d.t = nextOpenTime;
-
-  await loadCandleSnapshot(false);
-  await loadChartToday(false);
-
-  hoverActive = false;
-  hoverIndex = null;
-  pinnedIndex = null;
-  updatePriceOverlayFromPinned();
-}
-
-async function ensureChartBootstrapped() {
-  if (!liveMode) return;
-  if (chartBootstrappedToday) return;
-
-  if (!tfReady.d || !candle.d.t) await loadCandleSnapshot(false);
-  if (tfReady.d && candle.d.t) await loadChartToday(false);
-}
-
-/* ===================== BINANCE WS TRADE ===================== */
-function clearTradeRetry() { if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; } }
-function scheduleTradeRetry() {
-  clearTradeRetry();
-  tradeRetryTimer = setTimeout(() => { if (liveMode) startTradeWS(); }, 1200);
-}
-
-function startTradeWS() {
-  if (!liveMode) return;
-  try { wsTrade?.close(); } catch {}
-
-  wsTradeOnline = false;
-  refreshConnUI();
-  if (!hasInternet()) return;
-
-  wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
-
-  wsTrade.onopen = () => { wsTradeOnline = true; refreshConnUI(); clearTradeRetry(); };
-  wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); scheduleTradeRetry(); };
-  wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
-
-  wsTrade.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    const p = safe(msg.p);
-    if (!p) return;
-
-    targetPrice = p;
-
-    if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
-    if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
-    if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
-  };
-}
-
-/* ===================== BINANCE WS KLINES ===================== */
-function clearKlineRetry() { if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; } }
-function scheduleKlineRetry() {
-  clearKlineRetry();
-  klineRetryTimer = setTimeout(() => { if (liveMode) startKlineWS(); }, 1200);
-}
-
-function applyKline(intervalKey, k) {
-  const t = safe(k.t);
-  const o = safe(k.o);
-  const h = safe(k.h);
-  const l = safe(k.l);
-
-  if (o && h && l) {
-    candle[intervalKey].t = t || candle[intervalKey].t;
-    candle[intervalKey].open = o;
-    candle[intervalKey].high = h;
-    candle[intervalKey].low  = l;
-
-    if (!tfReady[intervalKey]) {
-      tfReady[intervalKey] = true;
-      settleStart = Date.now();
-    }
-  }
-}
-
-function startKlineWS() {
-  if (!liveMode) return;
-  try { wsKline?.close(); } catch {}
-
-  wsKlineOnline = false;
-  refreshConnUI();
-  if (!hasInternet()) return;
-
-  const url =
-    "wss://stream.binance.com:9443/stream?streams=" +
-    "injusdt@kline_1m/" +
-    "injusdt@kline_1d/" +
-    "injusdt@kline_1w/" +
-    "injusdt@kline_1M";
-
-  wsKline = new WebSocket(url);
-
-  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); clearKlineRetry(); };
-  wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
-  wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
-
-  wsKline.onmessage = async (e) => {
-    const payload = JSON.parse(e.data);
-    const data = payload.data;
-    if (!data || !data.k) return;
-
-    const stream = payload.stream || "";
-    const k = data.k;
-
-    if (stream.includes("@kline_1m")) {
-      updateChartFrom1mKline(k);
-      return;
-    }
-
-    if (stream.includes("@kline_1d")) {
-      const prevDayOpen = candle.d.t;
-      applyKline("d", k);
-
-      if (!chartBootstrappedToday && tfReady.d && candle.d.t) {
-        await loadChartToday(false);
-      }
-
-      if (k.x === true) {
-        const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
-        await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
-      } else {
-        if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
-          await resetDayAndReloadChart(candle.d.t);
-        }
-      }
-    }
-    else if (stream.includes("@kline_1w")) applyKline("w", k);
-    else if (stream.includes("@kline_1M")) applyKline("m", k);
-
-    const root = $("appRoot");
-    if (root && root.classList.contains("loading") && tfReady.d) {
-      root.classList.remove("loading");
-      root.classList.add("ready");
-    }
-  };
 }
 
 /* =========================================================
@@ -1049,10 +378,11 @@ function loadAllPoints(prefix, addr) {
 }
 
 /* =========================================================
-   NO-OVERLAP WINDOWING
+   NO-OVERLAP WINDOWING + AXIS AUTO-SCALING (VISIBLE RANGE)
 ========================================================= */
 function ensureReadableWindow(ch, minPxPerPoint, maxLabels = MAX_LABELS_VISIBLE) {
   if (!ch) return;
+
   const ds = ch.data.datasets?.[0];
   const n = ds?.data?.length || 0;
   if (n <= 1) return;
@@ -1071,13 +401,56 @@ function ensureReadableWindow(ch, minPxPerPoint, maxLabels = MAX_LABELS_VISIBLE)
   const curMax = Number.isFinite(xScale.max) ? xScale.max : xmax;
   const visibleNow = Math.floor(curMax - curMin + 1);
 
-  // se troppi punti visibili -> forza finestra leggibile sugli ultimi maxVisible
+  // Se troppi punti visibili -> forza finestra leggibile sugli ultimi maxVisible
   if (visibleNow > maxVisible) {
     const xmin = Math.max(0, xmax - maxVisible + 1);
     ch.options.scales.x.min = xmin;
     ch.options.scales.x.max = xmax;
     ch.update("none");
   }
+}
+
+function visibleIndexRange(ch, n) {
+  const xScale = ch?.scales?.x;
+  if (!xScale || !n) return { min: 0, max: Math.max(0, n - 1) };
+
+  let min = Number.isFinite(xScale.min) ? Math.floor(xScale.min) : 0;
+  let max = Number.isFinite(xScale.max) ? Math.ceil(xScale.max) : (n - 1);
+  min = clamp(min, 0, n - 1);
+  max = clamp(max, 0, n - 1);
+  if (max < min) [min, max] = [max, min];
+  return { min, max };
+}
+
+/* Auto-scale Y based on VISIBLE points; keep integer ticks (step 1) */
+function autoScaleYOnVisible(ch, valuesArray, pad, { floorAtZero = false, minSpan = 2 } = {}) {
+  if (!ch) return;
+  const n = valuesArray?.length || 0;
+  if (n < 2) return;
+
+  const { min: i0, max: i1 } = visibleIndexRange(ch, n);
+
+  let vMin = Infinity, vMax = -Infinity;
+  for (let i = i0; i <= i1; i++) {
+    const v = safe(valuesArray[i]);
+    if (!Number.isFinite(v)) continue;
+    vMin = Math.min(vMin, v);
+    vMax = Math.max(vMax, v);
+  }
+  if (!Number.isFinite(vMin) || !Number.isFinite(vMax)) return;
+
+  let min = Math.floor(vMin - pad);
+  let max = Math.ceil(vMax + pad);
+
+  if (floorAtZero) min = Math.max(0, min);
+
+  // ensure span
+  if (max - min < minSpan) {
+    max = min + minSpan;
+  }
+
+  ch.options.scales.y.min = min;
+  ch.options.scales.y.max = max;
 }
 
 /* =========================================================
@@ -1100,7 +473,7 @@ function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, san
       const ctx = ch.ctx;
       ctx.save();
 
-      // CLIP inside chart area => never touches Y axis column
+      // CLIP inside chart area => never touches Y axis
       ctx.beginPath();
       ctx.rect(area.left, area.top, area.width, area.height);
       ctx.clip();
@@ -1111,11 +484,8 @@ function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, san
         : "rgba(249,250,251,0.92)";
       ctx.textBaseline = "bottom";
 
-      const xScale = ch.scales?.x;
-      let min = Number.isFinite(xScale?.min) ? Math.floor(xScale.min) : 0;
-      let max = Number.isFinite(xScale?.max) ? Math.ceil(xScale.max) : (els.length - 1);
-      min = clamp(min, 0, els.length - 1);
-      max = clamp(max, 0, els.length - 1);
+      const n = els.length;
+      const { min, max } = visibleIndexRange(ch, n);
 
       for (let i = min; i <= max; i++) {
         const el = els[i];
@@ -1149,7 +519,7 @@ function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, san
 }
 
 /* =========================================================
-   STAKE CHART — all points, step=1, no overlap, persistence
+   STAKE CHART — all points, step=1, auto-scale on visible, PAD=6
 ========================================================= */
 let stakeChart = null;
 let stakePoints = []; // {t,label,value,type}
@@ -1161,7 +531,6 @@ const stakeLabelPlugin = makeClippedPointLabelPlugin({
 
 async function initStakeChart() {
   await ensureZoomPlugin();
-
   const canvas = $("stakeChart");
   if (!canvas || !window.Chart) return;
 
@@ -1199,14 +568,32 @@ async function initStakeChart() {
           }
         },
         zoom: {
-          pan: { enabled: true, mode: "x", threshold: 2 },
-          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+          pan: {
+            enabled: true,
+            mode: "x",
+            threshold: 2,
+            onPanComplete: ({ chart }) => {
+              ensureReadableWindow(chart, MIN_PX_PER_POINT_STAKE);
+              autoScaleYOnVisible(chart, chart.data.datasets[0].data, STAKE_PAD, { floorAtZero: false, minSpan: 2 });
+              chart.update("none");
+            }
+          },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x",
+            onZoomComplete: ({ chart }) => {
+              ensureReadableWindow(chart, MIN_PX_PER_POINT_STAKE);
+              autoScaleYOnVisible(chart, chart.data.datasets[0].data, STAKE_PAD, { floorAtZero: false, minSpan: 2 });
+              chart.update("none");
+            }
+          }
         }
       },
       scales: {
         x: { display: false },
         y: {
-          beginAtZero: true,
+          beginAtZero: false,
           ticks: {
             color: "#9ca3af",
             padding: 10,
@@ -1219,18 +606,24 @@ async function initStakeChart() {
     plugins: [stakeLabelPlugin]
   });
 
+  // First-time: readable window + y autoscale visible with PAD=6
   ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE);
-
-  canvas.addEventListener("wheel", () => setTimeout(() => ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE), 0), { passive: true });
-  canvas.addEventListener("touchend", () => setTimeout(() => ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE), 0), { passive: true });
+  autoScaleYOnVisible(stakeChart, stakeChart.data.datasets[0].data, STAKE_PAD, { floorAtZero: false, minSpan: 2 });
+  stakeChart.update("none");
 }
 
-function redrawStakeChart() {
+function redrawStakeChart(forceRescale = false) {
   if (!stakeChart) return;
   stakeChart.data.labels = stakePoints.map(p => p.label);
   stakeChart.data.datasets[0].data = stakePoints.map(p => p.value);
-  stakeChart.update("none");
+
+  // keep readable window; if user zoomed in a lot we don't crush it, only if too many points
   ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE);
+
+  // auto-scale Y based on visible range, PAD=6
+  autoScaleYOnVisible(stakeChart, stakeChart.data.datasets[0].data, STAKE_PAD, { floorAtZero: false, minSpan: 2 });
+
+  stakeChart.update("none");
 }
 
 function loadStakePointsForAddress(addr) {
@@ -1250,7 +643,7 @@ function addStakePoint(addr, stakeValue, typeLabel) {
 
   if (stakePoints.length) {
     const prev = safe(stakePoints[stakePoints.length - 1].value);
-    if (s === prev) return; // ogni cambiamento -> punto, identico -> no
+    if (s === prev) return; // ogni cambiamento = punto, identico = no
   }
 
   const point = { t: nowTS(), label: nowLabel(), value: s, type: typeLabel || "" };
@@ -1259,12 +652,12 @@ function addStakePoint(addr, stakeValue, typeLabel) {
   const ok = appendPoint("inj_stake_points", addr, point);
   if (!ok) console.warn("[stake] localStorage quota? point NOT saved");
 
-  if (!stakeChart) initStakeChart().then(() => redrawStakeChart());
-  else redrawStakeChart();
+  if (!stakeChart) initStakeChart().then(() => redrawStakeChart(true));
+  else redrawStakeChart(true);
 }
 
 /* =========================================================
-   REWARD WITHDRAWALS CHART — all points, label visible, no overlap, step=1, persistence
+   REWARD WITHDRAWALS CHART — step=1, auto-scale on visible, no overlap
 ========================================================= */
 let rewardChart = null;
 let rewardPoints = []; // {t,label,value}
@@ -1280,7 +673,6 @@ const rewardLabelPlugin = makeClippedPointLabelPlugin({
 
 async function initRewardChart() {
   await ensureZoomPlugin();
-
   const canvas = $("rewardChart");
   if (!canvas || !window.Chart) return;
 
@@ -1314,8 +706,26 @@ async function initRewardChart() {
           }
         },
         zoom: {
-          pan: { enabled: true, mode: "x", threshold: 2 },
-          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+          pan: {
+            enabled: true,
+            mode: "x",
+            threshold: 2,
+            onPanComplete: ({ chart }) => {
+              ensureReadableWindow(chart, MIN_PX_PER_POINT_REWARD);
+              autoScaleYOnVisible(chart, chart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
+              chart.update("none");
+            }
+          },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x",
+            onZoomComplete: ({ chart }) => {
+              ensureReadableWindow(chart, MIN_PX_PER_POINT_REWARD);
+              autoScaleYOnVisible(chart, chart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
+              chart.update("none");
+            }
+          }
         }
       },
       scales: {
@@ -1335,17 +745,19 @@ async function initRewardChart() {
   });
 
   ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD);
-
-  canvas.addEventListener("wheel", () => setTimeout(() => ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD), 0), { passive: true });
-  canvas.addEventListener("touchend", () => setTimeout(() => ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD), 0), { passive: true });
+  autoScaleYOnVisible(rewardChart, rewardChart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
+  rewardChart.update("none");
 }
 
-function redrawRewardChart() {
+function redrawRewardChart(forceRescale = false) {
   if (!rewardChart) return;
   rewardChart.data.labels = rewardPoints.map(p => p.label);
   rewardChart.data.datasets[0].data = rewardPoints.map(p => p.value);
-  rewardChart.update("none");
+
   ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD);
+  autoScaleYOnVisible(rewardChart, rewardChart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
+
+  rewardChart.update("none");
 }
 
 function loadRewardPointsForAddress(addr) {
@@ -1368,51 +780,499 @@ function addRewardWithdrawalPoint(addr, amount) {
   const ok = appendPoint("inj_reward_withdrawals", addr, point);
   if (!ok) console.warn("[reward] localStorage quota? point NOT saved");
 
-  if (!rewardChart) initRewardChart().then(() => redrawRewardChart());
-  else redrawRewardChart();
+  if (!rewardChart) initRewardChart().then(() => redrawRewardChart(true));
+  else redrawRewardChart(true);
 }
 
-/* ===================== ADDRESS COMMIT ===================== */
-function commitAddress(newAddr) {
-  const a = (newAddr || "").trim();
-  if (!a) return;
+/* =========================================================
+   ACCOUNT (Injective LCD)
+   - stake points: every change
+   - reward withdrawals: when rewards drop
+========================================================= */
+let lastRewardsSeenForWithdraw = null;
+let lastStakeForType = null;
+let lastRewardsForType = null;
 
-  address = a;
-  pendingAddress = a;
-  localStorage.setItem("inj_address", address);
-  setAddressDisplay(address);
+function inferStakeType(newStake, newRewards) {
+  if (lastStakeForType == null) return "START";
+  const ds = safe(newStake) - safe(lastStakeForType);
+  if (ds === 0) return null;
 
-  // reset smoothing
-  settleStart = Date.now();
-  displayed.available = 0;
-  displayed.stake = 0;
-  displayed.rewards = 0;
+  if (ds > 0) {
+    if (lastRewardsForType != null) {
+      const dr = safe(lastRewardsForType) - safe(newRewards);
+      if (dr > REWARD_WITHDRAW_THRESHOLD) return "COMPOUND";
+    }
+    return "DELEGATE";
+  }
+  return "UNDELEGATE";
+}
 
-  // reset withdraw detector
-  lastRewardsSeenForWithdraw = null;
-
-  // load charts from storage for this address (no loss)
-  loadStakePointsForAddress(address);
-  loadRewardPointsForAddress(address);
-
-  if (stakeChart) redrawStakeChart(); else initStakeChart().then(() => redrawStakeChart());
-  if (rewardChart) redrawRewardChart(); else initRewardChart().then(() => redrawRewardChart());
-
-  // refresh data
-  if (liveMode) {
-    loadAccount(false);
-    startTradeWS();
-    startKlineWS();
-  } else {
-    oneShotRefresh().catch(() => {});
+async function loadAccount() {
+  if (!address || !hasInternet()) {
+    accountOnline = false;
+    refreshConnUI();
+    return;
   }
 
+  const base = "https://lcd.injective.network";
+  const [b, s, r, i] = await Promise.all([
+    fetchJSON(`${base}/cosmos/bank/v1beta1/balances/${address}`),
+    fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`),
+    fetchJSON(`${base}/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
+    fetchJSON(`${base}/cosmos/mint/v1beta1/inflation`)
+  ]);
+
+  if (!b || !s || !r || !i) {
+    accountOnline = false;
+    refreshConnUI();
+    return;
+  }
+
+  accountOnline = true;
   refreshConnUI();
+
+  availableInj = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
+  stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
+  rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
+  apr = safe(i.inflation) * 100;
+
+  // withdrawal event: rewards dropped
+  if (lastRewardsSeenForWithdraw == null) lastRewardsSeenForWithdraw = rewardsInj;
+  const diff = safe(lastRewardsSeenForWithdraw) - safe(rewardsInj);
+  if (diff > REWARD_WITHDRAW_THRESHOLD) {
+    addRewardWithdrawalPoint(address, diff);
+  }
+  lastRewardsSeenForWithdraw = rewardsInj;
+
+  // stake event: every change with type inferred
+  const type = inferStakeType(stakeInj, rewardsInj);
+  addStakePoint(address, stakeInj, type || "");
+
+  lastStakeForType = stakeInj;
+  lastRewardsForType = rewardsInj;
 }
 
-/* ===================== MAIN ANIMATION LOOP ===================== */
+/* =========================================================
+   BINANCE REST SNAPSHOT (1D/1W/1M)
+========================================================= */
+async function loadCandleSnapshot() {
+  if (!hasInternet()) return;
+
+  const [d, w, m] = await Promise.all([
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1w&limit=1"),
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1M&limit=1"),
+  ]);
+
+  if (Array.isArray(d) && d[0]) {
+    candle.d.t = safe(d[0][0]);
+    candle.d.open = safe(d[0][1]);
+    candle.d.high = safe(d[0][2]);
+    candle.d.low  = safe(d[0][3]);
+    if (candle.d.open && Number.isFinite(candle.d.high) && Number.isFinite(candle.d.low)) tfReady.d = true;
+  }
+  if (Array.isArray(w) && w[0]) {
+    candle.w.t = safe(w[0][0]);
+    candle.w.open = safe(w[0][1]);
+    candle.w.high = safe(w[0][2]);
+    candle.w.low  = safe(w[0][3]);
+    if (candle.w.open && Number.isFinite(candle.w.high) && Number.isFinite(candle.w.low)) tfReady.w = true;
+  }
+  if (Array.isArray(m) && m[0]) {
+    candle.m.t = safe(m[0][0]);
+    candle.m.open = safe(m[0][1]);
+    candle.m.high = safe(m[0][2]);
+    candle.m.low  = safe(m[0][3]);
+    if (candle.m.open && Number.isFinite(candle.m.high) && Number.isFinite(candle.m.low)) tfReady.m = true;
+  }
+
+  const root = $("appRoot");
+  if (root && root.classList.contains("loading") && tfReady.d) {
+    root.classList.remove("loading");
+    root.classList.add("ready");
+  }
+}
+
+/* =========================================================
+   PRICE CHART 1D (REST bootstrap + WS 1m) + overlay pinned
+========================================================= */
+let priceChart = null;
+let priceLabels = [];
+let priceData = [];
+let lastChartMinuteStart = 0;
+let chartBootstrappedToday = false;
+
+let hoverActive = false;
+let hoverIndex = null;
+let pinnedIndex = null;
+let lastChartSign = "neutral";
+
+const verticalLinePlugin = {
+  id: "verticalLinePlugin",
+  afterDraw(ch) {
+    if (!hoverActive || hoverIndex == null) return;
+    const meta = ch.getDatasetMeta(0);
+    const el = meta?.data?.[hoverIndex];
+    if (!el) return;
+
+    const ctx = ch.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(el.x, ch.chartArea.top);
+    ctx.lineTo(el.x, ch.chartArea.bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(250,204,21,0.9)";
+    ctx.stroke();
+    ctx.restore();
+  }
+};
+
+function applyPriceChartColorBySign(sign) {
+  if (!priceChart) return;
+  const ds = priceChart.data.datasets?.[0];
+  if (!ds) return;
+
+  if (sign === "up") {
+    ds.borderColor = "#22c55e";
+    ds.backgroundColor = "rgba(34,197,94,.20)";
+  } else if (sign === "down") {
+    ds.borderColor = "#ef4444";
+    ds.backgroundColor = "rgba(239,68,68,.18)";
+  } else {
+    ds.borderColor = "#3b82f6";
+    ds.backgroundColor = "rgba(59,130,246,.14)";
+  }
+  priceChart.update("none");
+}
+
+function updatePriceOverlayFromPinned() {
+  const chartEl = $("chartPrice");
+  const overlay = $("chartOverlay"); // se non c'è, ok
+  if (!chartEl || !priceChart) return;
+
+  if (pinnedIndex == null) {
+    overlay?.classList?.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
+
+  const ds = priceChart.data.datasets?.[0]?.data || [];
+  const lbs = priceChart.data.labels || [];
+  if (!ds.length || !lbs.length) {
+    overlay?.classList?.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
+
+  let idx = clamp(Math.round(+pinnedIndex), 0, ds.length - 1);
+  const price = safe(ds[idx]);
+  const label = lbs[idx];
+  if (!Number.isFinite(price) || !label) {
+    overlay?.classList?.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
+
+  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
+  overlay?.classList?.add("show");
+}
+
+async function fetchKlines1mRange(startTime, endTime) {
+  const out = [];
+  let cursor = startTime;
+  const end = endTime || Date.now();
+
+  while (cursor < end && out.length < DAY_MINUTES) {
+    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
+    const d = await fetchJSON(url);
+    if (!Array.isArray(d) || !d.length) break;
+
+    out.push(...d);
+    const lastOpenTime = safe(d[d.length - 1][0]);
+    cursor = lastOpenTime + ONE_MIN_MS;
+
+    if (!lastOpenTime) break;
+    if (d.length < 1000) break;
+  }
+  return out.slice(0, DAY_MINUTES);
+}
+
+async function initPriceChart() {
+  await ensureZoomPlugin();
+  const canvas = $("priceChart");
+  if (!canvas || !window.Chart) return;
+
+  priceChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: priceLabels,
+      datasets: [{
+        data: priceData,
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59,130,246,.14)",
+        fill: true,
+        pointRadius: 0,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: "x",
+            threshold: 2,
+            onPanComplete: ({ chart }) => {
+              const xScale = chart.scales.x;
+              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
+              pinnedIndex = xScale.getValueForPixel(centerPx);
+              updatePriceOverlayFromPinned();
+            }
+          },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x",
+            onZoomComplete: ({ chart }) => {
+              const xScale = chart.scales.x;
+              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
+              pinnedIndex = xScale.getValueForPixel(centerPx);
+              updatePriceOverlayFromPinned();
+            }
+          }
+        }
+      },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    },
+    plugins: [verticalLinePlugin]
+  });
+
+  setupPriceChartInteractions();
+  updatePriceOverlayFromPinned();
+}
+
+function setupPriceChartInteractions() {
+  const canvas = $("priceChart");
+  if (!canvas || !priceChart) return;
+
+  const getIndexFromEvent = (evt) => {
+    const points = priceChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
+    if (!points || !points.length) return null;
+    return points[0].index;
+  };
+
+  const handleMove = (evt) => {
+    const idx = getIndexFromEvent(evt);
+    if (idx == null) return;
+
+    hoverActive = true;
+    hoverIndex = idx;
+    pinnedIndex = idx;
+
+    updatePriceOverlayFromPinned();
+    priceChart.update("none");
+  };
+
+  const handleLeave = () => {
+    hoverActive = false;
+    hoverIndex = null;
+    pinnedIndex = null;
+    updatePriceOverlayFromPinned();
+    priceChart.update("none");
+  };
+
+  canvas.addEventListener("mousemove", handleMove, { passive: true });
+  canvas.addEventListener("mouseleave", handleLeave, { passive: true });
+
+  canvas.addEventListener("touchstart", (e) => { handleMove(e); }, { passive: true });
+  canvas.addEventListener("touchmove", (e) => { handleMove(e); }, { passive: true });
+  canvas.addEventListener("touchend", handleLeave, { passive: true });
+  canvas.addEventListener("touchcancel", handleLeave, { passive: true });
+}
+
+async function loadChartToday() {
+  if (!hasInternet()) return;
+  if (!tfReady.d || !candle.d.t) return;
+
+  const kl = await fetchKlines1mRange(candle.d.t, Date.now());
+  if (!kl.length) return;
+
+  priceLabels = kl.map(k => fmtHHMM(safe(k[0])));
+  priceData = kl.map(k => safe(k[4]));
+  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
+
+  const lastClose = safe(kl[kl.length - 1][4]);
+  if (!targetPrice && lastClose) targetPrice = lastClose;
+
+  if (!priceChart && window.Chart) await initPriceChart();
+  if (priceChart) {
+    priceChart.data.labels = priceLabels;
+    priceChart.data.datasets[0].data = priceData;
+    priceChart.update("none");
+  }
+
+  chartBootstrappedToday = true;
+}
+
+function updateChartFrom1mKline(k) {
+  if (!priceChart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
+
+  const openTime = safe(k.t);
+  const close = safe(k.c);
+  if (!openTime || !close) return;
+  if (openTime < candle.d.t) return;
+
+  if (lastChartMinuteStart === openTime) {
+    const idx = priceChart.data.datasets[0].data.length - 1;
+    if (idx >= 0) {
+      priceChart.data.datasets[0].data[idx] = close;
+      priceChart.update("none");
+    }
+    return;
+  }
+
+  lastChartMinuteStart = openTime;
+
+  priceChart.data.labels.push(fmtHHMM(openTime));
+  priceChart.data.datasets[0].data.push(close);
+
+  while (priceChart.data.labels.length > DAY_MINUTES) priceChart.data.labels.shift();
+  while (priceChart.data.datasets[0].data.length > DAY_MINUTES) priceChart.data.datasets[0].data.shift();
+
+  priceChart.update("none");
+}
+
+async function ensureChartBootstrapped() {
+  if (chartBootstrappedToday) return;
+  if (!tfReady.d || !candle.d.t) await loadCandleSnapshot();
+  if (tfReady.d && candle.d.t) await loadChartToday();
+}
+
+/* =========================================================
+   BINANCE WS TRADE
+========================================================= */
+let wsTrade = null;
+let tradeRetryTimer = null;
+
+function clearTradeRetry() { if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; } }
+function scheduleTradeRetry() {
+  clearTradeRetry();
+  tradeRetryTimer = setTimeout(() => startTradeWS(), 1200);
+}
+
+function startTradeWS() {
+  try { wsTrade?.close(); } catch {}
+  wsTradeOnline = false;
+  refreshConnUI();
+  if (!hasInternet()) return;
+
+  wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+
+  wsTrade.onopen = () => { wsTradeOnline = true; refreshConnUI(); clearTradeRetry(); };
+  wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); scheduleTradeRetry(); };
+  wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
+
+  wsTrade.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    const p = safe(msg.p);
+    if (!p) return;
+
+    targetPrice = p;
+
+    if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
+    if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
+    if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
+  };
+}
+
+/* =========================================================
+   BINANCE WS KLINES
+========================================================= */
+let wsKline = null;
+let klineRetryTimer = null;
+
+function clearKlineRetry() { if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; } }
+function scheduleKlineRetry() {
+  clearKlineRetry();
+  klineRetryTimer = setTimeout(() => startKlineWS(), 1200);
+}
+
+function applyKline(intervalKey, k) {
+  const t = safe(k.t);
+  const o = safe(k.o);
+  const h = safe(k.h);
+  const l = safe(k.l);
+
+  if (o && h && l) {
+    candle[intervalKey].t = t || candle[intervalKey].t;
+    candle[intervalKey].open = o;
+    candle[intervalKey].high = h;
+    candle[intervalKey].low  = l;
+
+    if (!tfReady[intervalKey]) {
+      tfReady[intervalKey] = true;
+      settleStart = Date.now();
+    }
+  }
+}
+
+function startKlineWS() {
+  try { wsKline?.close(); } catch {}
+  wsKlineOnline = false;
+  refreshConnUI();
+  if (!hasInternet()) return;
+
+  const url =
+    "wss://stream.binance.com:9443/stream?streams=" +
+    "injusdt@kline_1m/" +
+    "injusdt@kline_1d/" +
+    "injusdt@kline_1w/" +
+    "injusdt@kline_1M";
+
+  wsKline = new WebSocket(url);
+
+  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); clearKlineRetry(); };
+  wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
+  wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
+
+  wsKline.onmessage = async (e) => {
+    const payload = JSON.parse(e.data);
+    const data = payload.data;
+    if (!data || !data.k) return;
+
+    const stream = payload.stream || "";
+    const k = data.k;
+
+    if (stream.includes("@kline_1m")) {
+      updateChartFrom1mKline(k);
+      return;
+    }
+
+    if (stream.includes("@kline_1d")) applyKline("d", k);
+    else if (stream.includes("@kline_1w")) applyKline("w", k);
+    else if (stream.includes("@kline_1M")) applyKline("m", k);
+
+    const root = $("appRoot");
+    if (root && root.classList.contains("loading") && tfReady.d) {
+      root.classList.remove("loading");
+      root.classList.add("ready");
+    }
+  };
+}
+
+/* ===================== LOOP ===================== */
 function animate() {
-  /* PRICE card */
+  /* PRICE */
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
@@ -1426,14 +1286,14 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* price chart color by 24h sign */
+  /* Price chart color by 24h sign */
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "neutral");
   if (sign !== lastChartSign) {
     lastChartSign = sign;
     applyPriceChartColorBySign(sign);
   }
 
-  /* bars gradients */
+  /* Bars gradients (come richiesto: 1D/1W/1M diversi) */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
@@ -1558,45 +1418,37 @@ function animate() {
   requestAnimationFrame(animate);
 }
 
+/* ===================== TIMERS ===================== */
+setInterval(loadAccount, ACCOUNT_POLL_MS);
+setInterval(loadCandleSnapshot, REST_SYNC_MS);
+setInterval(loadChartToday, CHART_SYNC_MS);
+setInterval(ensureChartBootstrapped, 1500);
+
 /* ===================== BOOT ===================== */
 (async function boot() {
-  // initial UI
-  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
-  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-  setAddressDisplay(address);
   refreshConnUI();
 
-  // load saved points for current address (no loss)
+  // Load stored points for current address
   if (address) {
     loadStakePointsForAddress(address);
     loadRewardPointsForAddress(address);
-    // init charts
-    await initStakeChart();
-    await initRewardChart();
-    redrawStakeChart();
-    redrawRewardChart();
   }
 
-  // load price snapshots + chart once
-  await loadCandleSnapshot(true);
-  await loadChartToday(true);
+  // Init charts (if canvases exist)
+  await initStakeChart();
+  await initRewardChart();
 
-  // mode start
-  if (liveMode) {
-    startTradeWS();
-    startKlineWS();
-    startAllTimers();
-    if (address) loadAccount(false);
-  } else {
-    stopAllTimers();
-    stopAllSockets();
-    if (address) await loadAccount(true);
-    refreshConnUI();
-  }
+  // Snapshot + chart
+  await loadCandleSnapshot();
+  await loadChartToday();
 
-  // start UI loop
+  // Account initial
+  await loadAccount();
+
+  // WS
+  startTradeWS();
+  startKlineWS();
+
+  // UI loop
   animate();
 })();
-
-/* expose commitAddress for debug */
-window.commitAddress = commitAddress;
