@@ -14,7 +14,7 @@ body {
   gap: 1rem;
 }
 
-/* ================= HEADER (LATEST) ================= */
+/* ================= HEADER (PRO) ================= */
 .header {
   display: flex;
   flex-direction: column;
@@ -30,7 +30,6 @@ body {
 
 /* LEFT */
 .header-left { display: flex; align-items: center; }
-
 .menu-btn {
   width: 44px;
   height: 44px;
@@ -43,7 +42,6 @@ body {
   cursor: pointer;
   outline: none;
 }
-
 .menu-btn:active { transform: translateY(1px); }
 
 /* CENTER */
@@ -58,7 +56,6 @@ body {
   -webkit-text-fill-color: transparent;
   line-height: 1.05;
 }
-
 .subtitle {
   font-size: 0.9rem;
   color: #9ca3af;
@@ -67,13 +64,13 @@ body {
 /* RIGHT */
 .header-right { display: flex; justify-content: flex-end; }
 
-/* search */
 .search-wrap {
   display: flex;
   align-items: center;
   gap: .35rem;
 }
 
+/* lens button minimal, no border/background */
 .icon-btn {
   width: 38px;
   height: 38px;
@@ -87,9 +84,9 @@ body {
   cursor: pointer;
   outline: none;
 }
-
 .icon-btn:active { transform: translateY(1px); }
 
+/* search input collapsed by default */
 .search-wrap input {
   width: 0px;
   opacity: 0;
@@ -275,7 +272,7 @@ body {
 .price-card .perf { margin-top: 0.35rem; }
 .price-card .bar-values { margin-bottom: 0.65rem; }
 
-/* reward */
+/* ================= REWARD BAR ================= */
 .reward-container { height: 26px; }
 .reward-fill { background: linear-gradient(to right, #0ea5e9, #3b82f6); }
 
@@ -289,9 +286,10 @@ body {
   text-shadow: 0 1px 10px rgba(0,0,0,0.55);
 }
 
+/* hide label in reward bar */
 .reward-card .bar-label { display: none; }
 
-/* NEW: reward withdrawals chart */
+/* reward withdrawals chart */
 .reward-chart-wrap {
   height: 140px;
   margin-top: 0.8rem;
@@ -303,7 +301,52 @@ body {
   height: 100% !important;
 }
 
-/* NEW: timeline */
+/* reward tools */
+.reward-tools{
+  margin-top: .55rem;
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap:.6rem;
+}
+
+.mini-btn{
+  height: 30px;
+  padding: 0 .75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: rgba(249,250,251,0.92);
+  font-weight: 800;
+  font-size: .75rem;
+  cursor: pointer;
+}
+
+.mini-btn:active{ transform: translateY(1px); }
+
+.mini-select-wrap{
+  display:flex;
+  align-items:center;
+  gap:.4rem;
+}
+
+.mini-select-label{
+  font-size:.72rem;
+  color: rgba(249,250,251,0.68);
+}
+
+.mini-select{
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: rgba(249,250,251,0.9);
+  padding: 0 .55rem;
+  font-size: .75rem;
+  outline:none;
+}
+
+/* reward timeline */
 .reward-timeline {
   margin-top: .55rem;
   display: flex;
@@ -338,7 +381,7 @@ body {
   text-align: right;
 }
 
-/* stake */
+/* ================= STAKE ================= */
 .stake-container { height: 26px; }
 .stake-fill { background: linear-gradient(to right, #22c55e, #10b981); }
 
@@ -360,11 +403,21 @@ body {
   position: relative;
 }
 
-#stakeChart { width: 100% !important; height: 100% !important; }
+#stakeChart {
+  width: 100% !important;
+  height: 100% !important;
+}
 
 /* ================= PRICE CHART ================= */
-.chart-card { height: 300px; position: relative; }
-#priceChart { width: 100% !important; height: 100% !important; }
+.chart-card {
+  height: 300px;
+  position: relative;
+}
+
+#priceChart {
+  width: 100% !important;
+  height: 100% !important;
+}
 
 .chart-overlay {
   position: absolute;
@@ -380,7 +433,11 @@ body {
   transform: translateY(-4px);
   transition: opacity 160ms ease, transform 160ms ease;
 }
-.chart-overlay.show { opacity: .98; transform: translateY(0); }
+
+.chart-overlay.show {
+  opacity: .98;
+  transform: translateY(0);
+}
 
 .last-update {
   font-size: 0.8rem;
@@ -391,9 +448,14 @@ body {
 /* ================= LOADING ================= */
 .container.loading .value-row span,
 .container.loading .sub-row,
-.container.loading .bar-values { opacity: 0; }
+.container.loading .bar-values {
+  opacity: 0;
+}
 
-.container.loading .card { position: relative; overflow: hidden; }
+.container.loading .card {
+  position: relative;
+  overflow: hidden;
+}
 
 .container.loading .card::after {
   content: "";
