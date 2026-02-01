@@ -694,15 +694,24 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* ===== BARS – GRADIENT IDENTICO A "Injective Portfolio" ===== */
+  /* ===== BARS – INJECTIVE GRADIENT ULTRA SFUMATO ===== */
 
-/* Injective gradient base (verde → blu) */
-const upGradInj = "linear-gradient(90deg,#16a34a 0%,#22c55e 45%,#3b82f6 100%)";
+/* UP — verde → blu, transizione lunga e morbida */
+const upGradInj =
+  "linear-gradient(90deg," +
+  "rgba(34,197,94,0.25) 0%," +
+  "rgba(34,197,94,0.55) 30%," +
+  "rgba(59,130,246,0.65) 70%," +
+  "rgba(59,130,246,0.85) 100%)";
 
-/* Down: stessa palette ma più scura e aggressiva */
-const dnGradInj = "linear-gradient(270deg,#7f1d1d 0%,#dc2626 45%,#1e40af 100%)";
+/* DOWN — rosso → blu scuro, sempre molto soft */
+const dnGradInj =
+  "linear-gradient(270deg," +
+  "rgba(239,68,68,0.30) 0%," +
+  "rgba(239,68,68,0.55) 35%," +
+  "rgba(30,64,175,0.65) 75%," +
+  "rgba(30,64,175,0.85) 100%)";
 
-/* Tutti i timeframe usano Injective gradient */
 renderBar(
   $("priceBar"), $("priceLine"),
   targetPrice, candle.d.open, candle.d.low, candle.d.high,
@@ -720,6 +729,7 @@ renderBar(
   targetPrice, candle.m.open, candle.m.low, candle.m.high,
   upGradInj, dnGradInj
 );
+
 
 
   /* ===== ATH/ATL flash (solo quando cambia davvero) ===== */
