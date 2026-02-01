@@ -18,6 +18,7 @@
 <div class="container loading" id="appRoot">
 
   <div class="header">
+
     <div class="header-top">
       <div class="title-wrap">
         <h1>Injective <span class="dot">•</span> Portfolio</h1>
@@ -31,17 +32,19 @@
           <input id="addressInput" placeholder="inj..." autocomplete="off" />
           <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
         </div>
+
+        <!-- META sotto le icone -->
+        <div class="header-meta">
+          <div id="addressDisplay" class="address-display"></div>
+
+          <div class="connection-status" id="connectionStatus">
+            <span class="status-dot" id="statusDot"></span>
+            <span class="status-text" id="statusText">Offline</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="header-bottom">
-      <div class="connection-status" id="connectionStatus">
-        <span class="status-dot" id="statusDot"></span>
-        <span class="status-text" id="statusText">Offline</span>
-      </div>
-
-      <div id="addressDisplay" class="address-display"></div>
-    </div>
   </div>
 
   <div class="cards-wrapper">
