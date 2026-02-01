@@ -12,6 +12,10 @@ const ONE_MIN_MS = 60_000;
 /* stake range */
 const STAKE_TARGET_MAX = 1000;
 
+/* stake chart persistence */
+const STAKE_SERIES_MAX = 240; // punti max salvati
+const STAKE_LOCAL_VER = 1;    // bump se cambi formato
+
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
@@ -63,64 +67,6 @@ function closeSearch() {
   searchWrap.classList.remove("open");
   addressInput?.blur();
 }
-
-function commitAddress(newAddr) {
-  const a = (newAddr || "").trim();
-  if (!a) return;
-
-  address = a;
-  pendingAddress = a;
-  localStorage.setItem("inj_address", address);
-
-  setAddressDisplay(address);
-
-  settleStart = Date.now();
-  stakeBootstrapped = false;
-
-  loadAccount();
-  bootstrapStakeHistory();
-}
-
-if (addressInput) addressInput.value = pendingAddress;
-setAddressDisplay(address);
-
-if (searchBtn) {
-  searchBtn.addEventListener("click", () => {
-    if (!searchWrap.classList.contains("open")) openSearch();
-    else addressInput?.focus();
-  });
-}
-
-if (addressInput) {
-  addressInput.addEventListener("focus", () => openSearch());
-
-  // aggiorna solo il pending, senza ricaricare subito
-  addressInput.addEventListener("input", (e) => {
-    pendingAddress = e.target.value.trim();
-  });
-
-  // INVIO = conferma + chiudi in lente
-  addressInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commitAddress(pendingAddress);
-      closeSearch();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      addressInput.value = address || "";
-      pendingAddress = address || "";
-      closeSearch();
-    }
-  });
-}
-
-/* click fuori = richiudi (senza confermare) */
-document.addEventListener("click", (e) => {
-  const t = e.target;
-  if (!searchWrap) return;
-  if (searchWrap.contains(t)) return;
-  closeSearch();
-});
 
 /* ================= STATE ================= */
 /* live price */
@@ -182,6 +128,151 @@ let stakeMoves = [];
 let stakeEventTypes = [];
 let lastStakeRecorded = null;
 let stakeBootstrapped = false;
+
+/* ================= PERSISTENCE (stake series) ================= */
+function stakeStoreKey(addr) {
+  const a = (addr || "").trim();
+  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
+}
+
+function saveStakeSeries() {
+  const key = stakeStoreKey(address);
+  if (!key) return;
+
+  const payload = {
+    v: STAKE_LOCAL_VER,
+    t: Date.now(),
+    labels: stakeLabels,
+    data: stakeData,
+    moves: stakeMoves,
+    types: stakeEventTypes
+  };
+
+  try {
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    // se localStorage pieno, prova a tagliare e risalvare
+    try {
+      stakeLabels = stakeLabels.slice(-Math.floor(STAKE_SERIES_MAX / 2));
+      stakeData = stakeData.slice(-Math.floor(STAKE_SERIES_MAX / 2));
+      stakeMoves = stakeMoves.slice(-Math.floor(STAKE_SERIES_MAX / 2));
+      stakeEventTypes = stakeEventTypes.slice(-Math.floor(STAKE_SERIES_MAX / 2));
+      localStorage.setItem(key, JSON.stringify({
+        v: STAKE_LOCAL_VER,
+        t: Date.now(),
+        labels: stakeLabels,
+        data: stakeData,
+        moves: stakeMoves,
+        types: stakeEventTypes
+      }));
+    } catch {}
+  }
+}
+
+function loadStakeSeries() {
+  const key = stakeStoreKey(address);
+  if (!key) return false;
+
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
+
+    const labels = Array.isArray(obj.labels) ? obj.labels : [];
+    const data = Array.isArray(obj.data) ? obj.data : [];
+    const moves = Array.isArray(obj.moves) ? obj.moves : [];
+    const types = Array.isArray(obj.types) ? obj.types : [];
+
+    if (!labels.length || !data.length || labels.length !== data.length) return false;
+
+    stakeLabels = labels.slice(-STAKE_SERIES_MAX);
+    stakeData = data.slice(-STAKE_SERIES_MAX);
+    stakeMoves = moves.slice(-STAKE_SERIES_MAX);
+    stakeEventTypes = types.slice(-STAKE_SERIES_MAX);
+
+    // normalizza lunghezze
+    while (stakeMoves.length < stakeData.length) stakeMoves.push(0);
+    while (stakeEventTypes.length < stakeData.length) stakeEventTypes.push("Stake update");
+    if (stakeMoves.length > stakeData.length) stakeMoves = stakeMoves.slice(0, stakeData.length);
+    if (stakeEventTypes.length > stakeData.length) stakeEventTypes = stakeEventTypes.slice(0, stakeData.length);
+
+    lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
+
+    // disegna subito
+    if (!stakeChart && window.Chart) initStakeChart();
+    else if (stakeChart) {
+      stakeChart.data.labels = stakeLabels;
+      stakeChart.data.datasets[0].data = stakeData;
+      stakeChart.update("none");
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ================= COMMIT ADDRESS ================= */
+function commitAddress(newAddr) {
+  const a = (newAddr || "").trim();
+  if (!a) return;
+
+  address = a;
+  pendingAddress = a;
+  localStorage.setItem("inj_address", address);
+
+  setAddressDisplay(address);
+
+  settleStart = Date.now();
+  stakeBootstrapped = false;
+
+  // carica subito i punti salvati per questo wallet
+  loadStakeSeries();
+
+  // poi aggiorna dati live + prova ricostruzione storico
+  loadAccount();
+  bootstrapStakeHistory();
+}
+
+if (addressInput) addressInput.value = pendingAddress;
+setAddressDisplay(address);
+
+if (searchBtn) {
+  searchBtn.addEventListener("click", () => {
+    if (!searchWrap.classList.contains("open")) openSearch();
+    else addressInput?.focus();
+  });
+}
+
+if (addressInput) {
+  addressInput.addEventListener("focus", () => openSearch());
+
+  addressInput.addEventListener("input", (e) => {
+    pendingAddress = e.target.value.trim();
+  });
+
+  addressInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitAddress(pendingAddress);
+      closeSearch();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      addressInput.value = address || "";
+      pendingAddress = address || "";
+      closeSearch();
+    }
+  });
+}
+
+document.addEventListener("click", (e) => {
+  const t = e.target;
+  if (!searchWrap) return;
+  if (searchWrap.contains(t)) return;
+  closeSearch();
+});
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
@@ -305,17 +396,11 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
+  // aggiunge punto evento (e salva)
   maybeAddStakePoint(stakeInj);
 }
 
-/* prima chiamata se address già salvato */
-if (address) {
-  loadAccount();
-  setInterval(loadAccount, ACCOUNT_POLL_MS);
-} else {
-  // se non c’è address, polling parte quando confermi
-  setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
-}
+setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
 
 /* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
 async function loadCandleSnapshot() {
@@ -399,7 +484,7 @@ function applyChartColorBySign(sign) {
   chart.update("none");
 }
 
-/* ================= CHART: giornata corrente (REST bootstrap) ================= */
+/* ================= CHART: giornata corrente ================= */
 async function fetchKlines1mRange(startTime, endTime) {
   const out = [];
   let cursor = startTime;
@@ -536,7 +621,6 @@ async function loadChartToday() {
   chartBootstrappedToday = true;
 }
 
-/* hover/touch = pin overlay su punto */
 function setupChartInteractions() {
   const canvas = $("priceChart");
   if (!canvas) return;
@@ -581,10 +665,8 @@ function setupChartInteractions() {
   canvas.addEventListener("touchcancel", handleLeave, { passive: true });
 }
 
-/* ensure chart not empty */
 async function ensureChartBootstrapped() {
   if (chartBootstrappedToday) return;
-
   if (!tfReady.d || !candle.d.t) await loadCandleSnapshot();
   if (tfReady.d && candle.d.t) await loadChartToday();
 }
@@ -669,60 +751,6 @@ function applyKline(intervalKey, k) {
   }
 }
 
-function updateChartFrom1mKline(k) {
-  if (!chart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
-
-  const openTime = safe(k.t);
-  const close = safe(k.c);
-  if (!openTime || !close) return;
-  if (openTime < candle.d.t) return;
-
-  if (lastChartMinuteStart === openTime) {
-    const idx = chart.data.datasets[0].data.length - 1;
-    if (idx >= 0) {
-      chart.data.datasets[0].data[idx] = close;
-      chart.update("none");
-      updatePinnedOverlay();
-    }
-    return;
-  }
-
-  lastChartMinuteStart = openTime;
-
-  chart.data.labels.push(fmtHHMM(openTime));
-  chart.data.datasets[0].data.push(close);
-
-  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
-  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
-
-  chart.update("none");
-  updatePinnedOverlay();
-}
-
-async function resetDayAndReloadChart(nextOpenTime) {
-  chartBootstrappedToday = false;
-
-  chartLabels = [];
-  chartData = [];
-  lastChartMinuteStart = 0;
-  pinnedIndex = null;
-
-  if (chart) {
-    chart.data.labels = [];
-    chart.data.datasets[0].data = [];
-    chart.update("none");
-  }
-
-  if (nextOpenTime) candle.d.t = nextOpenTime;
-
-  await loadCandleSnapshot();
-  await loadChartToday();
-  updatePinnedOverlay();
-
-  hoverActive = false;
-  hoverIndex = null;
-}
-
 function startKlineWS() {
   try { if (wsKline) wsKline.close(); } catch {}
 
@@ -765,28 +793,7 @@ function startKlineWS() {
     const stream = payload.stream || "";
     const k = data.k;
 
-    if (stream.includes("@kline_1m")) {
-      updateChartFrom1mKline(k);
-      return;
-    }
-
-    if (stream.includes("@kline_1d")) {
-      const prevDayOpen = candle.d.t;
-      applyKline("d", k);
-
-      if (!chartBootstrappedToday && tfReady.d && candle.d.t) {
-        await loadChartToday();
-      }
-
-      if (k.x === true) {
-        const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
-        await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
-      } else {
-        if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
-          await resetDayAndReloadChart(candle.d.t);
-        }
-      }
-    }
+    if (stream.includes("@kline_1d")) applyKline("d", k);
     else if (stream.includes("@kline_1w")) applyKline("w", k);
     else if (stream.includes("@kline_1M")) applyKline("m", k);
 
@@ -870,6 +877,7 @@ function initStakeChart() {
   });
 }
 
+/* aggiunge punto quando stake cambia (e salva) */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -878,29 +886,51 @@ function maybeAddStakePoint(currentStake) {
 
   if (lastStakeRecorded == null) {
     lastStakeRecorded = s;
+
     stakeLabels.push(new Date().toLocaleTimeString());
     stakeData.push(s);
     stakeMoves.push(0);
     stakeEventTypes.push("Initial");
-  } else {
-    const delta = s - lastStakeRecorded;
-    if (Math.abs(delta) > TH) {
-      lastStakeRecorded = s;
 
-      stakeLabels.push(new Date().toLocaleTimeString());
-      stakeData.push(s);
-
-      const isUp = delta > 0;
-      stakeMoves.push(isUp ? 1 : -1);
-      stakeEventTypes.push(isUp ? "Delegate / Compound" : "Undelegate");
-
-      while (stakeLabels.length > 240) stakeLabels.shift();
-      while (stakeData.length > 240) stakeData.shift();
-      while (stakeMoves.length > 240) stakeMoves.shift();
-      while (stakeEventTypes.length > 240) stakeEventTypes.shift();
-    }
+    trimStakeSeries();
+    drawStakeChart();
+    saveStakeSeries();
+    return;
   }
 
+  const delta = s - lastStakeRecorded;
+  if (Math.abs(delta) <= TH) return;
+
+  lastStakeRecorded = s;
+
+  stakeLabels.push(new Date().toLocaleTimeString());
+  stakeData.push(s);
+
+  const isUp = delta > 0;
+  stakeMoves.push(isUp ? 1 : -1);
+  stakeEventTypes.push(isUp ? "Delegate / Compound" : "Undelegate");
+
+  trimStakeSeries();
+  drawStakeChart();
+  saveStakeSeries();
+}
+
+function trimStakeSeries() {
+  if (stakeLabels.length > STAKE_SERIES_MAX) stakeLabels = stakeLabels.slice(-STAKE_SERIES_MAX);
+  if (stakeData.length > STAKE_SERIES_MAX) stakeData = stakeData.slice(-STAKE_SERIES_MAX);
+  if (stakeMoves.length > STAKE_SERIES_MAX) stakeMoves = stakeMoves.slice(-STAKE_SERIES_MAX);
+  if (stakeEventTypes.length > STAKE_SERIES_MAX) stakeEventTypes = stakeEventTypes.slice(-STAKE_SERIES_MAX);
+
+  // allinea lunghezze
+  const n = stakeData.length;
+  if (stakeLabels.length > n) stakeLabels = stakeLabels.slice(0, n);
+  if (stakeMoves.length > n) stakeMoves = stakeMoves.slice(0, n);
+  if (stakeEventTypes.length > n) stakeEventTypes = stakeEventTypes.slice(0, n);
+  while (stakeMoves.length < n) stakeMoves.push(0);
+  while (stakeEventTypes.length < n) stakeEventTypes.push("Stake update");
+}
+
+function drawStakeChart() {
   if (!stakeChart && window.Chart) initStakeChart();
   else if (stakeChart) {
     stakeChart.data.labels = stakeLabels;
@@ -947,7 +977,6 @@ async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
     const resps = data?.tx_responses || [];
 
     if (!Array.isArray(txs) || !Array.isArray(resps) || !txs.length) break;
-
     for (let i = 0; i < txs.length; i++) out.push({ tx: txs[i], resp: resps[i] });
 
     if (txs.length < limit) break;
@@ -960,83 +989,83 @@ async function bootstrapStakeHistory() {
   if (!address) return;
   stakeBootstrapped = false;
 
-  stakeLabels = [];
-  stakeData = [];
-  stakeMoves = [];
-  stakeEventTypes = [];
-  lastStakeRecorded = null;
-
   const all = await fetchAllTxsBySenderCosmos(address, 60);
+  if (!all || !all.length) return;
 
-  if (all && all.length) {
-    let running = 0;
+  // ricostruzione running
+  let running = 0;
 
-    for (const item of all) {
-      const tx = item?.tx;
-      const when = item?.resp?.timestamp ? new Date(item.resp.timestamp) : null;
+  const newLabels = [];
+  const newData = [];
+  const newMoves = [];
+  const newTypes = [];
 
-      const msgs = tx?.body?.messages || tx?.body?.msgs || [];
-      if (!Array.isArray(msgs) || !msgs.length) continue;
+  for (const item of all) {
+    const tx = item?.tx;
+    const when = item?.resp?.timestamp ? new Date(item.resp.timestamp) : null;
 
-      let changed = false;
-      let net = 0;
-      let hadDelegate = false;
-      let hadUndelegate = false;
+    const msgs = tx?.body?.messages || tx?.body?.msgs || [];
+    if (!Array.isArray(msgs) || !msgs.length) continue;
 
-      for (const m of msgs) {
-        if (isDelegateMsg(m)) {
-          const a = readMsgAmount(m);
-          if (a > 0) { running += a; net += a; changed = true; hadDelegate = true; }
-        } else if (isUndelegateMsg(m)) {
-          const a = readMsgAmount(m);
-          if (a > 0) { running -= a; net -= a; changed = true; hadUndelegate = true; }
-        }
-      }
+    let changed = false;
+    let net = 0;
+    let hadDelegate = false;
+    let hadUndelegate = false;
 
-      if (changed) {
-        stakeLabels.push(
-          when ? when.toLocaleDateString() + " " + when.toLocaleTimeString()
-               : new Date().toLocaleTimeString()
-        );
-        stakeData.push(Math.max(0, running));
-        stakeMoves.push(net > 0 ? 1 : (net < 0 ? -1 : 0));
-
-        let type = "Stake update";
-        if (hadDelegate && hadUndelegate) type = "Mixed";
-        else if (hadDelegate) type = "Delegate";
-        else if (hadUndelegate) type = "Undelegate";
-        stakeEventTypes.push(type);
+    for (const m of msgs) {
+      if (isDelegateMsg(m)) {
+        const a = readMsgAmount(m);
+        if (a > 0) { running += a; net += a; changed = true; hadDelegate = true; }
+      } else if (isUndelegateMsg(m)) {
+        const a = readMsgAmount(m);
+        if (a > 0) { running -= a; net -= a; changed = true; hadUndelegate = true; }
       }
     }
 
-    if (stakeData.length) {
-      lastStakeRecorded = stakeData[stakeData.length - 1];
+    if (changed) {
+      newLabels.push(when ? when.toLocaleDateString() + " " + when.toLocaleTimeString()
+                         : new Date().toLocaleTimeString());
+      newData.push(Math.max(0, running));
+      newMoves.push(net > 0 ? 1 : (net < 0 ? -1 : 0));
 
-      while (stakeLabels.length > 240) stakeLabels.shift();
-      while (stakeData.length > 240) stakeData.shift();
-      while (stakeMoves.length > 240) stakeMoves.shift();
-      while (stakeEventTypes.length > 240) stakeEventTypes.shift();
-
-      if (!stakeChart && window.Chart) initStakeChart();
-      else if (stakeChart) {
-        stakeChart.data.labels = stakeLabels;
-        stakeChart.data.datasets[0].data = stakeData;
-        stakeChart.update("none");
-      }
-      stakeBootstrapped = true;
-      return;
+      let type = "Stake update";
+      if (hadDelegate && hadUndelegate) type = "Mixed";
+      else if (hadDelegate) type = "Delegate";
+      else if (hadUndelegate) type = "Undelegate";
+      newTypes.push(type);
     }
   }
 
-  maybeAddStakePoint(stakeInj);
+  if (!newData.length) return;
+
+  // mantieni massimo N
+  stakeLabels = newLabels.slice(-STAKE_SERIES_MAX);
+  stakeData = newData.slice(-STAKE_SERIES_MAX);
+  stakeMoves = newMoves.slice(-STAKE_SERIES_MAX);
+  stakeEventTypes = newTypes.slice(-STAKE_SERIES_MAX);
+
+  trimStakeSeries();
+  lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
+
+  drawStakeChart();
+  saveStakeSeries();
+
   stakeBootstrapped = true;
 }
 
 /* ================= BOOT ================= */
 (async function boot() {
+  // carica subito stake series salvata (se c’è address)
+  if (address) loadStakeSeries();
+
   await loadCandleSnapshot();
   await loadChartToday();
-  if (address) await bootstrapStakeHistory();
+
+  if (address) {
+    await loadAccount();
+    // prova ricostruzione (se riesce, sovrascrive e salva)
+    await bootstrapStakeHistory();
+  }
 })();
 
 /* ================= LOOP ================= */
@@ -1046,7 +1075,7 @@ function animate() {
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  /* PERF */
+  /* PERFORMANCE */
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -1055,23 +1084,11 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  const sign =
-    !tfReady.d ? "neutral" :
-    pD > 0 ? "up" :
-    pD < 0 ? "down" : "neutral";
-
-  if (sign !== lastChartSign) {
-    lastChartSign = sign;
-    applyChartColorBySign(sign);
-  }
-
   /* BARS gradients */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
-
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
   const wDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(59,130,246,.55))";
-
   const mUp   = "linear-gradient(to right, rgba(249,115,22,.92), rgba(236,72,153,.78))";
   const mDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(236,72,153,.55))";
 
@@ -1079,7 +1096,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* values under bars + flash */
+  /* Values under bars + flash */
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
