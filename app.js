@@ -48,18 +48,11 @@ let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
 /* Candle state (current candles) */
-const lastHL = {
-  d: { h: 0, l: 0 },
-  w: { h: 0, l: 0 },
-  m: { h: 0, l: 0 }
+const candle = {
+  d: { t: 0, open: 0, high: 0, low: 0 }, // 1D (t = openTime ms)
+  w: { t: 0, open: 0, high: 0, low: 0 }, // 1W
+  m: { t: 0, open: 0, high: 0, low: 0 }, // 1M
 };
-
-function flash(el) {
-  if (!el) return;
-  el.classList.remove("flash");
-  void el.offsetWidth;
-  el.classList.add("flash");
-}
 
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
@@ -96,9 +89,6 @@ let stakeLabels = [];
 let stakeData = [];
 let lastStakeRecorded = null;
 let stakeBootstrapped = false;
-
-// segue il valore VISIBILE nella card stake
-let lastDisplayedStakeForChart = 0;
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
@@ -718,6 +708,30 @@ function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
 
+  // aggiunge punto ogni volta che il valore VISIBILE aumenta
+function maybeAddStakePointFromDisplay(displayedStake) {
+  const s = safe(displayedStake);
+  if (!Number.isFinite(s)) return;
+
+  if (s > lastDisplayedStakeForChart + 0.00001) {
+    lastDisplayedStakeForChart = s;
+
+    stakeLabels.push(new Date().toLocaleTimeString());
+    stakeData.push(s);
+
+    while (stakeLabels.length > 240) stakeLabels.shift();
+    while (stakeData.length > 240) stakeData.shift();
+
+    if (!stakeChart && window.Chart) initStakeChart();
+    else if (stakeChart) {
+      stakeChart.data.labels = stakeLabels;
+      stakeChart.data.datasets[0].data = stakeData;
+      stakeChart.update("none");
+    }
+  }
+}
+
+
   if (lastStakeRecorded == null) {
     lastStakeRecorded = s;
     stakeLabels.push(new Date().toLocaleTimeString());
@@ -908,35 +922,12 @@ function animate() {
   }
 
   /* BARS (tutte green/red coerenti con performance) */
-  const GRADS = {
-  d: {
-    up: "linear-gradient(to right,#22c55e,#16a34a)",
-    down: "linear-gradient(to left,#ef4444,#dc2626)"
-  },
-  w: {
-    up: "linear-gradient(to right,#3b82f6,#2563eb)",
-    down: "linear-gradient(to left,#f97316,#ea580c)"
-  },
-  m: {
-    up: "linear-gradient(to right,#a855f7,#7c3aed)",
-    down: "linear-gradient(to left,#ec4899,#db2777)"
-  }
-};
+  const upGrad = "linear-gradient(to right,#22c55e,#10b981)";
+  const downGrad = "linear-gradient(to left,#ef4444,#f87171)";
 
-renderBar($("priceBar"), $("priceLine"),
-  targetPrice, candle.d.open, candle.d.low, candle.d.high,
-  GRADS.d.up, GRADS.d.down
-);
-
-renderBar($("weekBar"), $("weekLine"),
-  targetPrice, candle.w.open, candle.w.low, candle.w.high,
-  GRADS.w.up, GRADS.w.down
-);
-
-renderBar($("monthBar"), $("monthLine"),
-  targetPrice, candle.m.open, candle.m.low, candle.m.high,
-  GRADS.m.up, GRADS.m.down
-);
+  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, upGrad, downGrad);
+  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, upGrad, downGrad);
+  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, upGrad, downGrad);
 
   /* Values under bars */
   $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
@@ -951,40 +942,6 @@ renderBar($("monthBar"), $("monthLine"),
   $("monthOpen").textContent = tfReady.m ? safe(candle.m.open).toFixed(3) : "--";
   $("monthMax").textContent  = tfReady.m ? safe(candle.m.high).toFixed(3) : "--";
 
-  // 🔔 FLASH ATH / ATL quando cambiano i valori
-if (tfReady.d) {
-  if (candle.d.high > lastHL.d.h) {
-    lastHL.d.h = candle.d.high;
-    flash($("priceMax"));
-  }
-  if (!lastHL.d.l || candle.d.low < lastHL.d.l) {
-    lastHL.d.l = candle.d.low;
-    flash($("priceMin"));
-  }
-}
-
-if (tfReady.w) {
-  if (candle.w.high > lastHL.w.h) {
-    lastHL.w.h = candle.w.high;
-    flash($("weekMax"));
-  }
-  if (!lastHL.w.l || candle.w.low < lastHL.w.l) {
-    lastHL.w.l = candle.w.low;
-    flash($("weekMin"));
-  }
-}
-
-if (tfReady.m) {
-  if (candle.m.high > lastHL.m.h) {
-    lastHL.m.h = candle.m.high;
-    flash($("monthMax"));
-  }
-  if (!lastHL.m.l || candle.m.low < lastHL.m.l) {
-    lastHL.m.l = candle.m.low;
-    flash($("monthMin"));
-  }
-}
-
   /* AVAILABLE */
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
@@ -995,8 +952,6 @@ if (tfReady.m) {
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-  maybeAddStakePointFromDisplay(displayed.stake);
-
   $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
 
   // STAKE BAR (0-1000)
