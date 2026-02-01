@@ -67,9 +67,6 @@ let hoverActive = false;
 let hoverIndex = null;
 let hoverPrice = null;
 
-/* Overlay price (top-right) */
-let displayedChartPrice = 0;
-
 /* Color state (performance daily) */
 let lastChartSign = "neutral";
 
@@ -391,7 +388,7 @@ async function loadChartToday() {
   chartBootstrappedToday = true;
 }
 
-/* ================= CHART: interactions (line + top-right price) ================= */
+/* ================= CHART: interactions (line only) ================= */
 function setHoverState(active, idx, price) {
   hoverActive = active;
   hoverIndex = active ? idx : null;
@@ -682,20 +679,19 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* TOP-RIGHT GRAPH PRICE */
-  const chartEl = $("chartPrice");
-  const targetChartVal = hoverActive && Number.isFinite(hoverPrice) ? hoverPrice : displayed.price;
-  const prevChartVal = displayedChartPrice;
-  displayedChartPrice = tick(displayedChartPrice, targetChartVal);
-  if (chartEl) colorNumber(chartEl, displayedChartPrice, prevChartVal, 4);
+  /* BARS con gradient differenti per timeframe */
+  const upGradD = "linear-gradient(to right,#22c55e,#10b981)";
+  const dnGradD = "linear-gradient(to left,#ef4444,#f87171)";
 
-  /* BARS (tutte green/red coerenti con performance) */
-  const upGrad = "linear-gradient(to right,#22c55e,#10b981)";
-  const downGrad = "linear-gradient(to left,#ef4444,#f87171)";
+  const upGradW = "linear-gradient(to right,#38bdf8,#3b82f6)";
+  const dnGradW = "linear-gradient(to left,#f97316,#fb7185)";
 
-  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, upGrad, downGrad);
-  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, upGrad, downGrad);
-  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, upGrad, downGrad);
+  const upGradM = "linear-gradient(to right,#a78bfa,#6366f1)";
+  const dnGradM = "linear-gradient(to left,#fb7185,#ef4444)";
+
+  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, upGradD, dnGradD);
+  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, upGradW, dnGradW);
+  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, upGradM, dnGradM);
 
   /* Values under bars */
   $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
@@ -734,7 +730,11 @@ function animate() {
   $("rewardBar").style.width = rp + "%";
   $("rewardLine").style.left = rp + "%";
   $("rewardPercent").textContent = rp.toFixed(1) + "%";
-  $("rewardBar").style.background = heatColor(rp);
+
+  /* reward: gradient più deciso + heat sovrapposta (più “strong”) */
+  const heat = heatColor(rp);
+  $("rewardBar").style.background = `linear-gradient(90deg, ${heat} 0%, #2563eb 45%, #7c3aed 100%)`;
+
   $("rewardMin").textContent = "0";
   $("rewardMax").textContent = maxR.toFixed(1);
 
