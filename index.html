@@ -25,61 +25,64 @@
 
   <input id="addressInput" placeholder="Inserisci indirizzo Injective (inj...)" />
 
-  <div class="card price-card">
+  <div class="cards-wrapper">
 
-    <!-- 1D -->
-    <div class="bar-block">
+    <div class="card price-card">
+
+      <!-- 1D -->
       <div class="bar-container">
         <span class="bar-label">1D</span>
-        <div id="barD" class="bar-fill"></div>
+        <div id="priceBar" class="bar-fill"></div>
         <div class="open-marker"></div>
-        <div id="lineD" class="bar-line"></div>
+        <div id="priceLine" class="bar-line"></div>
       </div>
       <div class="bar-values">
-        <span id="minD">--</span>
-        <span id="openD">--</span>
-        <span id="maxD">--</span>
+        <span id="priceMin" class="left">--</span>
+        <span id="priceOpen" class="center">--</span>
+        <span id="priceMax" class="right">--</span>
       </div>
-    </div>
 
-    <!-- 1W -->
-    <div class="bar-block">
+      <!-- 1W -->
       <div class="bar-container">
         <span class="bar-label">1W</span>
-        <div id="barW" class="bar-fill"></div>
+        <div id="weekBar" class="bar-fill"></div>
         <div class="open-marker"></div>
-        <div id="lineW" class="bar-line"></div>
+        <div id="weekLine" class="bar-line"></div>
       </div>
       <div class="bar-values">
-        <span id="minW">--</span>
-        <span id="openW">--</span>
-        <span id="maxW">--</span>
+        <span id="weekMin" class="left">--</span>
+        <span id="weekOpen" class="center">--</span>
+        <span id="weekMax" class="right">--</span>
       </div>
-    </div>
 
-    <!-- 1M -->
-    <div class="bar-block">
+      <!-- 1M -->
       <div class="bar-container">
         <span class="bar-label">1M</span>
-        <div id="barM" class="bar-fill"></div>
+        <div id="monthBar" class="bar-fill"></div>
         <div class="open-marker"></div>
-        <div id="lineM" class="bar-line"></div>
+        <div id="monthLine" class="bar-line"></div>
       </div>
       <div class="bar-values">
-        <span id="minM">--</span>
-        <span id="openM">--</span>
-        <span id="maxM">--</span>
+        <span id="monthMin" class="left">--</span>
+        <span id="monthOpen" class="center">--</span>
+        <span id="monthMax" class="right">--</span>
+      </div>
+
+    </div>
+
+    <div class="card reward-card">
+      <div class="label">Rewards</div>
+      <div class="reward-bar-container bar-container">
+        <div id="rewardBar" class="bar-fill reward-fill"></div>
+        <div id="rewardLine" class="bar-line"></div>
+        <span id="rewardPercent" class="reward-percent">0%</span>
+      </div>
+      <div class="bar-values">
+        <span id="rewardMin" class="left">0</span>
+        <span id="rewardMax" class="right">0.1</span>
       </div>
     </div>
 
-  </div>
-
-  <div class="card reward-card">
-    <div class="label">Rewards</div>
-    <div class="reward-container">
-      <div id="rewardBar" class="reward-fill"></div>
-      <span id="rewardPct">0%</span>
-    </div>
   </div>
 
 </div>
