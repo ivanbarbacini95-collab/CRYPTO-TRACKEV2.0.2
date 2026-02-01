@@ -2,385 +2,239 @@
 let address = localStorage.getItem("inj_address") || "";
 
 let targetPrice = 0;
-let displayedPrice = 0;
 
-// 24h (da 1m klines 1440)
+// OHLC
 let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
-
-// Week / Month (da klines reali)
 let priceWeekOpen = 0, priceWeekLow = 0, priceWeekHigh = 0;
 let priceMonthOpen = 0, priceMonthLow = 0, priceMonthHigh = 0;
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-
 let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 
-let chart, chartData = [];
-let ws;
+let chart, chartData = [], ws;
 
-// ================= HELPERS =================
-const $ = (id) => document.getElementById(id);
-
-function clamp(n, a, b) { return Math.min(Math.max(n, a), b); }
-
-function safeNum(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n : 0;
+// ================= CSS INJECT (FLASH + SHAKE) =================
+const style = document.createElement("style");
+style.innerHTML = `
+.reward-flash {
+  animation: rewardFlash 0.35s ease-out;
+}
+@keyframes rewardFlash {
+  0%   { box-shadow: 0 0 0 rgba(239,68,68,0); }
+  30%  { box-shadow: 0 0 35px rgba(239,68,68,0.9); }
+  100% { box-shadow: 0 0 0 rgba(239,68,68,0); }
 }
 
-function colorNumber(el, n, o, dec = 4) {
-  const nn = safeNum(n), oo = safeNum(o);
-  const ns = nn.toFixed(dec), os = oo.toFixed(dec);
-  if (ns === os) { el.innerHTML = ns; return; }
+.reward-shake {
+  animation: rewardShake 0.25s linear;
+}
+@keyframes rewardShake {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-3px); }
+  100% { transform: translateX(0); }
+}
+`;
+document.head.appendChild(style);
 
-  el.innerHTML = [...ns].map((c, i) => {
-    const same = os[i] === c;
-    const col = same ? "#f9fafb" : (nn > oo ? "#22c55e" : "#ef4444");
+// ================= HELPERS =================
+const $ = id => document.getElementById(id);
+const clamp = (n,a,b) => Math.min(Math.max(n,a),b);
+const safe = n => Number.isFinite(+n) ? +n : 0;
+
+function colorNumber(el, n, o, dec = 4) {
+  const ns = n.toFixed(dec), os = o.toFixed(dec);
+  if (ns === os) { el.innerHTML = ns; return; }
+  el.innerHTML = [...ns].map((c,i)=>{
+    const col = c!==os[i] ? (n>o ? "#22c55e" : "#ef4444") : "#f9fafb";
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
 }
 
-async function fetchJSON(url) {
-  try {
-    const r = await fetch(url, { cache: "no-store" });
-    return await r.json();
-  } catch {
-    return {};
-  }
+async function fetchJSON(url){
+  try{ return await (await fetch(url,{cache:"no-store"})).json(); }
+  catch{ return {}; }
 }
 
-// da freddo (blu) a caldo (rosso)
-function getHeatColor(percent) {
-  const p = clamp(percent, 0, 100) / 100;
-  const r = Math.round(14 + (239 - 14) * p);
-  const g = Math.round(165 - 165 * p);
-  const b = Math.round(233 - 233 * p);
-  return `rgb(${r},${g},${b})`;
+function getHeatColor(p){
+  p=clamp(p,0,100)/100;
+  return `rgb(${14+(239-14)*p},${165-165*p},${233-233*p})`;
 }
 
-function fmtArrowPct(p) {
-  const n = safeNum(p);
-  const up = n >= 0;
-  return `${up ? "▲" : "▼"} ${Math.abs(n).toFixed(2)}%`;
-}
+const pct = (v,o)=>o?((v-o)/o*100):0;
+const arrow = v=>`${v>=0?"▲":"▼"} ${Math.abs(v).toFixed(2)}%`;
 
-// ================= ADDRESS INPUT =================
+// ================= ADDRESS =================
 $("addressInput").value = address;
-$("addressInput").addEventListener("input", (e) => {
-  address = e.target.value.trim();
-  localStorage.setItem("inj_address", address);
+$("addressInput").oninput = e=>{
+  address=e.target.value.trim();
+  localStorage.setItem("inj_address",address);
   loadAccount();
-});
+};
 
-// ================= ACCOUNT LOAD =================
-async function loadAccount() {
-  if (!address) return;
-
-  const [balances, staking, rewardsData, inflation] = await Promise.all([
+// ================= ACCOUNT =================
+async function loadAccount(){
+  if(!address) return;
+  const [b,s,r,i]=await Promise.all([
     fetchJSON(`https://lcd.injective.network/cosmos/bank/v1beta1/balances/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/staking/v1beta1/delegations/${address}`),
     fetchJSON(`https://lcd.injective.network/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`https://lcd.injective.network/cosmos/mint/v1beta1/inflation`)
   ]);
 
-  availableInj =
-    safeNum(balances.balances?.find((b) => b.denom === "inj")?.amount) / 1e18;
-
-  stakeInj =
-    (staking.delegation_responses || []).reduce((a, d) => a + safeNum(d.balance.amount), 0) / 1e18;
-
-  rewardsInj =
-    (rewardsData.rewards || []).reduce(
-      (a, r) => a + (r.reward || []).reduce((s, x) => s + safeNum(x.amount), 0),
-      0
-    ) / 1e18;
-
-  apr = safeNum(inflation.inflation) * 100;
+  availableInj=safe(b.balances?.find(x=>x.denom==="inj")?.amount)/1e18;
+  stakeInj=(s.delegation_responses||[]).reduce((a,d)=>a+safe(d.balance.amount),0)/1e18;
+  rewardsInj=(r.rewards||[]).reduce((a,x)=>a+x.reward.reduce((s,y)=>s+safe(y.amount),0),0)/1e18;
+  apr=safe(i.inflation)*100;
 }
 loadAccount();
-setInterval(loadAccount, 2000);
+setInterval(loadAccount,2000);
 
-// ================= BINANCE HELPERS (OHLC) =================
-async function fetchKlines(interval, limit) {
-  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${limit}`;
-  const d = await fetchJSON(url);
-  return Array.isArray(d) ? d : [];
+// ================= BINANCE =================
+async function klines(i,l){
+  return await fetchJSON(`https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${i}&limit=${l}`)||[];
 }
 
-function calcFromKlines(klines) {
-  if (!klines.length) return { open: 0, high: 0, low: 0, close: 0 };
-
-  const open = safeNum(klines[0][1]);
-  let high = -Infinity;
-  let low = Infinity;
-  const close = safeNum(klines[klines.length - 1][4]);
-
-  for (const k of klines) {
-    const h = safeNum(k[2]);
-    const l = safeNum(k[3]);
-    if (h > high) high = h;
-    if (l < low) low = l;
-  }
-
-  if (!Number.isFinite(high)) high = open;
-  if (!Number.isFinite(low)) low = open;
-
-  return { open, high, low, close };
+function calcOHLC(d){
+  if(!d.length) return{};
+  return{
+    open:safe(d[0][1]),
+    high:Math.max(...d.map(x=>safe(x[2]))),
+    low:Math.min(...d.map(x=>safe(x[3]))),
+    close:safe(d.at(-1)[4])
+  };
 }
 
-// ================= PRICE HISTORY =================
-async function fetchHistory24h() {
-  const d = await fetchKlines("1m", 1440);
-  if (!d.length) return;
-
-  chartData = d.map((c) => safeNum(c[4])); // close
-
-  const ohlc = calcFromKlines(d);
-  price24hOpen = ohlc.open;
-  price24hLow = ohlc.low;
-  price24hHigh = ohlc.high;
-
-  targetPrice = safeNum(d[d.length - 1][4]);
-
-  if (!chart) initChart();
+async function loadPrices(){
+  const d=await klines("1m",1440);
+  if(!d.length) return;
+  chartData=d.map(x=>safe(x[4]));
+  const o=calcOHLC(d);
+  price24hOpen=o.open; price24hHigh=o.high; price24hLow=o.low;
+  targetPrice=o.close;
+  if(!chart) initChart();
 }
-
-async function fetchTimeframes() {
-  const [w, m] = await Promise.all([
-    fetchKlines("1w", 1),
-    fetchKlines("1M", 1)
-  ]);
-
-  if (w.length) {
-    const k = w[0];
-    priceWeekOpen = safeNum(k[1]);
-    priceWeekHigh = safeNum(k[2]);
-    priceWeekLow = safeNum(k[3]);
-  }
-
-  if (m.length) {
-    const k = m[0];
-    priceMonthOpen = safeNum(k[1]);
-    priceMonthHigh = safeNum(k[2]);
-    priceMonthLow = safeNum(k[3]);
-  }
+async function loadTF(){
+  const [w,m]=await Promise.all([klines("1w",1),klines("1M",1)]);
+  if(w[0]){priceWeekOpen=safe(w[0][1]);priceWeekHigh=safe(w[0][2]);priceWeekLow=safe(w[0][3]);}
+  if(m[0]){priceMonthOpen=safe(m[0][1]);priceMonthHigh=safe(m[0][2]);priceMonthLow=safe(m[0][3]);}
 }
-
-fetchHistory24h();
-fetchTimeframes();
-
-setInterval(fetchHistory24h, 60_000);
-setInterval(fetchTimeframes, 60_000);
+loadPrices(); loadTF();
+setInterval(loadPrices,60000); setInterval(loadTF,60000);
 
 // ================= CHART =================
-function initChart() {
-  const ctx = $("priceChart").getContext("2d");
-  chart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: Array(1440).fill(""),
-      datasets: [{
-        data: chartData,
-        borderColor: "#22c55e",
-        backgroundColor: "rgba(34,197,94,0.2)",
-        fill: true,
-        pointRadius: 0,
-        tension: 0.3
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { display: false, grid: { display: false } },
-        y: { ticks: { color: "#9ca3af" } }
-      }
-    }
+function initChart(){
+  chart=new Chart($("priceChart"),{
+    type:"line",
+    data:{labels:Array(1440).fill(""),datasets:[{data:chartData,borderColor:"#22c55e",backgroundColor:"rgba(34,197,94,.2)",fill:true,pointRadius:0}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{ticks:{color:"#9ca3af"}}}}
   });
 }
-
-function updateChart(price) {
-  if (!chart) return;
-  chart.data.datasets[0].data.push(price);
+function updateChart(p){
+  if(!chart) return;
+  chart.data.datasets[0].data.push(p);
   chart.data.datasets[0].data.shift();
   chart.update("none");
 }
 
-// ================= WEBSOCKET =================
-function setConnectionStatus(online) {
-  const dot = $("connectionStatus").querySelector(".status-dot");
-  const txt = $("connectionStatus").querySelector(".status-text");
-  dot.style.background = online ? "#22c55e" : "#ef4444";
-  txt.textContent = online ? "Online" : "Offline";
+// ================= WS =================
+function status(on){
+  $("connectionStatus").querySelector(".status-dot").style.background=on?"#22c55e":"#ef4444";
+  $("connectionStatus").querySelector(".status-text").textContent=on?"Online":"Offline";
 }
-
-function startWS() {
-  if (ws) ws.close();
-
-  ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
-
-  ws.onopen = () => setConnectionStatus(true);
-
-  ws.onmessage = (e) => {
-    const p = safeNum(JSON.parse(e.data).p);
-    if (!p) return;
-
-    targetPrice = p;
-
-    price24hHigh = Math.max(price24hHigh || p, p);
-    price24hLow = Math.min(price24hLow || p, p);
-
-    priceWeekHigh = Math.max(priceWeekHigh || p, p);
-    priceWeekLow = Math.min(priceWeekLow || p, p);
-
-    priceMonthHigh = Math.max(priceMonthHigh || p, p);
-    priceMonthLow = Math.min(priceMonthLow || p, p);
-
+function startWS(){
+  if(ws) ws.close();
+  ws=new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  ws.onopen=()=>status(true);
+  ws.onmessage=e=>{
+    const p=safe(JSON.parse(e.data).p);
+    targetPrice=p;
+    price24hHigh=Math.max(price24hHigh,p);
+    price24hLow=Math.min(price24hLow,p);
+    priceWeekHigh=Math.max(priceWeekHigh,p);
+    priceWeekLow=Math.min(priceWeekLow,p);
+    priceMonthHigh=Math.max(priceMonthHigh,p);
+    priceMonthLow=Math.min(priceMonthLow,p);
     updateChart(p);
   };
-
-  ws.onclose = () => { setConnectionStatus(false); setTimeout(startWS, 3000); };
-  ws.onerror = () => setConnectionStatus(false);
+  ws.onclose=()=>{status(false);setTimeout(startWS,3000);}
 }
 startWS();
 
-// ================= BAR UPDATE (OPEN ALWAYS CENTER) =================
-function updateBarOpenCentered(bar, line, val, open, low, high, gradUp, gradDown) {
-  const v = safeNum(val);
-  const o = safeNum(open);
-  const lo = safeNum(low);
-  const hi = safeNum(high);
-
-  const range = Math.max(Math.abs(hi - o), Math.abs(o - lo), 1e-9);
-  const scaledLow = o - range;
-  const scaledHigh = o + range;
-
-  const pos = ((v - scaledLow) / (scaledHigh - scaledLow)) * 100;
-  const p = clamp(pos, 0, 100);
-
-  line.style.left = p + "%";
-
-  const center = 50;
-
-  if (v >= o) {
-    const width = clamp(p - center, 0, 100);
-    bar.style.left = center + "%";
-    bar.style.width = width + "%";
-    bar.style.background = gradUp;
-  } else {
-    const width = clamp(center - p, 0, 100);
-    bar.style.left = p + "%";
-    bar.style.width = width + "%";
-    bar.style.background = gradDown;
-  }
+// ================= BAR =================
+function bar(bar,line,v,o,l,h,up,down){
+  const r=Math.max(Math.abs(h-o),Math.abs(o-l),1e-9);
+  const p=clamp(((v-(o-r))/(2*r))*100,0,100);
+  line.style.left=p+"%";
+  if(v>=o){bar.style.left="50%";bar.style.width=(p-50)+"%";bar.style.background=up;}
+  else{bar.style.left=p+"%";bar.style.width=(50-p)+"%";bar.style.background=down;}
 }
 
-// ================= ANIMATION LOOP =================
-function animate() {
-  // PRICE (smooth)
-  if (displayed.price !== targetPrice) {
-    const old = displayed.price;
+// ================= LOOP (ISTANT) =================
+function animate(){
 
-    displayed.price += (targetPrice - old) * 0.5;
-    if (Math.abs(displayed.price - targetPrice) < 1e-6) displayed.price = targetPrice;
+  // PRICE
+  if(displayed.price!==targetPrice){
+    const o=displayed.price; displayed.price=targetPrice;
+    colorNumber($("price"),displayed.price,o,4);
 
-    colorNumber($("price"), displayed.price, old, 4);
+    $("price24h").textContent=arrow(pct(displayed.price,price24hOpen));
+    $("priceWeek").textContent=arrow(pct(displayed.price,priceWeekOpen));
+    $("priceMonth").textContent=arrow(pct(displayed.price,priceMonthOpen));
 
-    const d24h = price24hOpen ? ((displayed.price - price24hOpen) / price24hOpen) * 100 : 0;
-    $("price24h").textContent = fmtArrowPct(d24h);
-    $("price24h").className = "sub-row " + (d24h >= 0 ? "up" : "down");
-
-    const dWeek = priceWeekOpen ? ((displayed.price - priceWeekOpen) / priceWeekOpen) * 100 : 0;
-    $("priceWeek").textContent = fmtArrowPct(dWeek);
-    $("priceWeek").className = "sub-row " + (dWeek >= 0 ? "up" : "down");
-
-    const dMonth = priceMonthOpen ? ((displayed.price - priceMonthOpen) / priceMonthOpen) * 100 : 0;
-    $("priceMonth").textContent = fmtArrowPct(dMonth);
-    $("priceMonth").className = "sub-row " + (dMonth >= 0 ? "up" : "down");
-
-    updateBarOpenCentered(
-      $("priceBar"), $("priceLine"),
-      displayed.price, price24hOpen, price24hLow, price24hHigh,
-      "linear-gradient(to right,#22c55e,#10b981)",
-      "linear-gradient(to left,#ef4444,#f87171)"
-    );
-    $("priceMin").textContent = price24hLow.toFixed(3);
-    $("priceOpen").textContent = price24hOpen.toFixed(3);
-    $("priceMax").textContent = price24hHigh.toFixed(3);
-
-    updateBarOpenCentered(
-      $("weekBar"), $("weekLine"),
-      displayed.price, priceWeekOpen, priceWeekLow, priceWeekHigh,
-      "linear-gradient(to right,#f59e0b,#fbbf24)",
-      "linear-gradient(to left,#f97316,#f87171)"
-    );
-    $("weekMin").textContent = priceWeekLow.toFixed(3);
-    $("weekOpen").textContent = priceWeekOpen.toFixed(3);
-    $("weekMax").textContent = priceWeekHigh.toFixed(3);
-
-    updateBarOpenCentered(
-      $("monthBar"), $("monthLine"),
-      displayed.price, priceMonthOpen, priceMonthLow, priceMonthHigh,
-      "linear-gradient(to right,#8b5cf6,#c084fc)",
-      "linear-gradient(to left,#6b21a8,#c084fc)"
-    );
-    $("monthMin").textContent = priceMonthLow.toFixed(3);
-    $("monthOpen").textContent = priceMonthOpen.toFixed(3);
-    $("monthMax").textContent = priceMonthHigh.toFixed(3);
+    bar($("priceBar"),$("priceLine"),displayed.price,price24hOpen,price24hLow,price24hHigh,"linear-gradient(to right,#22c55e,#10b981)","linear-gradient(to left,#ef4444,#f87171)");
+    bar($("weekBar"),$("weekLine"),displayed.price,priceWeekOpen,priceWeekLow,priceWeekHigh,"linear-gradient(to right,#f59e0b,#fbbf24)","linear-gradient(to left,#f97316,#f87171)");
+    bar($("monthBar"),$("monthLine"),displayed.price,priceMonthOpen,priceMonthLow,priceMonthHigh,"linear-gradient(to right,#8b5cf6,#c084fc)","linear-gradient(to left,#6b21a8,#c084fc)");
   }
 
   // AVAILABLE
-  if (displayed.available !== availableInj) {
-    const old = displayed.available;
-    displayed.available += (availableInj - old) * 0.5;
-    if (Math.abs(displayed.available - availableInj) < 1e-6) displayed.available = availableInj;
-    colorNumber($("available"), displayed.available, old, 6);
-    $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
+  if(displayed.available!==availableInj){
+    colorNumber($("available"),availableInj,displayed.available,6);
+    displayed.available=availableInj;
+    $("availableUsd").textContent=`≈ $${(availableInj*displayed.price).toFixed(2)}`;
   }
 
   // STAKE
-  if (displayed.stake !== stakeInj) {
-    const old = displayed.stake;
-    displayed.stake += (stakeInj - old) * 0.5;
-    if (Math.abs(displayed.stake - stakeInj) < 1e-6) displayed.stake = stakeInj;
-    colorNumber($("stake"), displayed.stake, old, 4);
-    $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
+  if(displayed.stake!==stakeInj){
+    colorNumber($("stake"),stakeInj,displayed.stake,4);
+    displayed.stake=stakeInj;
+    $("stakeUsd").textContent=`≈ $${(stakeInj*displayed.price).toFixed(2)}`;
   }
 
-  // REWARDS
-  if (displayed.rewards !== rewardsInj) {
-    const old = displayed.rewards;
-    displayed.rewards += (rewardsInj - old) * 0.5;
-    if (Math.abs(displayed.rewards - rewardsInj) < 1e-8) displayed.rewards = rewardsInj;
-    colorNumber($("rewards"), displayed.rewards, old, 7);
-    $("rewardsUsd").textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
+  // REWARDS + FLASH + SHAKE
+  if(displayed.rewards!==rewardsInj){
+    const old=displayed.rewards;
+    displayed.rewards=rewardsInj;
+    colorNumber($("rewards"),rewardsInj,old,7);
+    $("rewardsUsd").textContent=`≈ $${(rewardsInj*displayed.price).toFixed(2)}`;
 
-    // scala dinamica
-    const minMax = 0.1;
-    const dynMax = Math.max(minMax, Math.ceil(displayed.rewards * 10) / 10 || minMax);
+    const card=document.querySelector(".reward-card");
 
-    const perc = clamp((displayed.rewards / dynMax) * 100, 0, 100);
+    if(rewardsInj<old){
+      $("rewardBar").style.transition="none";
+      $("rewardBar").style.width="0%";
+      $("rewardLine").style.left="0%";
+      $("rewardPercent").textContent="0%";
 
-    $("rewardBar").style.width = perc + "%";
-    $("rewardLine").style.left = perc + "%";
-    $("rewardPercent").textContent = perc.toFixed(1) + "%";
-    $("rewardBar").style.background = getHeatColor(perc);
+      card.classList.remove("reward-flash","reward-shake");
+      void card.offsetWidth;
+      card.classList.add("reward-flash","reward-shake");
 
-    const rewardVals = document.querySelectorAll(".reward-values .reward-extremes");
-    if (rewardVals.length >= 2) {
-      rewardVals[0].textContent = "0";
-      rewardVals[1].textContent = dynMax.toFixed(1);
+      setTimeout(()=>card.classList.remove("reward-flash","reward-shake"),400);
+    } else {
+      const max=Math.max(.1,Math.ceil(rewardsInj*10)/10);
+      const p=Math.min(rewardsInj/max*100,100);
+      $("rewardBar").style.transition="";
+      $("rewardBar").style.width=p+"%";
+      $("rewardLine").style.left=p+"%";
+      $("rewardPercent").textContent=p.toFixed(1)+"%";
+      $("rewardBar").style.background=getHeatColor(p);
     }
   }
 
-  // APR
-  $("apr").textContent = apr.toFixed(2) + "%";
-
-  $("updated").textContent = "Last update: " + new Date().toLocaleTimeString();
-
+  $("apr").textContent=apr.toFixed(2)+"%";
+  $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
   requestAnimationFrame(animate);
 }
-
 animate();
