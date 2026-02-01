@@ -6,7 +6,7 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -27,88 +27,97 @@
 
   <div class="cards-wrapper">
 
-    <!-- ================= PRICE CARD ================= -->
+    <!-- PRICE -->
     <div class="card price-card">
       <div class="label">INJ Price</div>
       <div class="value-row"><span id="price">0.0000</span></div>
 
-      <!-- GIORNALIERA -->
-      <div class="sub-row" id="price24h">±0.00%</div>
+      <!-- 24H -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrow24h">►</span>
+        <span class="pct" id="pct24h">0.00%</span>
+      </div>
       <div class="price-bar-container bar-container">
-        <div id="priceBar" class="price-bar bar-fill"></div>
-        <div id="priceLine" class="price-line bar-line"></div>
+        <span class="bar-label">24H</span>
+        <div id="priceBar" class="bar-fill"></div>
+        <div id="priceLine" class="bar-line"></div>
       </div>
-      <div class="price-values bar-values">
-        <span id="priceMin" class="price-extremes left">0.000</span>
-        <span id="priceOpen" class="price-extremes center">0.000</span>
-        <span id="priceMax" class="price-extremes right">0.000</span>
+      <div class="bar-values">
+        <span id="priceMin" class="left">0.000</span>
+        <span id="priceOpen" class="center">0.000</span>
+        <span id="priceMax" class="right">0.000</span>
       </div>
 
-      <!-- SETTIMANALE -->
-      <div class="sub-row" id="priceWeek">±0.00%</div>
+      <!-- WEEK -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrowWeek">►</span>
+        <span class="pct" id="pctWeek">0.00%</span>
+      </div>
       <div class="week-bar-container bar-container">
-        <div id="weekBar" class="week-bar bar-fill"></div>
-        <div id="weekLine" class="week-line bar-line"></div>
+        <span class="bar-label">1W</span>
+        <div id="weekBar" class="bar-fill"></div>
+        <div id="weekLine" class="bar-line"></div>
       </div>
-      <div class="week-values bar-values">
-        <span id="weekMin" class="week-extremes left">0.000</span>
-        <span id="weekOpen" class="week-extremes center">0.000</span>
-        <span id="weekMax" class="week-extremes right">0.000</span>
+      <div class="bar-values">
+        <span id="weekMin" class="left">0.000</span>
+        <span id="weekOpen" class="center">0.000</span>
+        <span id="weekMax" class="right">0.000</span>
       </div>
 
-      <!-- MENSILE -->
-      <div class="sub-row" id="priceMonth">±0.00%</div>
-      <div class="month-bar-container bar-container">
-        <div id="monthBar" class="month-bar bar-fill"></div>
-        <div id="monthLine" class="month-line bar-line"></div>
+      <!-- MONTH -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrowMonth">►</span>
+        <span class="pct" id="pctMonth">0.00%</span>
       </div>
-      <div class="month-values bar-values">
-        <span id="monthMin" class="month-extremes left">0.000</span>
-        <span id="monthOpen" class="month-extremes center">0.000</span>
-        <span id="monthMax" class="month-extremes right">0.000</span>
+      <div class="month-bar-container bar-container">
+        <span class="bar-label">1M</span>
+        <div id="monthBar" class="bar-fill"></div>
+        <div id="monthLine" class="bar-line"></div>
+      </div>
+      <div class="bar-values">
+        <span id="monthMin" class="left">0.000</span>
+        <span id="monthOpen" class="center">0.000</span>
+        <span id="monthMax" class="right">0.000</span>
       </div>
     </div>
 
-    <!-- ================= AVAILABLE ================= -->
+    <!-- AVAILABLE -->
     <div class="card">
       <div class="label">Available</div>
       <div class="value-row"><span id="available">0.000000</span></div>
-      <div class="sub-row"><span id="availableUsd">≈ $0.00</span></div>
+      <div class="sub-row" id="availableUsd">≈ $0.00</div>
     </div>
 
-    <!-- ================= STAKED ================= -->
+    <!-- STAKED -->
     <div class="card">
       <div class="label">Staked</div>
       <div class="value-row"><span id="stake">0.0000</span></div>
-      <div class="sub-row"><span id="stakeUsd">≈ $0.00</span></div>
+      <div class="sub-row" id="stakeUsd">≈ $0.00</div>
     </div>
 
-    <!-- ================= REWARDS ================= -->
+    <!-- REWARDS -->
     <div class="card reward-card">
       <div class="label">Rewards</div>
       <div class="value-row"><span id="rewards">0.0000000</span></div>
-      <div class="sub-row"><span id="rewardsUsd">≈ $0.00</span></div>
+      <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
 
-      <div class="reward-bar-container bar-container reward-container">
-        <div id="rewardBar" class="reward-bar bar-fill"></div>
-        <div id="rewardLine" class="reward-line bar-line"></div>
+      <div class="reward-bar-container bar-container">
+        <span class="bar-label">REWARD</span>
+        <div id="rewardBar" class="bar-fill"></div>
+        <div id="rewardLine" class="bar-line"></div>
         <span id="rewardPercent" class="reward-percent">0%</span>
-      </div>
-      <div class="reward-values bar-values">
-        <span class="reward-extremes left">0</span>
-        <span class="reward-extremes right">0.1</span>
       </div>
     </div>
 
-    <!-- ================= APR ================= -->
+    <!-- APR -->
     <div class="card">
       <div class="label">APR</div>
       <div class="value-row"><span id="apr">0%</span></div>
     </div>
 
-    <!-- ================= CHART ================= -->
+    <!-- CHART -->
     <div class="card chart-card">
-      <div class="label">24h Price Chart</div>
+      <div class="label">24H Price Chart</div>
       <canvas id="priceChart"></canvas>
     </div>
 
@@ -117,6 +126,5 @@
   <div id="updated" class="last-update">Last update: --:--</div>
 
 </div>
-
 </body>
 </html>
