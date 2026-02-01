@@ -11,22 +11,24 @@ const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
 
-/* persistence */
+/* staked persistence */
 const STAKE_SERIES_MAX = 240;
 const STAKE_LOCAL_VER = 1;
+/* richiesta: resettiamo da 0 e ricominciamo da ora */
 const RESET_STAKE_FROM_NOW_ON_BOOT = true;
 
 /* reward withdrawals persistence */
 const REWARD_WD_SERIES_MAX = 600;
 const REWARD_WD_LOCAL_VER = 1;
 
-/* detection thresholds */
+/* detect withdrawal: se rewards scendono > soglia */
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
+
 function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) {
   const d = new Date(ms);
@@ -46,13 +48,32 @@ let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
 
-function refreshConnUI() {
-  const ok = wsTradeOnline && wsKlineOnline && accountOnline;
-  statusText.textContent = ok ? "Online" : "Offline";
-  statusDot.style.background = ok ? "#22c55e" : "#ef4444";
+function hasInternet() {
+  return navigator.onLine === true;
 }
 
-/* ================= SEARCH / HEADER UI ================= */
+/* Offline SOLO senza internet, altrimenti Connecting finché feed non ok */
+function refreshConnUI() {
+  if (!statusDot || !statusText) return;
+
+  if (!hasInternet()) {
+    statusText.textContent = "Offline";
+    statusDot.style.background = "#ef4444";
+    return;
+  }
+
+  const allOk = wsTradeOnline && wsKlineOnline && accountOnline;
+  if (!allOk) {
+    statusText.textContent = "Connecting...";
+    statusDot.style.background = "#facc15";
+    return;
+  }
+
+  statusText.textContent = "Online";
+  statusDot.style.background = "#22c55e";
+}
+
+/* ================= HEADER SEARCH UI ================= */
 const searchWrap = $("searchWrap");
 const searchBtn = $("searchBtn");
 const addressInput = $("addressInput");
@@ -72,7 +93,7 @@ setAddressDisplay(address);
 function openSearch() {
   if (!searchWrap) return;
   searchWrap.classList.add("open");
-  setTimeout(() => addressInput?.focus(), 10);
+  setTimeout(() => addressInput?.focus(), 20);
 }
 function closeSearch() {
   if (!searchWrap) return;
@@ -86,11 +107,16 @@ if (searchBtn) {
   searchBtn.addEventListener("click", () => {
     if (!searchWrap.classList.contains("open")) openSearch();
     else addressInput?.focus();
-  });
+  }, { passive: true });
 }
+
 if (addressInput) {
-  addressInput.addEventListener("focus", openSearch);
-  addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); });
+  addressInput.addEventListener("focus", openSearch, { passive: true });
+
+  addressInput.addEventListener("input", (e) => {
+    pendingAddress = e.target.value.trim();
+  }, { passive: true });
+
   addressInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -104,15 +130,17 @@ if (addressInput) {
     }
   });
 }
+
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
   closeSearch();
 });
+
 if (menuBtn) {
   menuBtn.addEventListener("click", () => {
-    // futuro menu
-  });
+    // futuro menu drawer
+  }, { passive: true });
 }
 
 /* ================= STATE ================= */
@@ -121,6 +149,7 @@ let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
+/* Candle state */
 const candle = {
   d: { t: 0, open: 0, high: 0, low: 0 },
   w: { t: 0, open: 0, high: 0, low: 0 },
@@ -261,7 +290,10 @@ function saveStakeSeries() {
   if (!key) return;
   trimStakeSeries();
   try {
-    localStorage.setItem(key, JSON.stringify({ v: STAKE_LOCAL_VER, t: Date.now(), labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes }));
+    localStorage.setItem(key, JSON.stringify({
+      v: STAKE_LOCAL_VER, t: Date.now(),
+      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
+    }));
   } catch {}
 }
 function clearStakeSeriesStorage() {
@@ -456,18 +488,8 @@ function rebuildWdView() {
   drawRewardWdChart();
   syncRewardTimelineUI(true);
 }
-function clearWdAll() {
-  const key = wdStoreKey(address);
-  if (!key) return;
-  try { localStorage.removeItem(key); } catch {}
-  wdLabelsAll = []; wdValuesAll = []; wdTimesAll = [];
-  wdLabels = []; wdValues = []; wdTimes = [];
-  wdLastRewardsSeen = null;
-  drawRewardWdChart();
-  syncRewardTimelineUI(true);
-}
 
-/* labels only when zoom-in (or not too many points visible) */
+/* labels only when zoomed (few points visible) */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -478,19 +500,15 @@ const rewardPointLabelPlugin = {
     const dataEls = meta?.data || [];
     if (!dataEls.length) return;
 
-    // visible window size
     const xScale = ch.scales?.x;
     let min = xScale?.min;
     let max = xScale?.max;
 
-    // Chart.js category scale uses numeric indices
     const n = ds.data.length;
     if (!Number.isFinite(min)) min = 0;
     if (!Number.isFinite(max)) max = n - 1;
 
     const visibleCount = Math.max(0, Math.floor(max - min + 1));
-
-    // show labels only when zoomed enough
     if (visibleCount > 30) return;
 
     const ctx = ch.ctx;
@@ -499,24 +517,18 @@ const rewardPointLabelPlugin = {
     ctx.fillStyle = "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
 
-    // draw at most 18 labels
     let drawn = 0;
     const maxDraw = 18;
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
       if (!el) continue;
-
       if (drawn >= maxDraw) break;
 
       const v = safe(ds.data[i]);
       if (!v) continue;
 
-      const x = el.x;
-      const y = el.y;
-
-      const text = `+${v.toFixed(4)} INJ`;
-      ctx.fillText(text, x, y - 10);
+      ctx.fillText(`+${v.toFixed(4)} INJ`, el.x, el.y - 10);
       drawn++;
     }
 
@@ -572,7 +584,6 @@ function initRewardWdChart() {
     plugins: [rewardPointLabelPlugin]
   });
 }
-
 function drawRewardWdChart() {
   if (!rewardChart && window.Chart) initRewardWdChart();
   else if (rewardChart) {
@@ -582,7 +593,7 @@ function drawRewardWdChart() {
   }
 }
 
-/* timeline slider: window around selected idx */
+/* timeline window around selected idx */
 function syncRewardTimelineUI(forceToEnd=false) {
   const slider = $("rewardTimeline");
   const meta = $("rewardTimelineMeta");
@@ -602,7 +613,6 @@ function syncRewardTimelineUI(forceToEnd=false) {
 
   slider.min = 0;
   slider.max = String(n - 1);
-
   if (forceToEnd) slider.value = String(n - 1);
 
   const idx = clamp(parseInt(slider.value || "0", 10), 0, n - 1);
@@ -627,7 +637,6 @@ function attachRewardTimelineHandlers() {
   slider.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
 }
 
-/* LIVE button: go to last + reset zoom/pan */
 function goRewardLive() {
   const slider = $("rewardTimeline");
   if (slider) slider.value = String(Math.max(0, wdValues.length - 1));
@@ -637,22 +646,19 @@ function goRewardLive() {
 function attachRewardLiveHandler() {
   const btn = $("rewardLiveBtn");
   if (!btn) return;
-  btn.addEventListener("click", () => goRewardLive());
+  btn.addEventListener("click", () => goRewardLive(), { passive: true });
 }
 
-/* filter select */
 function attachRewardFilterHandler() {
   const sel = $("rewardFilter");
   if (!sel) return;
-
   sel.addEventListener("change", () => {
     wdMinFilter = safe(sel.value);
     rebuildWdView();
     goRewardLive();
-  });
+  }, { passive: true });
 }
 
-/* detect “withdrawal” from rewards drop */
 function maybeRecordRewardWithdrawal(newRewards) {
   const r = safe(newRewards);
 
@@ -670,8 +676,6 @@ function maybeRecordRewardWithdrawal(newRewards) {
 
     trimWdAll();
     saveWdAll();
-
-    // rebuild filtered view
     rebuildWdView();
     goRewardLive();
   }
@@ -700,7 +704,7 @@ async function commitAddress(newAddr) {
     resetStakeSeriesFromNow();
   }
 
-  // reset reward detection baseline and load withdrawals history for this wallet
+  // reward withdrawals load per wallet
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
@@ -713,7 +717,7 @@ async function commitAddress(newAddr) {
 
 /* ================= ACCOUNT (Injective LCD) ================= */
 async function loadAccount() {
-  if (!address) {
+  if (!address || !hasInternet()) {
     accountOnline = false;
     refreshConnUI();
     return;
@@ -747,12 +751,14 @@ async function loadAccount() {
   // staked points
   maybeAddStakePoint(stakeInj);
 
-  // reward withdrawals points (detect drop)
+  // reward withdrawals points
   maybeRecordRewardWithdrawal(rewardsInj);
 }
 
 /* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
 async function loadCandleSnapshot() {
+  if (!hasInternet()) return;
+
   const [d, w, m] = await Promise.all([
     fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
     fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1w&limit=1"),
@@ -803,6 +809,7 @@ let isPanning = false;
 
 let lastChartSign = "neutral";
 
+/* vertical line on hover */
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
   afterDraw(ch) {
@@ -812,16 +819,12 @@ const verticalLinePlugin = {
     if (!el) return;
 
     const ctx = ch.ctx;
-    const x = el.x;
-    const topY = ch.chartArea.top;
-    const bottomY = ch.chartArea.bottom;
-
     ctx.save();
     ctx.beginPath();
-    ctx.moveTo(x, topY);
-    ctx.lineTo(x, bottomY);
+    ctx.moveTo(el.x, ch.chartArea.top);
+    ctx.lineTo(el.x, ch.chartArea.bottom);
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(250, 204, 21, 0.9)";
+    ctx.strokeStyle = "rgba(250,204,21,0.9)";
     ctx.stroke();
     ctx.restore();
   }
@@ -858,15 +861,27 @@ function updatePinnedOverlay() {
 
   const ds = chart.data.datasets?.[0]?.data || [];
   const lbs = chart.data.labels || [];
-  if (!ds.length || !lbs.length) { overlay.classList.remove("show"); chartEl.textContent = "--"; return; }
+  if (!ds.length || !lbs.length) {
+    overlay.classList.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
 
   let idx = Number.isFinite(+pinnedIndex) ? +pinnedIndex : null;
-  if (idx == null) { overlay.classList.remove("show"); chartEl.textContent = "--"; return; }
+  if (idx == null) {
+    overlay.classList.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
   idx = clamp(Math.round(idx), 0, ds.length - 1);
 
   const price = safe(ds[idx]);
   const label = lbs[idx];
-  if (!Number.isFinite(price) || !label) { overlay.classList.remove("show"); chartEl.textContent = "--"; return; }
+  if (!Number.isFinite(price) || !label) {
+    overlay.classList.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
 
   chartEl.textContent = `${label} • $${price.toFixed(4)}`;
   overlay.classList.add("show");
@@ -954,6 +969,7 @@ function initChartToday() {
 }
 
 async function loadChartToday() {
+  if (!hasInternet()) return;
   if (!tfReady.d || !candle.d.t) return;
 
   const kl = await fetchKlines1mRange(candle.d.t, Date.now());
@@ -1000,7 +1016,6 @@ function setupChartInteractions() {
 
     pinnedIndex = idx;
     updatePinnedOverlay();
-
     chart.update("none");
   };
 
@@ -1029,16 +1044,46 @@ async function ensureChartBootstrapped() {
 setInterval(ensureChartBootstrapped, 1500);
 setInterval(loadChartToday, CHART_SYNC_MS);
 
-/* ================= WS TRADE ================= */
+/* ================= WS TRADE (price realtime) ================= */
+let wsTrade = null;
+let tradeRetryTimer = null;
+
+function clearTradeRetry() {
+  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
+}
+function scheduleTradeRetry() {
+  clearTradeRetry();
+  tradeRetryTimer = setTimeout(() => startTradeWS(), 1200);
+}
+
 function startTradeWS() {
+  try { if (wsTrade) wsTrade.close(); } catch {}
+
   wsTradeOnline = false;
   refreshConnUI();
 
-  const wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  if (!hasInternet()) return;
 
-  wsTrade.onopen = () => { wsTradeOnline = true; refreshConnUI(); };
-  wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); setTimeout(startTradeWS, 1200); };
-  wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} };
+  wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+
+  wsTrade.onopen = () => {
+    wsTradeOnline = true;
+    refreshConnUI();
+    clearTradeRetry();
+  };
+
+  wsTrade.onclose = () => {
+    wsTradeOnline = false;
+    refreshConnUI();
+    scheduleTradeRetry();
+  };
+
+  wsTrade.onerror = () => {
+    wsTradeOnline = false;
+    refreshConnUI();
+    try { wsTrade.close(); } catch {}
+    scheduleTradeRetry();
+  };
 
   wsTrade.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -1052,12 +1097,190 @@ function startTradeWS() {
     if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
   };
 }
-startTradeWS();
+
+/* ================= WS KLINES (1m chart + 1D/1W/1M candles) ================= */
+let wsKline = null;
+let klineRetryTimer = null;
+
+function clearKlineRetry() {
+  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
+}
+function scheduleKlineRetry() {
+  clearKlineRetry();
+  klineRetryTimer = setTimeout(() => startKlineWS(), 1200);
+}
+
+function applyKline(intervalKey, k) {
+  const t = safe(k.t);
+  const o = safe(k.o);
+  const h = safe(k.h);
+  const l = safe(k.l);
+
+  if (o && h && l) {
+    candle[intervalKey].t = t || candle[intervalKey].t;
+    candle[intervalKey].open = o;
+    candle[intervalKey].high = h;
+    candle[intervalKey].low  = l;
+
+    if (!tfReady[intervalKey]) {
+      tfReady[intervalKey] = true;
+      settleStart = Date.now();
+    }
+  }
+}
+
+function updateChartFrom1mKline(k) {
+  if (!chart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
+
+  const openTime = safe(k.t);
+  const close = safe(k.c);
+  if (!openTime || !close) return;
+
+  if (openTime < candle.d.t) return;
+
+  if (lastChartMinuteStart === openTime) {
+    const idx = chart.data.datasets[0].data.length - 1;
+    if (idx >= 0) {
+      chart.data.datasets[0].data[idx] = close;
+      chart.update("none");
+    }
+    return;
+  }
+
+  lastChartMinuteStart = openTime;
+
+  chart.data.labels.push(fmtHHMM(openTime));
+  chart.data.datasets[0].data.push(close);
+
+  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
+  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
+
+  chart.update("none");
+}
+
+async function resetDayAndReloadChart(nextOpenTime) {
+  chartBootstrappedToday = false;
+
+  chartLabels = [];
+  chartData = [];
+  lastChartMinuteStart = 0;
+
+  if (chart) {
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.update("none");
+  }
+
+  if (nextOpenTime) candle.d.t = nextOpenTime;
+
+  await loadCandleSnapshot();
+  await loadChartToday();
+
+  hoverActive = false;
+  hoverIndex = null;
+  pinnedIndex = null;
+  updatePinnedOverlay();
+}
+
+function startKlineWS() {
+  try { if (wsKline) wsKline.close(); } catch {}
+
+  wsKlineOnline = false;
+  refreshConnUI();
+
+  if (!hasInternet()) return;
+
+  const url =
+    "wss://stream.binance.com:9443/stream?streams=" +
+    "injusdt@kline_1m/" +
+    "injusdt@kline_1d/" +
+    "injusdt@kline_1w/" +
+    "injusdt@kline_1M";
+
+  wsKline = new WebSocket(url);
+
+  wsKline.onopen = () => {
+    wsKlineOnline = true;
+    refreshConnUI();
+    clearKlineRetry();
+  };
+
+  wsKline.onclose = () => {
+    wsKlineOnline = false;
+    refreshConnUI();
+    scheduleKlineRetry();
+  };
+
+  wsKline.onerror = () => {
+    wsKlineOnline = false;
+    refreshConnUI();
+    try { wsKline.close(); } catch {}
+    scheduleKlineRetry();
+  };
+
+  wsKline.onmessage = async (e) => {
+    const payload = JSON.parse(e.data);
+    const data = payload.data;
+    if (!data || !data.k) return;
+
+    const stream = payload.stream || "";
+    const k = data.k;
+
+    if (stream.includes("@kline_1m")) {
+      updateChartFrom1mKline(k);
+      return;
+    }
+
+    if (stream.includes("@kline_1d")) {
+      const prevDayOpen = candle.d.t;
+      applyKline("d", k);
+
+      if (!chartBootstrappedToday && tfReady.d && candle.d.t) {
+        await loadChartToday();
+      }
+
+      // chiusura candle daily => nuovo giorno
+      if (k.x === true) {
+        const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
+        await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
+      } else {
+        if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
+          await resetDayAndReloadChart(candle.d.t);
+        }
+      }
+    } else if (stream.includes("@kline_1w")) {
+      applyKline("w", k);
+    } else if (stream.includes("@kline_1M")) {
+      applyKline("m", k);
+    }
+
+    const root = $("appRoot");
+    if (root && root.classList.contains("loading") && tfReady.d) {
+      root.classList.remove("loading");
+      root.classList.add("ready");
+    }
+  };
+}
+
+/* ================= ONLINE / OFFLINE listeners ================= */
+window.addEventListener("online", () => {
+  refreshConnUI();
+  // restart aggressivo
+  try { startTradeWS(); } catch {}
+  try { startKlineWS(); } catch {}
+  try { loadAccount(); } catch {}
+}, { passive: true });
+
+window.addEventListener("offline", () => {
+  wsTradeOnline = false;
+  wsKlineOnline = false;
+  accountOnline = false;
+  refreshConnUI();
+}, { passive: true });
 
 /* ================= BOOT ================= */
 (async function boot() {
-  await loadCandleSnapshot();
-  await loadChartToday();
+  refreshConnUI();
 
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
@@ -1067,24 +1290,29 @@ startTradeWS();
   pendingAddress = address || "";
   setAddressDisplay(address);
 
-  // init filter from select
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
-  if (address) {
-    if (RESET_STAKE_FROM_NOW_ON_BOOT) {
-      clearStakeSeriesStorage();
-      resetStakeSeriesFromNow();
-    }
+  // reset staked da ora (richiesta)
+  if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
+    clearStakeSeriesStorage();
+    resetStakeSeriesFromNow();
+  }
 
+  // load rewards withdrawals history per wallet (se esiste)
+  if (address) {
     loadWdAll();
     rebuildWdView();
     goRewardLive();
-
-    await loadAccount();
-    setInterval(loadAccount, ACCOUNT_POLL_MS);
-  } else {
-    setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
   }
+
+  await loadCandleSnapshot();
+  await loadChartToday();
+
+  startTradeWS();
+  startKlineWS();
+
+  if (address) await loadAccount();
+  setInterval(loadAccount, ACCOUNT_POLL_MS);
 })();
 
 /* ================= LOOP ================= */
@@ -1109,7 +1337,7 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* BARS gradients */
+  /* BARS gradients (diversi per TF) */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
@@ -1121,7 +1349,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* values + flash extremes */
+  /* Values + flash extremes */
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -1131,6 +1359,7 @@ function animate() {
     $("priceMin").textContent  = low.toFixed(3);
     $("priceOpen").textContent = safe(candle.d.open).toFixed(3);
     $("priceMax").textContent  = high.toFixed(3);
+
     if (lastExtremes.d.low !== null && low !== lastExtremes.d.low) flash(pMinEl);
     if (lastExtremes.d.high !== null && high !== lastExtremes.d.high) flash(pMaxEl);
     lastExtremes.d.low = low; lastExtremes.d.high = high;
@@ -1145,6 +1374,7 @@ function animate() {
     $("weekMin").textContent   = low.toFixed(3);
     $("weekOpen").textContent  = safe(candle.w.open).toFixed(3);
     $("weekMax").textContent   = high.toFixed(3);
+
     if (lastExtremes.w.low !== null && low !== lastExtremes.w.low) flash(wMinEl);
     if (lastExtremes.w.high !== null && high !== lastExtremes.w.high) flash(wMaxEl);
     lastExtremes.w.low = low; lastExtremes.w.high = high;
@@ -1159,6 +1389,7 @@ function animate() {
     $("monthMin").textContent  = low.toFixed(3);
     $("monthOpen").textContent = safe(candle.m.open).toFixed(3);
     $("monthMax").textContent  = high.toFixed(3);
+
     if (lastExtremes.m.low !== null && low !== lastExtremes.m.low) flash(mMinEl);
     if (lastExtremes.m.high !== null && high !== lastExtremes.m.high) flash(mMaxEl);
     lastExtremes.m.low = low; lastExtremes.m.high = high;
@@ -1203,6 +1434,7 @@ function animate() {
   $("rewardMin").textContent = "0";
   $("rewardMax").textContent = maxR.toFixed(1);
 
+  /* APR + time */
   $("apr").textContent = safe(apr).toFixed(2) + "%";
   $("updated").textContent = "Last update: " + nowLabel();
 
