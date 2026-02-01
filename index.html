@@ -96,6 +96,22 @@
       <div class="label">Staked</div>
       <div class="value-row"><span id="stake">0.0000</span></div>
       <div class="sub-row" id="stakeUsd">≈ $0.00</div>
+
+      <div class="stake-bar-container bar-container stake-container">
+        <span class="bar-label">STAKED</span>
+        <div id="stakeBar" class="bar-fill stake-fill"></div>
+        <div id="stakeLine" class="bar-line"></div>
+        <span id="stakePercent" class="stake-percent">0%</span>
+      </div>
+
+      <div class="bar-values stake-values">
+        <span id="stakeMin" class="left">0</span>
+        <span id="stakeMax" class="right">1000</span>
+      </div>
+
+      <div class="stake-chart-wrap">
+        <canvas id="stakeChart"></canvas>
+      </div>
     </div>
 
     <!-- REWARDS -->
