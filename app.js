@@ -12,28 +12,27 @@ const ONE_MIN_MS = 60_000;
 /* stake range */
 const STAKE_TARGET_MAX = 1000;
 
-/* stake series persistence */
+/* staked chart persistence */
 const STAKE_SERIES_MAX = 240;
 const STAKE_LOCAL_VER = 1;
+
+/* RESET POLICY: riparti da 0 da ORA (richiesta) */
+const RESET_STAKE_FROM_NOW_ON_BOOT = true;
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
-
 function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) {
   const d = new Date(ms);
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
-function nowLabel() {
-  return new Date().toLocaleTimeString();
-}
+function nowLabel() { return new Date().toLocaleTimeString(); }
 
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
 const statusText = $("statusText");
-
 let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
@@ -44,20 +43,24 @@ function refreshConnUI() {
   statusDot.style.background = ok ? "#22c55e" : "#ef4444";
 }
 
-/* ================= SEARCH UI ================= */
+/* ================= SEARCH / HEADER UI ================= */
 const searchWrap = $("searchWrap");
 const searchBtn = $("searchBtn");
 const addressInput = $("addressInput");
 const addressDisplay = $("addressDisplay");
+const menuBtn = $("menuBtn");
 
 let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = address || "";
 
+function shortAddr(a) {
+  if (!a) return "";
+  return a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : a;
+}
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
-  const short = addr.length > 18 ? (addr.slice(0, 10) + "…" + addr.slice(-6)) : addr;
-  addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${short}</span>`;
+  addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${shortAddr(addr)}</span>`;
 }
 setAddressDisplay(address);
 
@@ -72,184 +75,6 @@ function closeSearch() {
   addressInput?.blur();
 }
 
-/* ================= STATE ================= */
-let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
-
-let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-
-const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 },
-  w: { t: 0, open: 0, high: 0, low: 0 },
-  m: { t: 0, open: 0, high: 0, low: 0 },
-};
-const tfReady = { d: false, w: false, m: false };
-
-/* Flash giallo su estremi */
-const lastExtremes = {
-  d: { low: null, high: null },
-  w: { low: null, high: null },
-  m: { low: null, high: null },
-};
-function flash(el) {
-  if (!el) return;
-  el.classList.remove("flash-yellow");
-  void el.offsetWidth;
-  el.classList.add("flash-yellow");
-}
-
-/* ================= PRICE CHART ================= */
-let chart = null;
-let chartLabels = [];
-let chartData = [];
-let lastChartMinuteStart = 0;
-let chartBootstrappedToday = false;
-
-/* hover/pin */
-let hoverActive = false;
-let hoverIndex = null;
-let pinnedIndex = null;
-let isPanning = false;
-
-let lastChartSign = "neutral";
-
-/* ws */
-let wsTrade = null;
-let wsKline = null;
-let tradeRetryTimer = null;
-let klineRetryTimer = null;
-
-/* ================= STAKE CHART ================= */
-let stakeChart = null;
-let stakeLabels = [];
-let stakeData = [];
-let stakeMoves = [];      // 1 up, -1 down, 0 none
-let stakeEventTypes = []; // "Delegate / Compound", "Undelegate", ...
-let lastStakeRecorded = null;
-
-/* ================= STAKE PERSISTENCE ================= */
-function stakeStoreKey(addr) {
-  const a = (addr || "").trim();
-  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
-}
-function trimStakeSeries() {
-  if (stakeLabels.length > STAKE_SERIES_MAX) stakeLabels = stakeLabels.slice(-STAKE_SERIES_MAX);
-  if (stakeData.length > STAKE_SERIES_MAX) stakeData = stakeData.slice(-STAKE_SERIES_MAX);
-  if (stakeMoves.length > STAKE_SERIES_MAX) stakeMoves = stakeMoves.slice(-STAKE_SERIES_MAX);
-  if (stakeEventTypes.length > STAKE_SERIES_MAX) stakeEventTypes = stakeEventTypes.slice(-STAKE_SERIES_MAX);
-
-  const n = stakeData.length;
-  if (stakeLabels.length > n) stakeLabels = stakeLabels.slice(0, n);
-  if (stakeMoves.length > n) stakeMoves = stakeMoves.slice(0, n);
-  if (stakeEventTypes.length > n) stakeEventTypes = stakeEventTypes.slice(0, n);
-
-  while (stakeMoves.length < n) stakeMoves.push(0);
-  while (stakeEventTypes.length < n) stakeEventTypes.push("Stake update");
-}
-function saveStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-
-  trimStakeSeries();
-
-  const payload = {
-    v: STAKE_LOCAL_VER,
-    t: Date.now(),
-    labels: stakeLabels,
-    data: stakeData,
-    moves: stakeMoves,
-    types: stakeEventTypes
-  };
-
-  try {
-    localStorage.setItem(key, JSON.stringify(payload));
-  } catch {
-    // se localStorage pieno: dimezza serie e riprova
-    try {
-      const half = Math.floor(STAKE_SERIES_MAX / 2);
-      stakeLabels = stakeLabels.slice(-half);
-      stakeData = stakeData.slice(-half);
-      stakeMoves = stakeMoves.slice(-half);
-      stakeEventTypes = stakeEventTypes.slice(-half);
-      localStorage.setItem(key, JSON.stringify({
-        v: STAKE_LOCAL_VER,
-        t: Date.now(),
-        labels: stakeLabels,
-        data: stakeData,
-        moves: stakeMoves,
-        types: stakeEventTypes
-      }));
-    } catch {}
-  }
-}
-function loadStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return false;
-
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
-
-    const labels = Array.isArray(obj.labels) ? obj.labels : [];
-    const data = Array.isArray(obj.data) ? obj.data : [];
-    const moves = Array.isArray(obj.moves) ? obj.moves : [];
-    const types = Array.isArray(obj.types) ? obj.types : [];
-
-    if (!labels.length || !data.length || labels.length !== data.length) return false;
-
-    stakeLabels = labels.slice(-STAKE_SERIES_MAX);
-    stakeData = data.slice(-STAKE_SERIES_MAX);
-    stakeMoves = moves.slice(-STAKE_SERIES_MAX);
-    stakeEventTypes = types.slice(-STAKE_SERIES_MAX);
-
-    trimStakeSeries();
-    lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
-
-    drawStakeChart();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* ================= COMMIT ADDRESS ================= */
-function commitAddress(newAddr) {
-  const a = (newAddr || "").trim();
-  if (!a) return;
-
-  address = a;
-  pendingAddress = a;
-  localStorage.setItem("inj_address", address);
-
-  setAddressDisplay(address);
-  settleStart = Date.now();
-
-  // reset stato account (verrà ricaricato)
-  availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
-  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
-
-  // carica serie salvata (se c'è). Se non c'è, verrà creata nel boot/seed.
-  loadStakeSeries();
-
-  // fetch account + ricostruzione (real)
-  loadAccount().then(async () => {
-    const hasSaved = !!stakeData.length;
-    if (!hasSaved) {
-      // prima tenta ricostruzione completa da tx reali
-      const okFull = await bootstrapStakeHistoryFullFromTxs();
-      if (!okFull) {
-        // se fallisce, seed da oggi (ultimi 2 up reali)
-        const okSeed = await seedStakeSeriesFromTodayLast2Ups();
-        if (!okSeed) seedFallback0ToCurrent();
-      }
-    }
-  });
-}
-
-/* hook UI search */
 if (addressInput) addressInput.value = pendingAddress;
 
 if (searchBtn) {
@@ -280,6 +105,39 @@ document.addEventListener("click", (e) => {
   if (searchWrap.contains(t)) return;
   closeSearch();
 });
+
+/* menu placeholder (per ora) */
+if (menuBtn) {
+  menuBtn.addEventListener("click", () => {
+    // futuro: apri drawer/menu
+  });
+}
+
+/* ================= STATE ================= */
+let targetPrice = 0;
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
+
+let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
+
+const candle = {
+  d: { t: 0, open: 0, high: 0, low: 0 },
+  w: { t: 0, open: 0, high: 0, low: 0 },
+  m: { t: 0, open: 0, high: 0, low: 0 },
+};
+const tfReady = { d: false, w: false, m: false };
+
+/* extremes flash */
+const lastExtremes = {
+  d: { low: null, high: null },
+  w: { low: null, high: null },
+  m: { low: null, high: null },
+};
+function flash(el) {
+  if (!el) return;
+  el.classList.remove("flash-yellow");
+  void el.offsetWidth;
+  el.classList.add("flash-yellow");
+}
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
@@ -373,6 +231,244 @@ async function fetchJSON(url) {
   }
 }
 
+/* ================= STAKED CHART STORAGE ================= */
+let stakeChart = null;
+let stakeLabels = [];
+let stakeData = [];
+let stakeMoves = [];
+let stakeTypes = [];
+let lastStakeRecorded = null;
+
+/* baseline logic for reset-from-now */
+let stakeBaselineCaptured = false;
+
+function stakeStoreKey(addr) {
+  const a = (addr || "").trim();
+  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
+}
+function trimStakeSeries() {
+  if (stakeLabels.length > STAKE_SERIES_MAX) stakeLabels = stakeLabels.slice(-STAKE_SERIES_MAX);
+  if (stakeData.length > STAKE_SERIES_MAX) stakeData = stakeData.slice(-STAKE_SERIES_MAX);
+  if (stakeMoves.length > STAKE_SERIES_MAX) stakeMoves = stakeMoves.slice(-STAKE_SERIES_MAX);
+  if (stakeTypes.length > STAKE_SERIES_MAX) stakeTypes = stakeTypes.slice(-STAKE_SERIES_MAX);
+
+  const n = stakeData.length;
+  if (stakeLabels.length > n) stakeLabels = stakeLabels.slice(0, n);
+  if (stakeMoves.length > n) stakeMoves = stakeMoves.slice(0, n);
+  if (stakeTypes.length > n) stakeTypes = stakeTypes.slice(0, n);
+
+  while (stakeMoves.length < n) stakeMoves.push(0);
+  while (stakeTypes.length < n) stakeTypes.push("Stake update");
+}
+function saveStakeSeries() {
+  const key = stakeStoreKey(address);
+  if (!key) return;
+
+  trimStakeSeries();
+  const payload = { v: STAKE_LOCAL_VER, t: Date.now(), labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes };
+
+  try {
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {}
+}
+function clearStakeSeriesStorage() {
+  const key = stakeStoreKey(address);
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch {}
+}
+
+function loadStakeSeries() {
+  const key = stakeStoreKey(address);
+  if (!key) return false;
+
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
+
+    const labels = Array.isArray(obj.labels) ? obj.labels : [];
+    const data = Array.isArray(obj.data) ? obj.data : [];
+    const moves = Array.isArray(obj.moves) ? obj.moves : [];
+    const types = Array.isArray(obj.types) ? obj.types : [];
+
+    if (!labels.length || !data.length || labels.length !== data.length) return false;
+
+    stakeLabels = labels.slice(-STAKE_SERIES_MAX);
+    stakeData = data.slice(-STAKE_SERIES_MAX);
+    stakeMoves = moves.slice(-STAKE_SERIES_MAX);
+    stakeTypes = types.slice(-STAKE_SERIES_MAX);
+
+    trimStakeSeries();
+    lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
+    stakeBaselineCaptured = true;
+
+    drawStakeChart();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* reset graph from now: start at 0 then capture real baseline at next account fetch */
+function resetStakeSeriesFromNow() {
+  stakeLabels = [nowLabel()];
+  stakeData = [0];
+  stakeMoves = [0];
+  stakeTypes = ["Reset start"];
+  lastStakeRecorded = null;
+  stakeBaselineCaptured = false;
+
+  saveStakeSeries();
+  drawStakeChart();
+}
+
+/* ================= STAKE CHART INIT ================= */
+function initStakeChart() {
+  const canvas = $("stakeChart");
+  if (!canvas) return;
+
+  stakeChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: stakeLabels,
+      datasets: [{
+        data: stakeData,
+        borderColor: "#22c55e",
+        backgroundColor: "rgba(34,197,94,.18)",
+        fill: true,
+        tension: 0.3,
+
+        pointRadius: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m === 0 ? 0 : 3;
+        },
+        pointHoverRadius: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m === 0 ? 0 : 5;
+        },
+        pointBackgroundColor: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
+        },
+        pointBorderColor: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
+        },
+        pointBorderWidth: 1,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          displayColors: false,
+          callbacks: {
+            title: (items) => {
+              const i = items?.[0]?.dataIndex ?? 0;
+              return stakeLabels[i] || "";
+            },
+            label: (item) => {
+              const i = item.dataIndex;
+              const v = safe(stakeData[i]);
+              const t = stakeTypes[i] || "Stake update";
+              return `${t} • ${v.toFixed(6)} INJ`;
+            }
+          }
+        }
+      },
+      interaction: { mode: "nearest", intersect: true },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    }
+  });
+}
+
+function drawStakeChart() {
+  if (!stakeChart && window.Chart) initStakeChart();
+  else if (stakeChart) {
+    stakeChart.data.labels = stakeLabels;
+    stakeChart.data.datasets[0].data = stakeData;
+    stakeChart.update("none");
+  }
+}
+
+/* baseline + punti reali */
+function maybeAddStakePoint(currentStake) {
+  const s = safe(currentStake);
+  if (!Number.isFinite(s)) return;
+
+  // se abbiamo resettato e non abbiamo ancora baseline: aggiungi baseline reale (una volta)
+  if (!stakeBaselineCaptured) {
+    stakeLabels.push(nowLabel());
+    stakeData.push(s);
+    stakeMoves.push(1);
+    stakeTypes.push("Baseline (current)");
+
+    trimStakeSeries();
+    lastStakeRecorded = s;
+    stakeBaselineCaptured = true;
+
+    saveStakeSeries();
+    drawStakeChart();
+    return;
+  }
+
+  const TH = 0.0005;
+  if (lastStakeRecorded == null) {
+    lastStakeRecorded = s;
+    return;
+  }
+
+  const delta = s - lastStakeRecorded;
+  if (Math.abs(delta) <= TH) return;
+
+  lastStakeRecorded = s;
+
+  stakeLabels.push(nowLabel());
+  stakeData.push(s);
+  stakeMoves.push(delta > 0 ? 1 : -1);
+  stakeTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
+
+  trimStakeSeries();
+  saveStakeSeries();
+  drawStakeChart();
+}
+
+/* ================= ADDRESS COMMIT ================= */
+async function commitAddress(newAddr) {
+  const a = (newAddr || "").trim();
+  if (!a) return;
+
+  address = a;
+  pendingAddress = a;
+  localStorage.setItem("inj_address", address);
+
+  setAddressDisplay(address);
+  settleStart = Date.now();
+
+  // reset valori display
+  availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
+  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
+
+  // RESET richiesto: ripartiamo da 0 da ora per questo wallet
+  clearStakeSeriesStorage();
+  resetStakeSeriesFromNow();
+
+  await loadAccount();
+}
+
 /* ================= ACCOUNT (Injective LCD) ================= */
 async function loadAccount() {
   if (!address) {
@@ -403,7 +499,6 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  // punto live quando cambia davvero (valore reale)
   maybeAddStakePoint(stakeInj);
 }
 setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
@@ -446,7 +541,20 @@ async function loadCandleSnapshot() {
 }
 setInterval(loadCandleSnapshot, REST_SYNC_MS);
 
-/* ================= PRICE CHART: vertical line plugin ================= */
+/* ================= PRICE CHART ================= */
+let chart = null;
+let chartLabels = [];
+let chartData = [];
+let lastChartMinuteStart = 0;
+let chartBootstrappedToday = false;
+
+let hoverActive = false;
+let hoverIndex = null;
+let pinnedIndex = null;
+let isPanning = false;
+
+let lastChartSign = "neutral";
+
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
   afterDraw(ch) {
@@ -490,28 +598,6 @@ function applyChartColorBySign(sign) {
   chart.update("none");
 }
 
-/* ================= CHART: bootstrap giornata ================= */
-async function fetchKlines1mRange(startTime, endTime) {
-  const out = [];
-  let cursor = startTime;
-  const end = endTime || Date.now();
-
-  while (cursor < end && out.length < DAY_MINUTES) {
-    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
-    const d = await fetchJSON(url);
-    if (!Array.isArray(d) || !d.length) break;
-
-    out.push(...d);
-
-    const lastOpenTime = safe(d[d.length - 1][0]);
-    cursor = lastOpenTime + ONE_MIN_MS;
-
-    if (!lastOpenTime) break;
-    if (d.length < 1000) break;
-  }
-  return out.slice(0, DAY_MINUTES);
-}
-
 function updatePinnedOverlay() {
   const overlay = $("chartOverlay");
   const chartEl = $("chartPrice");
@@ -537,6 +623,27 @@ function updatePinnedOverlay() {
 
   chartEl.textContent = `${label} • $${price.toFixed(4)}`;
   overlay.classList.add("show");
+}
+
+async function fetchKlines1mRange(startTime, endTime) {
+  const out = [];
+  let cursor = startTime;
+  const end = endTime || Date.now();
+
+  while (cursor < end && out.length < DAY_MINUTES) {
+    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
+    const d = await fetchJSON(url);
+    if (!Array.isArray(d) || !d.length) break;
+
+    out.push(...d);
+
+    const lastOpenTime = safe(d[d.length - 1][0]);
+    cursor = lastOpenTime + ONE_MIN_MS;
+
+    if (!lastOpenTime) break;
+    if (d.length < 1000) break;
+  }
+  return out.slice(0, DAY_MINUTES);
 }
 
 function initChartToday() {
@@ -678,41 +785,16 @@ async function ensureChartBootstrapped() {
 setInterval(ensureChartBootstrapped, 1500);
 setInterval(loadChartToday, CHART_SYNC_MS);
 
-/* ================= WS TRADE (price realtime) ================= */
-function clearTradeRetry() {
-  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
-}
-function scheduleTradeRetry() {
-  clearTradeRetry();
-  tradeRetryTimer = setTimeout(() => startTradeWS(), 1200);
-}
-
+/* ================= WS TRADE ================= */
 function startTradeWS() {
-  try { if (wsTrade) wsTrade.close(); } catch {}
-
   wsTradeOnline = false;
   refreshConnUI();
 
-  wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  const wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
 
-  wsTrade.onopen = () => {
-    wsTradeOnline = true;
-    refreshConnUI();
-    clearTradeRetry();
-  };
-
-  wsTrade.onclose = () => {
-    wsTradeOnline = false;
-    refreshConnUI();
-    scheduleTradeRetry();
-  };
-
-  wsTrade.onerror = () => {
-    wsTradeOnline = false;
-    refreshConnUI();
-    try { wsTrade.close(); } catch {}
-    scheduleTradeRetry();
-  };
+  wsTrade.onopen = () => { wsTradeOnline = true; refreshConnUI(); };
+  wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); setTimeout(startTradeWS, 1200); };
+  wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} };
 
   wsTrade.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -728,90 +810,8 @@ function startTradeWS() {
 }
 startTradeWS();
 
-/* ================= WS KLINES (1m chart + 1D/1W/1M bars) ================= */
-function clearKlineRetry() {
-  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
-}
-function scheduleKlineRetry() {
-  clearKlineRetry();
-  klineRetryTimer = setTimeout(() => startKlineWS(), 1200);
-}
-
-function applyKline(intervalKey, k) {
-  const t = safe(k.t);
-  const o = safe(k.o);
-  const h = safe(k.h);
-  const l = safe(k.l);
-
-  if (o && h && l) {
-    candle[intervalKey].t = t || candle[intervalKey].t;
-    candle[intervalKey].open = o;
-    candle[intervalKey].high = h;
-    candle[intervalKey].low  = l;
-
-    if (!tfReady[intervalKey]) {
-      tfReady[intervalKey] = true;
-      settleStart = Date.now();
-    }
-  }
-}
-
-function updateChartFrom1mKline(k) {
-  if (!chart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
-
-  const openTime = safe(k.t);
-  const close = safe(k.c);
-  if (!openTime || !close) return;
-  if (openTime < candle.d.t) return;
-
-  if (lastChartMinuteStart === openTime) {
-    const idx = chart.data.datasets[0].data.length - 1;
-    if (idx >= 0) {
-      chart.data.datasets[0].data[idx] = close;
-      chart.update("none");
-      updatePinnedOverlay();
-    }
-    return;
-  }
-
-  lastChartMinuteStart = openTime;
-
-  chart.data.labels.push(fmtHHMM(openTime));
-  chart.data.datasets[0].data.push(close);
-
-  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
-  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
-
-  chart.update("none");
-  updatePinnedOverlay();
-}
-
-async function resetDayAndReloadChart(nextOpenTime) {
-  chartBootstrappedToday = false;
-  chartLabels = [];
-  chartData = [];
-  lastChartMinuteStart = 0;
-  pinnedIndex = null;
-
-  if (chart) {
-    chart.data.labels = [];
-    chart.data.datasets[0].data = [];
-    chart.update("none");
-  }
-
-  if (nextOpenTime) candle.d.t = nextOpenTime;
-
-  await loadCandleSnapshot();
-  await loadChartToday();
-
-  hoverActive = false;
-  hoverIndex = null;
-  updatePinnedOverlay();
-}
-
+/* ================= WS KLINES ================= */
 function startKlineWS() {
-  try { if (wsKline) wsKline.close(); } catch {}
-
   wsKlineOnline = false;
   refreshConnUI();
 
@@ -822,26 +822,11 @@ function startKlineWS() {
     "injusdt@kline_1w/" +
     "injusdt@kline_1M";
 
-  wsKline = new WebSocket(url);
+  const wsKline = new WebSocket(url);
 
-  wsKline.onopen = () => {
-    wsKlineOnline = true;
-    refreshConnUI();
-    clearKlineRetry();
-  };
-
-  wsKline.onclose = () => {
-    wsKlineOnline = false;
-    refreshConnUI();
-    scheduleKlineRetry();
-  };
-
-  wsKline.onerror = () => {
-    wsKlineOnline = false;
-    refreshConnUI();
-    try { wsKline.close(); } catch {}
-    scheduleKlineRetry();
-  };
+  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); };
+  wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); setTimeout(startKlineWS, 1200); };
+  wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} };
 
   wsKline.onmessage = async (e) => {
     const payload = JSON.parse(e.data);
@@ -852,29 +837,66 @@ function startKlineWS() {
     const k = data.k;
 
     if (stream.includes("@kline_1m")) {
-      updateChartFrom1mKline(k);
+      // update chart (solo se già bootstrap)
+      if (chart && chartBootstrappedToday && tfReady.d && candle.d.t) {
+        const openTime = safe(k.t);
+        const close = safe(k.c);
+        if (!openTime || !close) return;
+
+        if (lastChartMinuteStart === openTime) {
+          const idx = chart.data.datasets[0].data.length - 1;
+          if (idx >= 0) {
+            chart.data.datasets[0].data[idx] = close;
+            chart.update("none");
+            updatePinnedOverlay();
+          }
+          return;
+        }
+
+        lastChartMinuteStart = openTime;
+        chart.data.labels.push(fmtHHMM(openTime));
+        chart.data.datasets[0].data.push(close);
+
+        while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
+        while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
+
+        chart.update("none");
+        updatePinnedOverlay();
+      }
       return;
     }
 
     if (stream.includes("@kline_1d")) {
-      const prevDayOpen = candle.d.t;
-      applyKline("d", k);
-
-      if (!chartBootstrappedToday && tfReady.d && candle.d.t) {
-        await loadChartToday();
+      const o = safe(k.o), h = safe(k.h), l = safe(k.l), t = safe(k.t);
+      if (o && h && l) {
+        candle.d.t = t || candle.d.t;
+        candle.d.open = o;
+        candle.d.high = h;
+        candle.d.low = l;
+        tfReady.d = true;
       }
-
-      if (k.x === true) {
-        const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
-        await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
-      } else {
-        if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
-          await resetDayAndReloadChart(candle.d.t);
-        }
+      if (!chartBootstrappedToday && tfReady.d && candle.d.t) await loadChartToday();
+    }
+    else if (stream.includes("@kline_1w")) {
+      const o = safe(k.o), h = safe(k.h), l = safe(k.l), t = safe(k.t);
+      if (o && h && l) {
+        candle.w.t = t || candle.w.t;
+        candle.w.open = o;
+        candle.w.high = h;
+        candle.w.low = l;
+        tfReady.w = true;
       }
     }
-    else if (stream.includes("@kline_1w")) applyKline("w", k);
-    else if (stream.includes("@kline_1M")) applyKline("m", k);
+    else if (stream.includes("@kline_1M")) {
+      const o = safe(k.o), h = safe(k.h), l = safe(k.l), t = safe(k.t);
+      if (o && h && l) {
+        candle.m.t = t || candle.m.t;
+        candle.m.open = o;
+        candle.m.high = h;
+        candle.m.low = l;
+        tfReady.m = true;
+      }
+    }
 
     const root = $("appRoot");
     if (root && root.classList.contains("loading") && tfReady.d) {
@@ -885,410 +907,27 @@ function startKlineWS() {
 }
 startKlineWS();
 
-/* ================= STAKE CHART DRAW ================= */
-function initStakeChart() {
-  const canvas = $("stakeChart");
-  if (!canvas) return;
-
-  stakeChart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: stakeLabels,
-      datasets: [{
-        data: stakeData,
-        borderColor: "#22c55e",
-        backgroundColor: "rgba(34,197,94,.18)",
-        fill: true,
-        tension: 0.3,
-
-        pointRadius: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
-          return m === 0 ? 0 : 3;
-        },
-        pointHoverRadius: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
-          return m === 0 ? 0 : 5;
-        },
-        pointBackgroundColor: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
-          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
-        },
-        pointBorderColor: (ctx) => {
-          const i = ctx.dataIndex;
-          const m = stakeMoves[i] || 0;
-          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
-        },
-        pointBorderWidth: 1,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          enabled: true,
-          displayColors: false,
-          callbacks: {
-            title: (items) => {
-              const i = items?.[0]?.dataIndex ?? 0;
-              return stakeLabels[i] || "";
-            },
-            label: (item) => {
-              const i = item.dataIndex;
-              const v = safe(stakeData[i]);
-              const t = stakeEventTypes[i] || "Stake update";
-              return `${t} • ${v.toFixed(6)} INJ`;
-            }
-          }
-        }
-      },
-      interaction: { mode: "nearest", intersect: true },
-      scales: {
-        x: { display: false },
-        y: { ticks: { color: "#9ca3af" } }
-      }
-    }
-  });
-}
-
-function drawStakeChart() {
-  if (!stakeChart && window.Chart) initStakeChart();
-  else if (stakeChart) {
-    stakeChart.data.labels = stakeLabels;
-    stakeChart.data.datasets[0].data = stakeData;
-    stakeChart.update("none");
-  }
-}
-
-/* punto live SOLO se il valore reale cambia */
-function maybeAddStakePoint(currentStake) {
-  const s = safe(currentStake);
-  if (!Number.isFinite(s)) return;
-
-  const TH = 0.0005; // soglia per evitare rumore
-
-  if (lastStakeRecorded == null) {
-    lastStakeRecorded = s;
-    // non aggiungo subito (evito duplicare seed/serie)
-    return;
-  }
-
-  const delta = s - lastStakeRecorded;
-  if (Math.abs(delta) <= TH) return;
-
-  lastStakeRecorded = s;
-
-  stakeLabels.push(nowLabel());
-  stakeData.push(s);
-  stakeMoves.push(delta > 0 ? 1 : -1);
-  stakeEventTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
-
-  trimStakeSeries();
-  saveStakeSeries();
-  drawStakeChart();
-}
-
-/* ================= STAKE TX PARSING (REAL) ================= */
-function isDelegateMsg(m) {
-  const t = (m?.["@type"] || m?.type || "").toLowerCase();
-  return t.includes("msgdelegate");
-}
-function isUndelegateMsg(m) {
-  const t = (m?.["@type"] || m?.type || "").toLowerCase();
-  return t.includes("msgundelegate");
-}
-function readMsgAmount(m) {
-  const a = m?.amount;
-  if (!a) return 0;
-
-  if (typeof a === "string") return safe(a) / 1e18;
-
-  const denom = (a.denom || "").toLowerCase();
-  const amt = safe(a.amount);
-  if (!amt) return 0;
-
-  if (denom === "inj") return amt / 1e18;
-  if (amt < 1e12) return amt;
-  return amt / 1e18;
-}
-
-function netStakeDeltaFromMsgs(msgs) {
-  let net = 0;
-  let hadDelegate = false;
-  let hadUndelegate = false;
-
-  for (const m of msgs) {
-    if (isDelegateMsg(m)) {
-      const a = readMsgAmount(m);
-      if (a > 0) { net += a; hadDelegate = true; }
-    } else if (isUndelegateMsg(m)) {
-      const a = readMsgAmount(m);
-      if (a > 0) { net -= a; hadUndelegate = true; }
-    }
-  }
-
-  let type = "Stake update";
-  if (hadDelegate && hadUndelegate) type = "Mixed";
-  else if (hadDelegate) type = "Delegate / Compound";
-  else if (hadUndelegate) type = "Undelegate";
-
-  return { net, type };
-}
-
-async function fetchAllTxsBySenderCosmosAsc(addressInj, maxPages = 80) {
-  const base = "https://lcd.injective.network";
-  const limit = 100;
-  let offset = 0;
-  const out = [];
-  const ev = encodeURIComponent(`message.sender='${addressInj}'`);
-
-  for (let p = 0; p < maxPages; p++) {
-    const url = `${base}/cosmos/tx/v1beta1/txs?events=${ev}&pagination.offset=${offset}&pagination.limit=${limit}&order_by=ORDER_BY_ASC`;
-    const data = await fetchJSON(url);
-
-    const txs = data?.txs || [];
-    const resps = data?.tx_responses || [];
-
-    if (!Array.isArray(txs) || !Array.isArray(resps) || !txs.length) break;
-
-    for (let i = 0; i < txs.length; i++) out.push({ tx: txs[i], resp: resps[i] });
-
-    if (txs.length < limit) break;
-    offset += limit;
-  }
-  return out;
-}
-
-async function fetchRecentTxsBySenderCosmosDesc(addressInj, maxPages = 10) {
-  const base = "https://lcd.injective.network";
-  const limit = 100;
-  let offset = 0;
-  const out = [];
-  const ev = encodeURIComponent(`message.sender='${addressInj}'`);
-
-  for (let p = 0; p < maxPages; p++) {
-    const url = `${base}/cosmos/tx/v1beta1/txs?events=${ev}&pagination.offset=${offset}&pagination.limit=${limit}&order_by=ORDER_BY_DESC`;
-    const data = await fetchJSON(url);
-
-    const txs = data?.txs || [];
-    const resps = data?.tx_responses || [];
-
-    if (!Array.isArray(txs) || !Array.isArray(resps) || !txs.length) break;
-
-    for (let i = 0; i < txs.length; i++) out.push({ tx: txs[i], resp: resps[i] });
-
-    if (txs.length < limit) break;
-    offset += limit;
-  }
-  return out;
-}
-
-function startOfTodayMs() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-/* ================= FULL RECONSTRUCTION (REAL TXS) =================
-   Ricostruisce "running stake" cumulando delegate/undelegate reali.
-   Nota: è best-effort (redelegate/slash/commissioni non sono sempre deducibili).
-   Però i punti sono basati su tx reali dell'indirizzo.
-*/
-async function bootstrapStakeHistoryFullFromTxs() {
-  if (!address) return false;
-
-  const all = await fetchAllTxsBySenderCosmosAsc(address, 60);
-  if (!all || !all.length) return false;
-
-  let running = 0;
-  const newLabels = [];
-  const newData = [];
-  const newMoves = [];
-  const newTypes = [];
-
-  for (const item of all) {
-    const tx = item?.tx;
-    const whenStr = item?.resp?.timestamp || null;
-    const when = whenStr ? new Date(whenStr) : null;
-
-    const msgs = tx?.body?.messages || tx?.body?.msgs || [];
-    if (!Array.isArray(msgs) || !msgs.length) continue;
-
-    const { net, type } = netStakeDeltaFromMsgs(msgs);
-    if (Math.abs(net) <= 0.00001) continue;
-
-    running += net;
-    running = Math.max(0, running);
-
-    newLabels.push(when ? (when.toLocaleDateString() + " " + when.toLocaleTimeString()) : nowLabel());
-    newData.push(running);
-    newMoves.push(net > 0 ? 1 : -1);
-    newTypes.push(type);
-  }
-
-  if (newData.length < 2) return false;
-
-  // allinea l'ultimo punto al valore reale attuale (per rimanere "reale" rispetto all'LCD)
-  const realNow = safe(stakeInj);
-  if (Number.isFinite(realNow) && realNow > 0) {
-    newLabels.push(nowLabel());
-    newData.push(realNow);
-    newMoves.push(realNow >= newData[newData.length - 2] ? 1 : -1);
-    newTypes.push("Current (LCD)");
-  }
-
-  stakeLabels = newLabels.slice(-STAKE_SERIES_MAX);
-  stakeData = newData.slice(-STAKE_SERIES_MAX);
-  stakeMoves = newMoves.slice(-STAKE_SERIES_MAX);
-  stakeEventTypes = newTypes.slice(-STAKE_SERIES_MAX);
-
-  trimStakeSeries();
-  lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
-
-  saveStakeSeries();
-  drawStakeChart();
-  return true;
-}
-
-/* ================= SEED TODAY LAST 2 UPS (REAL) ================= */
-async function seedStakeSeriesFromTodayLast2Ups() {
-  if (!address) return false;
-  const current = safe(stakeInj);
-  if (!Number.isFinite(current) || current <= 0) return false;
-
-  const today0 = startOfTodayMs();
-  const recent = await fetchRecentTxsBySenderCosmosDesc(address, 8);
-  if (!recent || !recent.length) return false;
-
-  const ups = [];
-  for (const item of recent) {
-    const ts = item?.resp?.timestamp ? new Date(item.resp.timestamp).getTime() : 0;
-    if (!ts || ts < today0) continue;
-
-    const msgs = item?.tx?.body?.messages || item?.tx?.body?.msgs || [];
-    if (!Array.isArray(msgs) || !msgs.length) continue;
-
-    const { net, type } = netStakeDeltaFromMsgs(msgs);
-    if (net > 0.00001) {
-      ups.push({ ts, amt: net, type });
-      if (ups.length >= 2) break;
-    }
-  }
-
-  // ordine cronologico
-  ups.reverse();
-
-  stakeLabels = [];
-  stakeData = [];
-  stakeMoves = [];
-  stakeEventTypes = [];
-
-  if (ups.length >= 2) {
-    const a = safe(ups[0].amt);
-    const b = safe(ups[1].amt);
-    const base = Math.max(0, current - a - b);
-
-    stakeLabels.push("Start");
-    stakeData.push(0);
-    stakeMoves.push(0);
-    stakeEventTypes.push("Seed");
-
-    stakeLabels.push("≈ Before 2x");
-    stakeData.push(base);
-    stakeMoves.push(1);
-    stakeEventTypes.push("Seed base");
-
-    stakeLabels.push(new Date(ups[0].ts).toLocaleTimeString());
-    stakeData.push(Math.max(0, base + a));
-    stakeMoves.push(1);
-    stakeEventTypes.push(ups[0].type);
-
-    stakeLabels.push(new Date(ups[1].ts).toLocaleTimeString());
-    stakeData.push(Math.max(0, base + a + b));
-    stakeMoves.push(1);
-    stakeEventTypes.push(ups[1].type);
-
-    stakeLabels.push(nowLabel());
-    stakeData.push(current);
-    stakeMoves.push(0);
-    stakeEventTypes.push("Current (LCD)");
-  }
-  else if (ups.length === 1) {
-    const a = safe(ups[0].amt);
-    const base = Math.max(0, current - a);
-
-    stakeLabels.push("Start");
-    stakeData.push(0);
-    stakeMoves.push(0);
-    stakeEventTypes.push("Seed");
-
-    stakeLabels.push("≈ Before");
-    stakeData.push(base);
-    stakeMoves.push(1);
-    stakeEventTypes.push("Seed base");
-
-    stakeLabels.push(new Date(ups[0].ts).toLocaleTimeString());
-    stakeData.push(Math.max(0, base + a));
-    stakeMoves.push(1);
-    stakeEventTypes.push(ups[0].type);
-
-    stakeLabels.push(nowLabel());
-    stakeData.push(current);
-    stakeMoves.push(0);
-    stakeEventTypes.push("Current (LCD)");
-  }
-  else {
-    return false;
-  }
-
-  trimStakeSeries();
-  lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
-
-  saveStakeSeries();
-  drawStakeChart();
-  return true;
-}
-
-function seedFallback0ToCurrent() {
-  const current = safe(stakeInj);
-  stakeLabels = ["Start", nowLabel()];
-  stakeData = [0, current];
-  stakeMoves = [0, 1];
-  stakeEventTypes = ["Seed", "Current (LCD)"];
-  trimStakeSeries();
-  lastStakeRecorded = safe(stakeData[stakeData.length - 1]);
-  saveStakeSeries();
-  drawStakeChart();
-}
-
 /* ================= BOOT ================= */
 (async function boot() {
-  // 1) carica serie salvata (se esiste)
-  const hasSaved = address ? loadStakeSeries() : false;
-
   await loadCandleSnapshot();
   await loadChartToday();
 
-  if (address) {
-    await loadAccount();
+  if (addressInput) addressInput.value = address || "";
+  pendingAddress = address || "";
+  setAddressDisplay(address);
 
-    // Se non ho serie salvata, creo serie "reale" per wallet
-    if (!hasSaved || !stakeData.length) {
-      const okFull = await bootstrapStakeHistoryFullFromTxs();
-      if (!okFull) {
-        const okSeed = await seedStakeSeriesFromTodayLast2Ups();
-        if (!okSeed) seedFallback0ToCurrent();
-      }
+  if (address) {
+    if (RESET_STAKE_FROM_NOW_ON_BOOT) {
+      clearStakeSeriesStorage();
+      resetStakeSeriesFromNow();
+    } else {
+      loadStakeSeries();
     }
+    await loadAccount();
   }
 })();
 
-/* ================= LOOP UI ================= */
+/* ================= LOOP ================= */
 function animate() {
   /* PRICE */
   const op = displayed.price;
@@ -1304,14 +943,14 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* chart color by 24h performance */
+  /* Chart color by 24h performance */
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   if (sign !== lastChartSign) {
     lastChartSign = sign;
     applyChartColorBySign(sign);
   }
 
-  /* BARS gradients */
+  /* BARS gradients: 1D/1W/1M diverse */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
 
@@ -1325,7 +964,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* Values under bars + flash */
+  /* Values under bars + flash extremes */
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
