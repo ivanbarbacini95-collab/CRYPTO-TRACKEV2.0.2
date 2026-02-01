@@ -678,19 +678,19 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* ===== BARS – PALETTE ALTERNATIVA (LUXURY / DARK / CYBER) ===== */
+  /* ===== BARS – PALETTE COERENTE CON REWARD (INTENSA MA PULITA) ===== */
 
-/* 1D — EMERALD / CRIMSON (profondo, elegante) */
-const upGradD = "linear-gradient(90deg,#064e3b 0%,#10b981 60%,#34d399 100%)";
-const dnGradD = "linear-gradient(270deg,#450a0a 0%,#dc2626 60%,#f87171 100%)";
+/* 1D — ROSSO / VERDE (baseline trading) */
+const upGradD = "linear-gradient(90deg,#16a34a 0%,#22c55e 50%,#4ade80 100%)";
+const dnGradD = "linear-gradient(270deg,#b91c1c 0%,#ef4444 50%,#fb7185 100%)";
 
-/* 1W — ELECTRIC BLUE / SOLAR YELLOW (forte contrasto) */
-const upGradW = "linear-gradient(90deg,#020617 0%,#1d4ed8 55%,#38bdf8 100%)";
-const dnGradW = "linear-gradient(270deg,#422006 0%,#eab308 55%,#fde68a 100%)";
+/* 1W — BLU / CIANO (stabilità, holding) */
+const upGradW = "linear-gradient(90deg,#0f172a 0%,#2563eb 55%,#38bdf8 100%)";
+const dnGradW = "linear-gradient(270deg,#020617 0%,#1e40af 55%,#60a5fa 100%)";
 
-/* 1M — CYBER PINK / DEEP VIOLET (crypto / neon) */
-const upGradM = "linear-gradient(90deg,#2e1065 0%,#9333ea 55%,#f0abfc 100%)";
-const dnGradM = "linear-gradient(270deg,#4a044e 0%,#db2777 55%,#f9a8d4 100%)";
+/* 1M — VIOLA / MAGENTA (premium, compounding) */
+const upGradM = "linear-gradient(90deg,#2e1065 0%,#7c3aed 55%,#e879f9 100%)";
+const dnGradM = "linear-gradient(270deg,#3b0764 0%,#a21caf 55%,#f0abfc 100%)";
 
 renderBar(
   $("priceBar"), $("priceLine"),
@@ -709,6 +709,7 @@ renderBar(
   targetPrice, candle.m.open, candle.m.low, candle.m.high,
   upGradM, dnGradM
 );
+
 
 
   /* Values under bars */
