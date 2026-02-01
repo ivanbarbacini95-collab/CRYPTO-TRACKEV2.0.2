@@ -39,10 +39,21 @@ function colorNumber(el,n,o,d=4){
 
 function updatePerf(a,p,v){
   const arrow=$(a), pct=$(p);
+  if(!Number.isFinite(v)) v = 0;
+
   if(v>0){arrow.textContent="▲";arrow.className="arrow up";pct.className="pct up";}
   else if(v<0){arrow.textContent="▼";arrow.className="arrow down";pct.className="pct down";}
   else{arrow.textContent="►";arrow.className="arrow flat";pct.className="pct flat";}
-  pct.textContent=Math.abs(v).toFixed(2)+"%";
+
+  pct.textContent = Math.abs(v).toFixed(2) + "%";
+}
+
+function getHeatColor(percent){
+  const p = clamp(percent,0,100)/100;
+  const r = Math.round(14 + (239-14)*p);
+  const g = Math.round(165 - 165*p);
+  const b = Math.round(233 - 233*p);
+  return `rgb(${r},${g},${b})`;
 }
 
 async function fetchJSON(u){
@@ -93,10 +104,13 @@ function calcOHLC(d){
 async function loadPrices(){
   const d=await klines("1m",1440);
   if(!d.length) return;
+
   chartData=d.map(x=>safe(x[4]));
   const o=calcOHLC(d);
+
   price24hOpen=o.open;price24hHigh=o.high;price24hLow=o.low;
   targetPrice=o.close;
+
   if(!chart) initChart();
 }
 
@@ -139,28 +153,48 @@ function updateChart(p){
 }
 
 /* WS */
+function setConn(online){
+  const dot = $("connectionStatus").querySelector(".status-dot");
+  const txt = $("connectionStatus").querySelector(".status-text");
+  dot.style.background = online ? "#22c55e" : "#ef4444";
+  txt.textContent = online ? "Online" : "Offline";
+}
+
 function startWS(){
+  if(ws) ws.close();
   ws = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  ws.onopen = ()=>setConn(true);
+
   ws.onmessage = e=>{
     const p = safe(JSON.parse(e.data).p);
     targetPrice = p;
+
     price24hHigh=Math.max(price24hHigh,p);
     price24hLow=Math.min(price24hLow,p);
     priceWeekHigh=Math.max(priceWeekHigh,p);
     priceWeekLow=Math.min(priceWeekLow,p);
     priceMonthHigh=Math.max(priceMonthHigh,p);
     priceMonthLow=Math.min(priceMonthLow,p);
+
     updateChart(p);
   };
+
+  ws.onclose = ()=>{ setConn(false); setTimeout(startWS, 3000); };
+  ws.onerror = ()=>setConn(false);
 }
 startWS();
 
 /* BAR */
 function renderBar(bar,line,v,o,l,h,up,down){
   if(!o||!h||!l||h===l) return;
-  const r=Math.max(Math.abs(h-o),Math.abs(o-l));
-  const p=clamp((v-(o-r))/(2*r)*100,0,100);
+
+  const r=Math.max(Math.abs(h-o),Math.abs(o-l),1e-9);
+  const scaledLow = o - r;
+  const scaledHigh = o + r;
+
+  const p=clamp((v-scaledLow)/(scaledHigh-scaledLow)*100,0,100);
   line.style.left=p+"%";
+
   if(v>=o){
     bar.style.left="50%";
     bar.style.width=(p-50)+"%";
@@ -174,13 +208,14 @@ function renderBar(bar,line,v,o,l,h,up,down){
 
 /* LOOP */
 function animate(){
+  // PRICE
   const op=displayed.price;
   displayed.price=tick(displayed.price,targetPrice);
   colorNumber($("price"),displayed.price,op,4);
 
-  const p24=(displayed.price-price24hOpen)/price24hOpen*100;
-  const pW =(displayed.price-priceWeekOpen)/priceWeekOpen*100;
-  const pM =(displayed.price-priceMonthOpen)/priceMonthOpen*100;
+  const p24 = price24hOpen ? ((displayed.price-price24hOpen)/price24hOpen*100) : 0;
+  const pW  = priceWeekOpen ? ((displayed.price-priceWeekOpen)/priceWeekOpen*100) : 0;
+  const pM  = priceMonthOpen ? ((displayed.price-priceMonthOpen)/priceMonthOpen*100) : 0;
 
   updatePerf("arrow24h","pct24h",p24);
   updatePerf("arrowWeek","pctWeek",pW);
@@ -208,28 +243,42 @@ function animate(){
   $("monthOpen").textContent=priceMonthOpen.toFixed(3);
   $("monthMax").textContent=priceMonthHigh.toFixed(3);
 
+  // AVAILABLE
   const oa=displayed.available;
   displayed.available=tick(displayed.available,availableInj);
   colorNumber($("available"),displayed.available,oa,6);
   $("availableUsd").textContent=`≈ $${(displayed.available*displayed.price).toFixed(2)}`;
 
+  // STAKE
   const os=displayed.stake;
   displayed.stake=tick(displayed.stake,stakeInj);
   colorNumber($("stake"),displayed.stake,os,4);
   $("stakeUsd").textContent=`≈ $${(displayed.stake*displayed.price).toFixed(2)}`;
 
+  // REWARDS (ripristinata + heat)
   const or=displayed.rewards;
-  if(rewardsInj<or) displayed.rewards=0;
-  else displayed.rewards=tick(displayed.rewards,rewardsInj);
+  if(rewardsInj < or){
+    displayed.rewards = 0; // prelievo => reset istant
+  } else {
+    displayed.rewards = tick(displayed.rewards, rewardsInj);
+  }
+
   colorNumber($("rewards"),displayed.rewards,or,7);
   $("rewardsUsd").textContent=`≈ $${(displayed.rewards*displayed.price).toFixed(2)}`;
 
-  const maxR=Math.max(0.1,Math.ceil(displayed.rewards*10)/10);
-  const rp=Math.min(displayed.rewards/maxR*100,100);
-  $("rewardBar").style.width=rp+"%";
-  $("rewardLine").style.left=rp+"%";
-  $("rewardPercent").textContent=rp.toFixed(1)+"%";
+  // scala dinamica e colore temperatura
+  const dynMax = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10 || 0.1);
+  const rp = clamp((displayed.rewards / dynMax) * 100, 0, 100);
 
+  $("rewardBar").style.width = rp + "%";
+  $("rewardLine").style.left = rp + "%";
+  $("rewardPercent").textContent = rp.toFixed(1) + "%";
+  $("rewardBar").style.background = getHeatColor(rp);
+
+  $("rewardMin").textContent = "0";
+  $("rewardMax").textContent = dynMax.toFixed(1);
+
+  // APR
   $("apr").textContent=apr.toFixed(2)+"%";
   $("updated").textContent="Last update: "+new Date().toLocaleTimeString();
 
