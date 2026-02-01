@@ -111,7 +111,7 @@ body {
   background: #111827;
   border-radius: 0.35rem;
   overflow: hidden;
-  margin-top: 0.7rem;
+  margin-top: 0.95rem; /* un filo più aria per label sopra */
   margin-bottom: 0.15rem;
 }
 
@@ -143,20 +143,16 @@ body {
   transition: left 0.25s ease;
 }
 
-/* TIMEFRAME sempre leggibile: centrato in alto, sopra al fill */
+/* timeframe label SEMPRE leggibile: sopra barra e centrato */
 .bar-label {
   position: absolute;
   left: 50%;
-  top: 3px;
+  top: -16px;
   transform: translateX(-50%);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 800;
-  color: rgba(249, 250, 251, 0.90);
+  color: rgba(249, 250, 251, 0.70);
   pointer-events: none;
-  z-index: 5;
-  background: rgba(0, 0, 0, 0.35);
-  padding: 1px 8px;
-  border-radius: 999px;
   text-shadow: 0 1px 10px rgba(0,0,0,0.65);
 }
 
@@ -195,7 +191,7 @@ body {
 /* nasconde scritta REWARD dentro la barra */
 .reward-card .bar-label { display: none; }
 
-/* staked */
+/* STAKE bar */
 .stake-container { height: 26px; }
 .stake-fill {
   background: linear-gradient(to right, #22c55e, #10b981);
@@ -209,10 +205,16 @@ body {
   font-weight: bold;
   text-shadow: 0 1px 10px rgba(0,0,0,0.55);
 }
+
+/* richiesta: invece che "STAKED" nella barra -> sempre percentuale */
+.stake-card .bar-label { display: none; }
+
 .stake-chart-wrap {
-  height: 170px;
-  margin-top: 0.65rem;
+  height: 150px;
+  margin-top: 0.7rem;
+  position: relative;
 }
+
 #stakeChart {
   width: 100% !important;
   height: 100% !important;
