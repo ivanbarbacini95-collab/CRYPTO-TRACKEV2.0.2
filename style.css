@@ -678,9 +678,17 @@ body.drawer-open .drawer{
   transform: translateX(0);
 }
 
-/* blur app under */
-body.drawer-open #appRoot{
-  filter: blur(3px);
+/* ✅ blur SOLO dei contenuti (menu sempre nitido) */
+body.drawer-open .header,
+body.drawer-open .cards-wrapper,
+body.drawer-open .last-update{
+  filter: blur(4px);
   transform: scale(0.995);
   transition: filter 180ms ease, transform 180ms ease;
+}
+
+body.drawer-open .drawer,
+body.drawer-open .backdrop{
+  filter: none !important;
+  transform: none !important;
 }
