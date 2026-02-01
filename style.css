@@ -112,7 +112,10 @@ body {
   background: #111827;
   border-radius: 0.35rem;
   overflow: hidden;
-  margin-top: 0.55rem; /* un filo più spazio */
+
+  /* ⬇️ spacing "ancora un pelo" */
+  margin-top: 0.7rem;       /* prima 0.55rem */
+  margin-bottom: 0.15rem;   /* aria sotto la barra */
 }
 
 .bar-fill {
@@ -145,8 +148,10 @@ body {
   color: #9ca3af;
   position: relative;
   height: 18px;
-  margin-top: 0.35rem; /* DISTANZIA I DATI DELLE BARRE */
-  padding-bottom: 0.15rem;
+
+  /* ⬇️ spacing "ancora un pelo" */
+  margin-top: 0.5rem;     /* prima 0.35rem */
+  padding-bottom: 0.2rem;
 }
 
 .bar-values .left { position: absolute; left: 0; }
@@ -154,14 +159,15 @@ body {
 .bar-values .right { position: absolute; right: 0; }
 
 /* maggiore separazione tra i 3 blocchi (24H/W/M) dentro price card */
-.price-card .perf { margin-top: 0.25rem; }
-.price-card .bar-values { margin-bottom: 0.45rem; }
+.price-card .perf { margin-top: 0.35rem; }       /* prima 0.25rem */
+.price-card .bar-values { margin-bottom: 0.65rem; } /* prima 0.45rem */
 
 /* reward */
-.reward-container{ height: 26px; }
-.reward-fill{
+.reward-container { height: 26px; }
+.reward-fill {
   background: linear-gradient(to right, #0ea5e9, #3b82f6);
 }
+
 .reward-percent {
   position: absolute;
   left: 50%;
@@ -171,7 +177,8 @@ body {
   font-weight: bold;
   text-shadow: 0 1px 10px rgba(0,0,0,0.55);
 }
-.reward-values{ margin-bottom: 0; }
+
+.reward-values { margin-bottom: 0; }
 
 .chart-card { height: 300px; }
 
