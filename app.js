@@ -1,10 +1,10 @@
 /* ================= CONFIG ================= */
-const INITIAL_SETTLE_TIME = 4200; // ms (più lungo -> numeri scorrono di più)
+const INITIAL_SETTLE_TIME = 4200;
 let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
-const REST_SYNC_MS = 60000;     // safety sync candele 1D/1W/1M
-const CHART_SYNC_MS = 60000;    // safety sync grafico giornata
+const REST_SYNC_MS = 60000;
+const CHART_SYNC_MS = 60000;
 
 const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
@@ -37,11 +37,94 @@ function refreshConnUI() {
   statusDot.style.background = ok ? "#22c55e" : "#ef4444";
 }
 
-/* ================= STATE ================= */
-let address = localStorage.getItem("inj_address") || "";
+/* ================= SEARCH UI ================= */
+const searchWrap = $("searchWrap");
+const searchBtn = $("searchBtn");
+const addressInput = $("addressInput");
+const addressDisplay = $("addressDisplay");
 
+let address = localStorage.getItem("inj_address") || "";
+let pendingAddress = address || "";
+
+function setAddressDisplay(addr) {
+  if (!addressDisplay) return;
+  if (!addr) { addressDisplay.innerHTML = ""; return; }
+  const short = addr.length > 18 ? (addr.slice(0, 10) + "…" + addr.slice(-6)) : addr;
+  addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${short}</span>`;
+}
+
+function openSearch() {
+  if (!searchWrap) return;
+  searchWrap.classList.add("open");
+  setTimeout(() => addressInput?.focus(), 10);
+}
+function closeSearch() {
+  if (!searchWrap) return;
+  searchWrap.classList.remove("open");
+  addressInput?.blur();
+}
+
+function commitAddress(newAddr) {
+  const a = (newAddr || "").trim();
+  if (!a) return;
+
+  address = a;
+  pendingAddress = a;
+  localStorage.setItem("inj_address", address);
+
+  setAddressDisplay(address);
+
+  settleStart = Date.now();
+  stakeBootstrapped = false;
+
+  loadAccount();
+  bootstrapStakeHistory();
+}
+
+if (addressInput) addressInput.value = pendingAddress;
+setAddressDisplay(address);
+
+if (searchBtn) {
+  searchBtn.addEventListener("click", () => {
+    if (!searchWrap.classList.contains("open")) openSearch();
+    else addressInput?.focus();
+  });
+}
+
+if (addressInput) {
+  addressInput.addEventListener("focus", () => openSearch());
+
+  // aggiorna solo il pending, senza ricaricare subito
+  addressInput.addEventListener("input", (e) => {
+    pendingAddress = e.target.value.trim();
+  });
+
+  // INVIO = conferma + chiudi in lente
+  addressInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitAddress(pendingAddress);
+      closeSearch();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      addressInput.value = address || "";
+      pendingAddress = address || "";
+      closeSearch();
+    }
+  });
+}
+
+/* click fuori = richiudi (senza confermare) */
+document.addEventListener("click", (e) => {
+  const t = e.target;
+  if (!searchWrap) return;
+  if (searchWrap.contains(t)) return;
+  closeSearch();
+});
+
+/* ================= STATE ================= */
 /* live price */
-let targetPrice = 0; // prezzo reale (trade WS)
+let targetPrice = 0;
 let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
 
 /* Injective account */
@@ -49,12 +132,11 @@ let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
 /* Candle state (current candles) */
 const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 }, // 1D (t = openTime ms)
-  w: { t: 0, open: 0, high: 0, low: 0 }, // 1W
-  m: { t: 0, open: 0, high: 0, low: 0 }, // 1M
+  d: { t: 0, open: 0, high: 0, low: 0 },
+  w: { t: 0, open: 0, high: 0, low: 0 },
+  m: { t: 0, open: 0, high: 0, low: 0 },
 };
 
-/* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
 /* Flash tracking ATH/ATL laterali */
@@ -77,15 +159,13 @@ let chartData = [];
 let lastChartMinuteStart = 0;
 let chartBootstrappedToday = false;
 
-/* Hover interaction state */
 let hoverActive = false;
 let hoverIndex = null;
 
-/* pinned (quando ti fermi dopo pan/drag) */
+/* pinned */
 let pinnedIndex = null;
 let isPanning = false;
 
-/* Color state (performance daily) */
 let lastChartSign = "neutral";
 
 /* ws */
@@ -98,8 +178,8 @@ let klineRetryTimer = null;
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
-let stakeMoves = [];        // +1 up, -1 down, 0 neutral
-let stakeEventTypes = [];   // testo tooltip per evento
+let stakeMoves = [];
+let stakeEventTypes = [];
 let lastStakeRecorded = null;
 let stakeBootstrapped = false;
 
@@ -195,17 +275,6 @@ async function fetchJSON(url) {
   }
 }
 
-/* ================= ADDRESS ================= */
-$("addressInput").value = address;
-$("addressInput").oninput = (e) => {
-  address = e.target.value.trim();
-  localStorage.setItem("inj_address", address);
-  settleStart = Date.now();
-  stakeBootstrapped = false;
-  loadAccount();
-  bootstrapStakeHistory();
-};
-
 /* ================= ACCOUNT (Injective LCD) ================= */
 async function loadAccount() {
   if (!address) {
@@ -236,11 +305,17 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  // punti stake evento (su o giù)
   maybeAddStakePoint(stakeInj);
 }
-loadAccount();
-setInterval(loadAccount, ACCOUNT_POLL_MS);
+
+/* prima chiamata se address già salvato */
+if (address) {
+  loadAccount();
+  setInterval(loadAccount, ACCOUNT_POLL_MS);
+} else {
+  // se non c’è address, polling parte quando confermi
+  setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
+}
 
 /* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
 async function loadCandleSnapshot() {
@@ -397,7 +472,6 @@ function initChartToday() {
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
-
         zoom: {
           pan: {
             enabled: true,
@@ -407,9 +481,8 @@ function initChartToday() {
             onPanComplete: ({ chart }) => {
               isPanning = false;
               const xScale = chart.scales.x;
-              const centerPixel = (chart.chartArea.left + chart.chartArea.right) / 2;
-              const value = xScale.getValueForPixel(centerPixel);
-              pinnedIndex = value;
+              const center = (chart.chartArea.left + chart.chartArea.right) / 2;
+              pinnedIndex = xScale.getValueForPixel(center);
               updatePinnedOverlay();
             }
           },
@@ -419,9 +492,8 @@ function initChartToday() {
             mode: "x",
             onZoomComplete: ({ chart }) => {
               const xScale = chart.scales.x;
-              const centerPixel = (chart.chartArea.left + chart.chartArea.right) / 2;
-              const value = xScale.getValueForPixel(centerPixel);
-              pinnedIndex = value;
+              const center = (chart.chartArea.left + chart.chartArea.right) / 2;
+              pinnedIndex = xScale.getValueForPixel(center);
               updatePinnedOverlay();
             }
           }
@@ -464,7 +536,7 @@ async function loadChartToday() {
   chartBootstrappedToday = true;
 }
 
-/* ================= CHART: interactions (hover/touch mostra overlay sul punto) ================= */
+/* hover/touch = pin overlay su punto */
 function setupChartInteractions() {
   const canvas = $("priceChart");
   if (!canvas) return;
@@ -478,7 +550,7 @@ function setupChartInteractions() {
 
   const handleMove = (evt) => {
     if (!chart) return;
-    if (isPanning) return; // durante il pan, lasciamo che sia onPanComplete a “pinnare”
+    if (isPanning) return;
 
     const idx = getIndexFromEvent(evt);
     if (idx == null) return;
@@ -509,16 +581,12 @@ function setupChartInteractions() {
   canvas.addEventListener("touchcancel", handleLeave, { passive: true });
 }
 
-/* ================= BOOTSTRAP ensure chart is never empty on reload ================= */
+/* ensure chart not empty */
 async function ensureChartBootstrapped() {
   if (chartBootstrappedToday) return;
 
-  if (!tfReady.d || !candle.d.t) {
-    await loadCandleSnapshot();
-  }
-  if (tfReady.d && candle.d.t) {
-    await loadChartToday();
-  }
+  if (!tfReady.d || !candle.d.t) await loadCandleSnapshot();
+  if (tfReady.d && candle.d.t) await loadChartToday();
 }
 setInterval(ensureChartBootstrapped, 1500);
 setInterval(loadChartToday, CHART_SYNC_MS);
@@ -573,7 +641,7 @@ function startTradeWS() {
 }
 startTradeWS();
 
-/* ================= WS KLINES (1m chart + 1D/1W/1M bars) ================= */
+/* ================= WS KLINES ================= */
 function clearKlineRetry() {
   if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
 }
@@ -731,7 +799,7 @@ function startKlineWS() {
 }
 startKlineWS();
 
-/* ================= STAKE CHART INIT (punti + tooltip tipo) ================= */
+/* ================= STAKE CHART (punti + tooltip tipo) ================= */
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas) return;
@@ -802,7 +870,6 @@ function initStakeChart() {
   });
 }
 
-/* aggiunge punto evento quando stake cambia (su o giù) */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -842,7 +909,7 @@ function maybeAddStakePoint(currentStake) {
   }
 }
 
-/* ================= STAKE FULL HISTORY (best-effort) ================= */
+/* ================= STAKE HISTORY (best-effort) ================= */
 function isDelegateMsg(m) {
   const t = (m?.["@type"] || m?.type || "").toLowerCase();
   return t.includes("msgdelegate");
@@ -854,7 +921,6 @@ function isUndelegateMsg(m) {
 function readMsgAmount(m) {
   const a = m?.amount;
   if (!a) return 0;
-
   if (typeof a === "string") return safe(a) / 1e18;
 
   const denom = (a.denom || "").toLowerCase();
@@ -882,9 +948,7 @@ async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
 
     if (!Array.isArray(txs) || !Array.isArray(resps) || !txs.length) break;
 
-    for (let i = 0; i < txs.length; i++) {
-      out.push({ tx: txs[i], resp: resps[i] });
-    }
+    for (let i = 0; i < txs.length; i++) out.push({ tx: txs[i], resp: resps[i] });
 
     if (txs.length < limit) break;
     offset += limit;
@@ -972,17 +1036,17 @@ async function bootstrapStakeHistory() {
 (async function boot() {
   await loadCandleSnapshot();
   await loadChartToday();
-  await bootstrapStakeHistory();
+  if (address) await bootstrapStakeHistory();
 })();
 
 /* ================= LOOP ================= */
 function animate() {
-  /* PRICE (card INJ Price) */
+  /* PRICE */
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  /* PERFORMANCE */
+  /* PERF */
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -991,7 +1055,6 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* Colore grafico = performance daily */
   const sign =
     !tfReady.d ? "neutral" :
     pD > 0 ? "up" :
@@ -1002,7 +1065,7 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* BARS: gradient vivaci diversi per timeframe */
+  /* BARS gradients */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
 
@@ -1016,7 +1079,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* Values under bars + flash ATH/ATL */
+  /* values under bars + flash */
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
