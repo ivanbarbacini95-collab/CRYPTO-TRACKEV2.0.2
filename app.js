@@ -3,10 +3,12 @@ const INITIAL_SETTLE_TIME = 2800; // ms
 let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
-const REST_SYNC_MS = 60000; // safety sync (se websocket perde un update)
+const REST_SYNC_MS = 60000;     // safety sync candele 1D/1W/1M
+const CHART_SYNC_MS = 60000;    // safety sync grafico giornata
 
-// Chart: ultime 34 ore a 1m
-const CHART_MINUTES = 34 * 60; // 2040 punti
+/* Grafico giornata: 1m, max 1440 punti */
+const DAY_MINUTES = 24 * 60;
+const ONE_MIN_MS = 60_000;
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -45,19 +47,20 @@ let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
 /* Candle state (current candles) */
 const candle = {
-  d: { open: 0, high: 0, low: 0 }, // 1D
-  w: { open: 0, high: 0, low: 0 }, // 1W
-  m: { open: 0, high: 0, low: 0 }, // 1M
+  d: { t: 0, open: 0, high: 0, low: 0 }, // 1D (t = openTime ms)
+  w: { t: 0, open: 0, high: 0, low: 0 }, // 1W
+  m: { t: 0, open: 0, high: 0, low: 0 }, // 1M
 };
 
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
-/* ================= CHART STATE (34H) ================= */
+/* ================= CHART (giornata) ================= */
 let chart = null;
-let chartLabels = []; // HH:MM
-let chartData = [];   // close price
-let lastChartMinuteStart = 0; // open time della candela 1m corrente
+let chartLabels = [];     // HH:MM
+let chartData = [];       // price
+let lastChartMinuteStart = 0; // openTime dell’ultimo minuto in chart
+let lastChartSign = "neutral"; // "up" | "down" | "neutral"
 
 /* ws */
 let wsTrade = null;
@@ -116,7 +119,6 @@ function updatePerf(arrowId, pctId, v) {
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   open = safe(open); low = safe(low); high = safe(high); val = safe(val);
 
-  // Candle non pronta => stato neutro elegante
   if (!open || !low || !high || high === low) {
     line.style.left = "50%";
     bar.style.left = "50%";
@@ -198,7 +200,7 @@ async function loadAccount() {
 loadAccount();
 setInterval(loadAccount, ACCOUNT_POLL_MS);
 
-/* ================= BINANCE REST: initial candle snapshot ================= */
+/* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
 async function loadCandleSnapshot() {
   const [d, w, m] = await Promise.all([
     fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
@@ -207,25 +209,27 @@ async function loadCandleSnapshot() {
   ]);
 
   if (Array.isArray(d) && d[0]) {
+    candle.d.t = safe(d[0][0]);
     candle.d.open = safe(d[0][1]);
     candle.d.high = safe(d[0][2]);
     candle.d.low  = safe(d[0][3]);
     if (candle.d.open && candle.d.high && candle.d.low) tfReady.d = true;
   }
   if (Array.isArray(w) && w[0]) {
+    candle.w.t = safe(w[0][0]);
     candle.w.open = safe(w[0][1]);
     candle.w.high = safe(w[0][2]);
     candle.w.low  = safe(w[0][3]);
     if (candle.w.open && candle.w.high && candle.w.low) tfReady.w = true;
   }
   if (Array.isArray(m) && m[0]) {
+    candle.m.t = safe(m[0][0]);
     candle.m.open = safe(m[0][1]);
     candle.m.high = safe(m[0][2]);
     candle.m.low  = safe(m[0][3]);
     if (candle.m.open && candle.m.high && candle.m.low) tfReady.m = true;
   }
 
-  // stop shimmer quando abbiamo almeno daily valido
   const root = $("appRoot");
   if (root && root.classList.contains("loading") && tfReady.d) {
     root.classList.remove("loading");
@@ -235,45 +239,92 @@ async function loadCandleSnapshot() {
 loadCandleSnapshot();
 setInterval(loadCandleSnapshot, REST_SYNC_MS);
 
-/* ================= CHART 34H (REST bootstrap) =================
-   Binance limita a 1000 klines per richiesta, quindi facciamo 3 chunk.
-*/
-async function fetchKlines1mChunk(limit, endTime) {
-  const url =
-    `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=${limit}` +
-    (endTime ? `&endTime=${endTime}` : "");
-  const d = await fetchJSON(url);
-  return Array.isArray(d) ? d : [];
+/* ================= CHART: linea verticale + tooltip leggibile ================= */
+const verticalLinePlugin = {
+  id: "verticalLinePlugin",
+  afterDraw(chart) {
+    const tooltip = chart.tooltip;
+    if (!tooltip || !tooltip.getActiveElements || tooltip.getActiveElements().length === 0) return;
+
+    const active = tooltip.getActiveElements()[0];
+    if (!active) return;
+
+    const ctx = chart.ctx;
+    const x = active.element.x;
+    const topY = chart.chartArea.top;
+    const bottomY = chart.chartArea.bottom;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, topY);
+    ctx.lineTo(x, bottomY);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.9)"; // giallo elegante
+    ctx.stroke();
+    ctx.restore();
+  }
+};
+
+function applyChartColorBySign(sign) {
+  if (!chart) return;
+  const ds = chart.data.datasets[0];
+  if (!ds) return;
+
+  if (sign === "up") {
+    ds.borderColor = "#22c55e";
+    ds.backgroundColor = "rgba(34,197,94,.20)";
+  } else if (sign === "down") {
+    ds.borderColor = "#ef4444";
+    ds.backgroundColor = "rgba(239,68,68,.18)";
+  } else {
+    ds.borderColor = "#9ca3af";
+    ds.backgroundColor = "rgba(156,163,175,.12)";
+  }
+  chart.update("none");
 }
 
-async function loadChart34h() {
-  // vogliamo CHART_MINUTES = 2040 punti
-  // chunk: 1000 + 1000 + 40
-  const now = Date.now();
+/* ================= CHART: giornata corrente (da open candela 1D) ================= */
+async function fetchKlines1mRange(startTime, endTime) {
+  // Binance max 1000 per call -> chunk
+  const out = [];
+  let cursor = startTime;
+  const end = endTime || Date.now();
 
-  const c1 = await fetchKlines1mChunk(1000, now); // ultimi 1000
-  if (!c1.length) return;
+  while (cursor < end && out.length < DAY_MINUTES) {
+    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
+    const d = await fetchJSON(url);
+    if (!Array.isArray(d) || !d.length) break;
 
-  const firstOfC1 = safe(c1[0][0]); // openTime del primo in c1
-  const c2 = await fetchKlines1mChunk(1000, firstOfC1 - 1);
-  const firstOfC2 = c2.length ? safe(c2[0][0]) : 0;
-  const remaining = Math.max(0, CHART_MINUTES - (c1.length + c2.length)); // ~40
-  const c3 = remaining ? await fetchKlines1mChunk(remaining, firstOfC2 ? (firstOfC2 - 1) : undefined) : [];
+    out.push(...d);
 
-  // unisci in ordine cronologico
-  const all = [...c3, ...c2, ...c1].slice(-CHART_MINUTES);
+    const lastOpenTime = safe(d[d.length - 1][0]);
+    cursor = lastOpenTime + ONE_MIN_MS;
 
-  chartLabels = all.map(k => fmtHHMM(safe(k[0])));
-  chartData = all.map(k => safe(k[4]));
+    // se Binance ci ridà sempre la stessa ultima candela, stop
+    if (!lastOpenTime) break;
+    if (d.length < 1000) break;
+  }
+  return out.slice(0, DAY_MINUTES);
+}
 
-  // minuto corrente (ultimo openTime)
-  lastChartMinuteStart = all.length ? safe(all[all.length - 1][0]) : 0;
+async function loadChartToday() {
+  if (!tfReady.d || !candle.d.t) return;
+
+  const start = candle.d.t;
+  const end = Date.now();
+  const kl = await fetchKlines1mRange(start, end);
+  if (!kl.length) return;
+
+  chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
+  chartData = kl.map(k => safe(k[4]));
+
+  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
 
   // prezzo fallback
-  const lastClose = all.length ? safe(all[all.length - 1][4]) : 0;
+  const lastClose = safe(kl[kl.length - 1][4]);
   if (!targetPrice && lastClose) targetPrice = lastClose;
 
-  if (!chart && window.Chart) initChart34h();
+  if (!chart && window.Chart) initChartToday();
   else if (chart) {
     chart.data.labels = chartLabels;
     chart.data.datasets[0].data = chartData;
@@ -281,7 +332,7 @@ async function loadChart34h() {
   }
 }
 
-function initChart34h() {
+function initChartToday() {
   const canvas = $("priceChart");
   if (!canvas) return;
 
@@ -291,8 +342,8 @@ function initChart34h() {
       labels: chartLabels,
       datasets: [{
         data: chartData,
-        borderColor: "#22c55e",
-        backgroundColor: "rgba(34,197,94,.2)",
+        borderColor: "#9ca3af",
+        backgroundColor: "rgba(156,163,175,.12)",
         fill: true,
         pointRadius: 0,
         tension: 0.3
@@ -301,58 +352,82 @@ function initChart34h() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: {
-          display: false  // se vuoi, possiamo farlo visibile (ma non tocchiamo UI adesso)
-        },
-        y: {
-          ticks: { color: "#9ca3af" }
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          mode: "index",
+          intersect: false,
+          displayColors: false,
+          callbacks: {
+            title(items) {
+              // HH:MM della label
+              return items?.[0]?.label ? `⏱ ${items[0].label}` : "";
+            },
+            label(item) {
+              const v = safe(item.parsed?.y);
+              return `Price: $${v.toFixed(4)}`;
+            }
+          }
         }
       },
-      animation: false
-    }
+      interaction: {
+        mode: "index",
+        intersect: false
+      },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    },
+    plugins: [verticalLinePlugin]
   });
+
+  applyChartColorBySign(lastChartSign);
 }
 
-/* realtime chart update from kline_1m:
-   - se è lo stesso minuto: aggiorna l’ultimo punto (si muove “live”)
-   - se è un nuovo minuto: shift + push (scorrimento destra->sinistra)
+/* Aggiornamento realtime del grafico con kline_1m:
+   - stesso minuto: aggiorna ultimo punto
+   - minuto nuovo: push (e se supera 1440, shift) -> scorre da destra a sinistra
+   - se cambia giorno (openTime < candle.d.t oppure candle.d.t cambiata): ignora finché non resync
 */
 function updateChartFrom1mKline(k) {
-  if (!chart) return;
+  if (!chart || !tfReady.d || !candle.d.t) return;
 
-  const openTime = safe(k.t);   // start time 1m
-  const close = safe(k.c);      // close aggiornato realtime
+  const openTime = safe(k.t);
+  const close = safe(k.c);
   if (!openTime || !close) return;
 
-  const label = fmtHHMM(openTime);
+  // se è un minuto precedente all’inizio della giornata corrente, ignora
+  if (openTime < candle.d.t) return;
 
-  // stesso minuto -> aggiorna ultimo punto
+  // se è lo stesso minuto, aggiorna l’ultimo punto
   if (lastChartMinuteStart === openTime) {
-    const lastIdx = chart.data.datasets[0].data.length - 1;
-    if (lastIdx >= 0) {
-      chart.data.datasets[0].data[lastIdx] = close;
+    const idx = chart.data.datasets[0].data.length - 1;
+    if (idx >= 0) {
+      chart.data.datasets[0].data[idx] = close;
       chart.update("none");
     }
     return;
   }
 
-  // nuovo minuto -> scorre a sinistra: shift e push
+  // nuovo minuto
   lastChartMinuteStart = openTime;
 
-  chart.data.labels.push(label);
-  chart.data.labels.shift();
-
+  chart.data.labels.push(fmtHHMM(openTime));
   chart.data.datasets[0].data.push(close);
-  chart.data.datasets[0].data.shift();
+
+  // scorre a sinistra (mantieni max 1440 punti)
+  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
+  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
 
   chart.update("none");
 }
 
 // bootstrap + refresh periodico
-loadChart34h();
-setInterval(loadChart34h, 60000);
+loadChartToday();
+setInterval(loadChartToday, CHART_SYNC_MS);
 
 /* ================= WS TRADE (price realtime) ================= */
 function clearTradeRetry() {
@@ -397,7 +472,7 @@ function startTradeWS() {
 
     targetPrice = p;
 
-    // aggiorna hi/low “al volo” solo se TF pronta (evita valori sballati all’avvio)
+    // aggiorna hi/low “al volo” solo se TF pronta
     if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
     if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
     if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
@@ -405,7 +480,7 @@ function startTradeWS() {
 }
 startTradeWS();
 
-/* ================= WS KLINES (1D / 1W / 1M + 1m chart realtime) ================= */
+/* ================= WS KLINES (1m chart + 1D/1W/1M bars) ================= */
 function clearKlineRetry() {
   if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
 }
@@ -415,22 +490,41 @@ function scheduleKlineRetry() {
 }
 
 function applyKline(intervalKey, k) {
+  const t = safe(k.t);
   const o = safe(k.o);
   const h = safe(k.h);
   const l = safe(k.l);
 
-  // valida candela in corso
   if (o && h && l) {
+    candle[intervalKey].t = t || candle[intervalKey].t;
     candle[intervalKey].open = o;
     candle[intervalKey].high = h;
     candle[intervalKey].low  = l;
 
-    // al primo dato valido, abilita TF e fai “settle” elegante
     if (!tfReady[intervalKey]) {
       tfReady[intervalKey] = true;
       settleStart = Date.now();
     }
   }
+}
+
+async function resetDayAndReloadChart(newDayOpenTime) {
+  // reset grafico e ricarica dalla nuova giornata
+  chartLabels = [];
+  chartData = [];
+  lastChartMinuteStart = 0;
+
+  if (chart) {
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.update("none");
+  }
+
+  // aggiorna openTime day (se ce l’abbiamo)
+  if (newDayOpenTime) candle.d.t = newDayOpenTime;
+
+  // ricarica dalla REST (prima che arrivino i minuti WS)
+  await loadChartToday();
 }
 
 function startKlineWS() {
@@ -439,7 +533,6 @@ function startKlineWS() {
   wsKlineOnline = false;
   refreshConnUI();
 
-  // aggiungiamo anche kline_1m per il grafico 34h realtime
   const url =
     "wss://stream.binance.com:9443/stream?streams=" +
     "injusdt@kline_1m/" +
@@ -468,7 +561,7 @@ function startKlineWS() {
     scheduleKlineRetry();
   };
 
-  wsKline.onmessage = (e) => {
+  wsKline.onmessage = async (e) => {
     const payload = JSON.parse(e.data);
     const data = payload.data;
     if (!data || !data.k) return;
@@ -476,19 +569,35 @@ function startKlineWS() {
     const stream = payload.stream || "";
     const k = data.k;
 
-    // grafico 34h realtime (1m)
+    // GRAFICO: kline 1m realtime
     if (stream.includes("@kline_1m")) {
-      // assicura chart bootstrap se non ancora pronto
-      if (!chart && window.Chart) initChart34h();
+      // crea chart se non esiste (ma meglio bootstrap via loadChartToday)
+      if (!chart && window.Chart && tfReady.d) initChartToday();
       updateChartFrom1mKline(k);
       return;
     }
 
-    if (stream.includes("@kline_1d")) applyKline("d", k);
+    // BARS: 1D/1W/1M
+    if (stream.includes("@kline_1d")) {
+      const prevDayOpen = candle.d.t;
+      applyKline("d", k);
+
+      // Reset “giornata” quando la candela 1D chiude (k.x = true)
+      // Binance manda subito dopo la nuova candela inizia con openTime diverso.
+      if (k.x === true) {
+        // dopo close, la prossima giornata ha openTime = k.T + 1
+        const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
+        await resetDayAndReloadChart(nextOpen || prevDayOpen + 24 * 60 * 60 * 1000);
+      } else {
+        // se per qualsiasi motivo cambia openTime (nuovo giorno) senza x, resetta
+        if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
+          await resetDayAndReloadChart(candle.d.t);
+        }
+      }
+    }
     else if (stream.includes("@kline_1w")) applyKline("w", k);
     else if (stream.includes("@kline_1M")) applyKline("m", k);
 
-    // stop shimmer quando daily è pronta
     const root = $("appRoot");
     if (root && root.classList.contains("loading") && tfReady.d) {
       root.classList.remove("loading");
@@ -513,6 +622,17 @@ function animate() {
   updatePerf("arrow24h", "pct24h", pD);
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
+
+  /* Colore grafico = colore performance giornaliera (candela 1D) */
+  const sign =
+    !tfReady.d ? "neutral" :
+    pD > 0 ? "up" :
+    pD < 0 ? "down" : "neutral";
+
+  if (sign !== lastChartSign) {
+    lastChartSign = sign;
+    applyChartColorBySign(sign);
+  }
 
   /* BARS (se non pronte -> neutre, vedi renderBar) */
   renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high,
