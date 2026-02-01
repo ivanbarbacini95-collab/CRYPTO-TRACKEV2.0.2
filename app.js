@@ -9,6 +9,9 @@ const CHART_SYNC_MS = 60000;    // safety sync grafico giornata
 const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
+/* stake range */
+const STAKE_TARGET_MAX = 1000;
+
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
@@ -54,7 +57,7 @@ const candle = {
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
-/* ================= CHART (Price) ================= */
+/* ================= CHART ================= */
 let chart = null;
 let chartLabels = [];
 let chartData = [];
@@ -66,6 +69,10 @@ let chartBootstrappedToday = false;
 let hoverActive = false;
 let hoverIndex = null;
 let hoverPrice = null;
+let hoverLabel = null;
+
+/* Overlay content */
+let overlayVisible = false;
 
 /* Color state (performance daily) */
 let lastChartSign = "neutral";
@@ -76,65 +83,12 @@ let wsKline = null;
 let tradeRetryTimer = null;
 let klineRetryTimer = null;
 
-/* ================= STAKED PROGRESS + CHART ================= */
-const STAKE_TARGET = 1000; // range 0 - 1000
-
+/* ================= STAKE HISTORY CHART ================= */
 let stakeChart = null;
-let stakeEventLabels = [];
-let stakeEventData = [];
-let lastStakeSeen = null; // per capire quando aumenta e aggiungere un punto
-
-function initStakeChart() {
-  const canvas = $("stakeChart");
-  if (!canvas || !window.Chart) return;
-
-  stakeChart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: stakeEventLabels,
-      datasets: [{
-        data: stakeEventData,
-        borderColor: "#22c55e",
-        backgroundColor: "rgba(34,197,94,.18)",
-        fill: true,
-        pointRadius: 2,
-        tension: 0.25
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false }
-      },
-      scales: {
-        x: { display: false },
-        y: { ticks: { color: "#9ca3af" } }
-      }
-    }
-  });
-}
-
-function pushStakePoint(val) {
-  const v = safe(val);
-  if (!v) return;
-
-  const label = fmtHHMM(Date.now());
-  stakeEventLabels.push(label);
-  stakeEventData.push(v);
-
-  while (stakeEventLabels.length > 220) stakeEventLabels.shift();
-  while (stakeEventData.length > 220) stakeEventData.shift();
-
-  if (!stakeChart) initStakeChart();
-  if (stakeChart) {
-    stakeChart.data.labels = stakeEventLabels;
-    stakeChart.data.datasets[0].data = stakeEventData;
-    stakeChart.update("none");
-  }
-}
+let stakeLabels = [];
+let stakeData = [];
+let lastStakeRecorded = null;
+let stakeBootstrapped = false;
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
@@ -246,7 +200,9 @@ $("addressInput").oninput = (e) => {
   address = e.target.value.trim();
   localStorage.setItem("inj_address", address);
   settleStart = Date.now();
+  stakeBootstrapped = false;
   loadAccount();
+  bootstrapStakeHistory(); // tenta recupero storico completo
 };
 
 /* ================= ACCOUNT (Injective LCD) ================= */
@@ -279,21 +235,8 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  /* ✅ stake chart: aggiunge un punto quando lo stake aumenta */
-  if (Number.isFinite(stakeInj)) {
-    if (lastStakeSeen == null) {
-      lastStakeSeen = stakeInj;
-      if (stakeInj > 0) pushStakePoint(stakeInj);
-    } else {
-      const diff = stakeInj - lastStakeSeen;
-      if (diff > 0.0001) {
-        lastStakeSeen = stakeInj;
-        pushStakePoint(stakeInj);
-      } else {
-        lastStakeSeen = stakeInj;
-      }
-    }
-  }
+  // aggiunge punto stake chart se aumenta (depositi/compounding)
+  maybeAddStakePoint(stakeInj);
 }
 loadAccount();
 setInterval(loadAccount, ACCOUNT_POLL_MS);
@@ -438,9 +381,6 @@ function initChartToday() {
 
   setupChartInteractions();
   applyChartColorBySign(lastChartSign);
-
-  const overlay = $("chartPrice")?.parentElement;
-  if (overlay) overlay.style.display = "none";
 }
 
 async function loadChartToday() {
@@ -467,21 +407,13 @@ async function loadChartToday() {
   chartBootstrappedToday = true;
 }
 
-/* ================= CHART: interactions (line + top-right info) ================= */
-function setHoverState(active, idx, price) {
+/* ================= CHART: interactions (line + top-right hover label) ================= */
+function setHoverState(active, idx, price, label) {
   hoverActive = active;
   hoverIndex = active ? idx : null;
   hoverPrice = active ? price : null;
-
-  const label = active && chart ? (chart.data.labels?.[idx] ?? "--") : "--";
-  const p = safe(price);
-
-  const txt = $("chartPrice");
-  const overlay = txt ? txt.parentElement : null;
-
-  if (overlay) overlay.style.display = active ? "block" : "none";
-  if (txt && active) txt.textContent = `${label} • $${p.toFixed(4)}`;
-
+  hoverLabel = active ? label : null;
+  overlayVisible = active;
   if (chart) chart.update("none");
 }
 
@@ -503,7 +435,8 @@ function setupChartInteractions() {
       return;
     }
     const v = safe(chart.data.datasets[0].data[idx]);
-    setHoverState(true, idx, v);
+    const l = chart.data.labels[idx];
+    setHoverState(true, idx, v, l);
   };
 
   const handleLeave = () => setHoverState(false);
@@ -735,11 +668,193 @@ function startKlineWS() {
 }
 startKlineWS();
 
+/* ================= STAKE CHART INIT ================= */
+function initStakeChart() {
+  const canvas = $("stakeChart");
+  if (!canvas) return;
+
+  stakeChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: stakeLabels,
+      datasets: [{
+        data: stakeData,
+        borderColor: "#22c55e",
+        backgroundColor: "rgba(34,197,94,.18)",
+        fill: true,
+        pointRadius: 0,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false }
+      },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    }
+  });
+}
+
+/* aggiunge un punto solo quando aumenta */
+function maybeAddStakePoint(currentStake) {
+  const s = safe(currentStake);
+  if (!Number.isFinite(s)) return;
+
+  if (lastStakeRecorded == null) {
+    lastStakeRecorded = s;
+    stakeLabels.push(new Date().toLocaleTimeString());
+    stakeData.push(s);
+  } else {
+    const delta = s - lastStakeRecorded;
+    if (delta > 0.00001) {
+      lastStakeRecorded = s;
+      stakeLabels.push(new Date().toLocaleTimeString());
+      stakeData.push(s);
+
+      while (stakeLabels.length > 240) stakeLabels.shift();
+      while (stakeData.length > 240) stakeData.shift();
+    }
+  }
+
+  if (!stakeChart && window.Chart) initStakeChart();
+  else if (stakeChart) {
+    stakeChart.data.labels = stakeLabels;
+    stakeChart.data.datasets[0].data = stakeData;
+    stakeChart.update("none");
+  }
+}
+
+/* ================= STAKE FULL HISTORY (best-effort) =================
+   - prova a ricostruire eventi di staking da /cosmos/tx/v1beta1/txs (message.sender=address)
+   - se non disponibile/decodificabile: fallback al live (punti solo quando stake sale)
+*/
+function isDelegateMsg(m) {
+  const t = (m?.["@type"] || m?.type || "").toLowerCase();
+  return t.includes("msgdelegate");
+}
+function isUndelegateMsg(m) {
+  const t = (m?.["@type"] || m?.type || "").toLowerCase();
+  return t.includes("msgundelegate");
+}
+function readMsgAmount(m) {
+  // supporta vari formati (amount o amount.amount)
+  const a = m?.amount;
+  if (!a) return 0;
+
+  // string (wei) oppure oggetto { denom, amount }
+  if (typeof a === "string") return safe(a) / 1e18;
+
+  const denom = (a.denom || "").toLowerCase();
+  const amt = safe(a.amount);
+  if (!amt) return 0;
+
+  // alcune API possono usare denom "inj" o "inj" in wei
+  if (denom === "inj") return amt / 1e18;
+
+  // fallback: se sembra già in INJ
+  if (amt < 1e12) return amt;
+  return amt / 1e18;
+}
+
+async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
+  const base = "https://lcd.injective.network";
+  const limit = 100;
+  let offset = 0;
+  const out = [];
+
+  // solo message.sender (deleghe sono quasi sempre inviate dal delegatore)
+  const ev = encodeURIComponent(`message.sender='${addressInj}'`);
+
+  for (let p = 0; p < maxPages; p++) {
+    const url = `${base}/cosmos/tx/v1beta1/txs?events=${ev}&pagination.offset=${offset}&pagination.limit=${limit}&order_by=ORDER_BY_ASC`;
+    const data = await fetchJSON(url);
+    const txs = data?.txs || [];
+    const resps = data?.tx_responses || [];
+
+    if (!Array.isArray(txs) || !Array.isArray(resps) || !txs.length) break;
+
+    for (let i = 0; i < txs.length; i++) {
+      out.push({ tx: txs[i], resp: resps[i] });
+    }
+
+    if (txs.length < limit) break;
+    offset += limit;
+  }
+  return out;
+}
+
+async function bootstrapStakeHistory() {
+  if (!address) return;
+  stakeBootstrapped = false;
+
+  // reset arrays
+  stakeLabels = [];
+  stakeData = [];
+  lastStakeRecorded = null;
+
+  // tenta recupero storico completo
+  const all = await fetchAllTxsBySenderCosmos(address, 60);
+
+  if (all && all.length) {
+    let running = 0;
+
+    for (const item of all) {
+      const tx = item?.tx;
+      const when = item?.resp?.timestamp ? new Date(item.resp.timestamp) : null;
+
+      const msgs = tx?.body?.messages || tx?.body?.msgs || [];
+      if (!Array.isArray(msgs) || !msgs.length) continue;
+
+      let changed = false;
+
+      for (const m of msgs) {
+        if (isDelegateMsg(m)) {
+          const a = readMsgAmount(m);
+          if (a > 0) { running += a; changed = true; }
+        } else if (isUndelegateMsg(m)) {
+          const a = readMsgAmount(m);
+          if (a > 0) { running -= a; changed = true; }
+        }
+      }
+
+      if (changed) {
+        stakeLabels.push(when ? when.toLocaleDateString() + " " + when.toLocaleTimeString() : new Date().toLocaleTimeString());
+        stakeData.push(Math.max(0, running));
+      }
+    }
+
+    // se abbiamo ricostruito qualcosa, inizializza chart
+    if (stakeData.length) {
+      lastStakeRecorded = stakeData[stakeData.length - 1];
+      if (!stakeChart && window.Chart) initStakeChart();
+      else if (stakeChart) {
+        stakeChart.data.labels = stakeLabels;
+        stakeChart.data.datasets[0].data = stakeData;
+        stakeChart.update("none");
+      }
+      stakeBootstrapped = true;
+      return;
+    }
+  }
+
+  // fallback: almeno un punto iniziale live
+  maybeAddStakePoint(stakeInj);
+  stakeBootstrapped = true;
+}
+
 /* ================= BOOT ================= */
 (async function boot() {
   await loadCandleSnapshot();
   await loadChartToday();
-  initStakeChart();
+  await bootstrapStakeHistory();
 })();
 
 /* ================= LOOP ================= */
@@ -767,6 +882,19 @@ function animate() {
   if (sign !== lastChartSign) {
     lastChartSign = sign;
     applyChartColorBySign(sign);
+  }
+
+  /* TOP-RIGHT GRAPH OVERLAY:
+     - quando hover/touch: mostra "HH:MM • $PRICE"
+     - quando molli: scompare
+  */
+  const chartEl = $("chartPrice");
+  if (chartEl) {
+    if (overlayVisible && hoverActive && hoverLabel && Number.isFinite(hoverPrice)) {
+      chartEl.textContent = `${hoverLabel} • $${safe(hoverPrice).toFixed(4)}`;
+    } else {
+      chartEl.textContent = "--";
+    }
   }
 
   /* BARS (tutte green/red coerenti con performance) */
@@ -802,15 +930,13 @@ function animate() {
   colorNumber($("stake"), displayed.stake, os, 4);
   $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
 
-  /* ✅ STAKE BAR (0 - 1000) */
-  const stakeMax = STAKE_TARGET;
-  const sp = clamp((displayed.stake / stakeMax) * 100, 0, 100);
-
-  $("stakeBar").style.width = sp + "%";
-  $("stakeLine").style.left = sp + "%";
-  $("stakePercent").textContent = sp.toFixed(1) + "%";
+  // STAKE BAR (0-1000)
+  const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
+  $("stakeBar").style.width = stakePct + "%";
+  $("stakeLine").style.left = stakePct + "%";
+  $("stakePercent").textContent = stakePct.toFixed(1) + "%";
   $("stakeMin").textContent = "0";
-  $("stakeMax").textContent = "1000";
+  $("stakeMax").textContent = String(STAKE_TARGET_MAX);
 
   /* REWARDS */
   const or = displayed.rewards;
