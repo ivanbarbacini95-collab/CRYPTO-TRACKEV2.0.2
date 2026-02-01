@@ -678,27 +678,38 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* ===== BARS – GRADIENT MOLTO DECISI E DISTINTI ===== */
-  /* 1D — GREEN vs RED (classico, potente) */
-  const upGradD = "linear-gradient(90deg,#16a34a 0%,#22c55e 50%,#4ade80 100%)";
-  const dnGradD = "linear-gradient(270deg,#b91c1c 0%,#ef4444 50%,#fb7185 100%)";
+  /* ===== BARS – PALETTE ALTERNATIVA (LUXURY / DARK / CYBER) ===== */
 
-  /* 1W — ICE vs FIRE (freddo / caldo) */
-  const upGradW = "linear-gradient(90deg,#06b6d4 0%,#0ea5e9 50%,#2563eb 100%)";
-  const dnGradW = "linear-gradient(270deg,#f97316 0%,#f59e0b 50%,#fde047 100%)";
+/* 1D — EMERALD / CRIMSON (profondo, elegante) */
+const upGradD = "linear-gradient(90deg,#064e3b 0%,#10b981 60%,#34d399 100%)";
+const dnGradD = "linear-gradient(270deg,#450a0a 0%,#dc2626 60%,#f87171 100%)";
 
-  /* 1M — NEON PURPLE vs ELECTRIC MAGENTA */
-  const upGradM = "linear-gradient(90deg,#7c3aed 0%,#a855f7 50%,#e879f9 100%)";
-  const dnGradM = "linear-gradient(270deg,#be185d 0%,#ec4899 50%,#fb7185 100%)";
+/* 1W — ELECTRIC BLUE / SOLAR YELLOW (forte contrasto) */
+const upGradW = "linear-gradient(90deg,#020617 0%,#1d4ed8 55%,#38bdf8 100%)";
+const dnGradW = "linear-gradient(270deg,#422006 0%,#eab308 55%,#fde68a 100%)";
 
-  renderBar($("priceBar"), $("priceLine"),
-    targetPrice, candle.d.open, candle.d.low, candle.d.high, upGradD, dnGradD);
+/* 1M — CYBER PINK / DEEP VIOLET (crypto / neon) */
+const upGradM = "linear-gradient(90deg,#2e1065 0%,#9333ea 55%,#f0abfc 100%)";
+const dnGradM = "linear-gradient(270deg,#4a044e 0%,#db2777 55%,#f9a8d4 100%)";
 
-  renderBar($("weekBar"), $("weekLine"),
-    targetPrice, candle.w.open, candle.w.low, candle.w.high, upGradW, dnGradW);
+renderBar(
+  $("priceBar"), $("priceLine"),
+  targetPrice, candle.d.open, candle.d.low, candle.d.high,
+  upGradD, dnGradD
+);
 
-  renderBar($("monthBar"), $("monthLine"),
-    targetPrice, candle.m.open, candle.m.low, candle.m.high, upGradM, dnGradM);
+renderBar(
+  $("weekBar"), $("weekLine"),
+  targetPrice, candle.w.open, candle.w.low, candle.w.high,
+  upGradW, dnGradW
+);
+
+renderBar(
+  $("monthBar"), $("monthLine"),
+  targetPrice, candle.m.open, candle.m.low, candle.m.high,
+  upGradM, dnGradM
+);
+
 
   /* Values under bars */
   $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
