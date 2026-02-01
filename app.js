@@ -1,4 +1,4 @@
- /* ================= CONFIG ================= */
+/* ================= CONFIG ================= */
 const INITIAL_SETTLE_TIME = 4200; // ms (più lungo -> numeri scorrono di più)
 let settleStart = Date.now();
 
@@ -57,12 +57,24 @@ const candle = {
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
+/* Flash tracking ATH/ATL */
+const lastExtremes = {
+  d: { low: null, high: null },
+  w: { low: null, high: null },
+  m: { low: null, high: null },
+};
+function flash(el) {
+  if (!el) return;
+  el.classList.remove("flash-yellow");
+  void el.offsetWidth; // reflow
+  el.classList.add("flash-yellow");
+}
+
 /* ================= CHART ================= */
 let chart = null;
 let chartLabels = [];
 let chartData = [];
 let lastChartMinuteStart = 0;
-
 let chartBootstrappedToday = false;
 
 /* Hover interaction state */
@@ -87,6 +99,7 @@ let klineRetryTimer = null;
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
+let stakeMoves = []; // +1 up, -1 down, 0 neutral (punti evento)
 let lastStakeRecorded = null;
 let stakeBootstrapped = false;
 
@@ -147,7 +160,7 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
 
   open = safe(open); low = safe(low); high = safe(high); val = safe(val);
 
-  if (!open || !low || !high || high === low) {
+  if (!open || !Number.isFinite(low) || !Number.isFinite(high) || high === low) {
     line.style.left = "50%";
     bar.style.left = "50%";
     bar.style.width = "0%";
@@ -235,7 +248,7 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  // aggiunge punto stake chart se aumenta (depositi/compounding)
+  // aggiunge punto stake chart sia se sale che se scende (con soglia)
   maybeAddStakePoint(stakeInj);
 }
 loadAccount();
@@ -668,7 +681,7 @@ function startKlineWS() {
 }
 startKlineWS();
 
-/* ================= STAKE CHART INIT ================= */
+/* ================= STAKE CHART INIT (event points up/down) ================= */
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas) return;
@@ -682,8 +695,30 @@ function initStakeChart() {
         borderColor: "#22c55e",
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
-        pointRadius: 0,
-        tension: 0.3
+        tension: 0.3,
+
+        // punti solo sugli eventi: ↑ verde / ↓ rosso
+        pointRadius: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m === 0 ? 0 : 3;
+        },
+        pointHoverRadius: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m === 0 ? 0 : 5;
+        },
+        pointBackgroundColor: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
+        },
+        pointBorderColor: (ctx) => {
+          const i = ctx.dataIndex;
+          const m = stakeMoves[i] || 0;
+          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
+        },
+        pointBorderWidth: 1,
       }]
     },
     options: {
@@ -703,48 +738,30 @@ function initStakeChart() {
   });
 }
 
-/* aggiunge un punto solo quando aumenta */
+/* aggiunge un punto quando stake cambia (su o giù) */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
 
-  // aggiunge punto ogni volta che il valore VISIBILE aumenta
-function maybeAddStakePointFromDisplay(displayedStake) {
-  const s = safe(displayedStake);
-  if (!Number.isFinite(s)) return;
-
-  if (s > lastDisplayedStakeForChart + 0.00001) {
-    lastDisplayedStakeForChart = s;
-
-    stakeLabels.push(new Date().toLocaleTimeString());
-    stakeData.push(s);
-
-    while (stakeLabels.length > 240) stakeLabels.shift();
-    while (stakeData.length > 240) stakeData.shift();
-
-    if (!stakeChart && window.Chart) initStakeChart();
-    else if (stakeChart) {
-      stakeChart.data.labels = stakeLabels;
-      stakeChart.data.datasets[0].data = stakeData;
-      stakeChart.update("none");
-    }
-  }
-}
-
+  const TH = 0.0005; // soglia anti-rumore (alza a 0.001 se vuoi più filtro)
 
   if (lastStakeRecorded == null) {
     lastStakeRecorded = s;
     stakeLabels.push(new Date().toLocaleTimeString());
     stakeData.push(s);
+    stakeMoves.push(0); // primo punto neutro
   } else {
     const delta = s - lastStakeRecorded;
-    if (delta > 0.00001) {
+    if (Math.abs(delta) > TH) {
       lastStakeRecorded = s;
+
       stakeLabels.push(new Date().toLocaleTimeString());
       stakeData.push(s);
+      stakeMoves.push(delta > 0 ? 1 : -1); // ↑ verde / ↓ rosso
 
       while (stakeLabels.length > 240) stakeLabels.shift();
       while (stakeData.length > 240) stakeData.shift();
+      while (stakeMoves.length > 240) stakeMoves.shift();
     }
   }
 
@@ -758,7 +775,7 @@ function maybeAddStakePointFromDisplay(displayedStake) {
 
 /* ================= STAKE FULL HISTORY (best-effort) =================
    - prova a ricostruire eventi di staking da /cosmos/tx/v1beta1/txs (message.sender=address)
-   - se non disponibile/decodificabile: fallback al live (punti solo quando stake sale)
+   - se non disponibile/decodificabile: fallback al live
 */
 function isDelegateMsg(m) {
   const t = (m?.["@type"] || m?.type || "").toLowerCase();
@@ -769,21 +786,16 @@ function isUndelegateMsg(m) {
   return t.includes("msgundelegate");
 }
 function readMsgAmount(m) {
-  // supporta vari formati (amount o amount.amount)
   const a = m?.amount;
   if (!a) return 0;
 
-  // string (wei) oppure oggetto { denom, amount }
   if (typeof a === "string") return safe(a) / 1e18;
 
   const denom = (a.denom || "").toLowerCase();
   const amt = safe(a.amount);
   if (!amt) return 0;
 
-  // alcune API possono usare denom "inj" o "inj" in wei
   if (denom === "inj") return amt / 1e18;
-
-  // fallback: se sembra già in INJ
   if (amt < 1e12) return amt;
   return amt / 1e18;
 }
@@ -794,7 +806,6 @@ async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
   let offset = 0;
   const out = [];
 
-  // solo message.sender (deleghe sono quasi sempre inviate dal delegatore)
   const ev = encodeURIComponent(`message.sender='${addressInj}'`);
 
   for (let p = 0; p < maxPages; p++) {
@@ -822,6 +833,7 @@ async function bootstrapStakeHistory() {
   // reset arrays
   stakeLabels = [];
   stakeData = [];
+  stakeMoves = [];
   lastStakeRecorded = null;
 
   // tenta recupero storico completo
@@ -838,26 +850,35 @@ async function bootstrapStakeHistory() {
       if (!Array.isArray(msgs) || !msgs.length) continue;
 
       let changed = false;
+      let net = 0;
 
       for (const m of msgs) {
         if (isDelegateMsg(m)) {
           const a = readMsgAmount(m);
-          if (a > 0) { running += a; changed = true; }
+          if (a > 0) { running += a; net += a; changed = true; }
         } else if (isUndelegateMsg(m)) {
           const a = readMsgAmount(m);
-          if (a > 0) { running -= a; changed = true; }
+          if (a > 0) { running -= a; net -= a; changed = true; }
         }
       }
 
       if (changed) {
-        stakeLabels.push(when ? when.toLocaleDateString() + " " + when.toLocaleTimeString() : new Date().toLocaleTimeString());
+        stakeLabels.push(
+          when ? when.toLocaleDateString() + " " + when.toLocaleTimeString()
+               : new Date().toLocaleTimeString()
+        );
         stakeData.push(Math.max(0, running));
+        stakeMoves.push(net > 0 ? 1 : (net < 0 ? -1 : 0));
       }
     }
 
-    // se abbiamo ricostruito qualcosa, inizializza chart
     if (stakeData.length) {
       lastStakeRecorded = stakeData[stakeData.length - 1];
+
+      while (stakeLabels.length > 240) stakeLabels.shift();
+      while (stakeData.length > 240) stakeData.shift();
+      while (stakeMoves.length > 240) stakeMoves.shift();
+
       if (!stakeChart && window.Chart) initStakeChart();
       else if (stakeChart) {
         stakeChart.data.labels = stakeLabels;
@@ -910,37 +931,82 @@ function animate() {
 
   /* TOP-RIGHT GRAPH OVERLAY:
      - quando hover/touch: mostra "HH:MM • $PRICE"
-     - quando molli: scompare
+     - quando molli: scompare davvero (classe .show via CSS)
   */
   const chartEl = $("chartPrice");
-  if (chartEl) {
+  const overlay = $("chartOverlay");
+  if (chartEl && overlay) {
     if (overlayVisible && hoverActive && hoverLabel && Number.isFinite(hoverPrice)) {
       chartEl.textContent = `${hoverLabel} • $${safe(hoverPrice).toFixed(4)}`;
+      overlay.classList.add("show");
     } else {
-      chartEl.textContent = "--";
+      overlay.classList.remove("show");
     }
   }
 
-  /* BARS (tutte green/red coerenti con performance) */
-  const upGrad = "linear-gradient(to right,#22c55e,#10b981)";
-  const downGrad = "linear-gradient(to left,#ef4444,#f87171)";
+  /* BARS: gradient vivaci diversi per timeframe */
+  const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
+  const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
 
-  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, upGrad, downGrad);
-  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, upGrad, downGrad);
-  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, upGrad, downGrad);
+  const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
+  const wDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(59,130,246,.55))";
 
-  /* Values under bars */
-  $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
-  $("priceOpen").textContent = tfReady.d ? safe(candle.d.open).toFixed(3) : "--";
-  $("priceMax").textContent  = tfReady.d ? safe(candle.d.high).toFixed(3) : "--";
+  const mUp   = "linear-gradient(to right, rgba(249,115,22,.92), rgba(236,72,153,.78))";
+  const mDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(236,72,153,.55))";
 
-  $("weekMin").textContent   = tfReady.w ? safe(candle.w.low).toFixed(3)  : "--";
-  $("weekOpen").textContent  = tfReady.w ? safe(candle.w.open).toFixed(3) : "--";
-  $("weekMax").textContent   = tfReady.w ? safe(candle.w.high).toFixed(3) : "--";
+  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, dUp, dDown);
+  renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
+  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  $("monthMin").textContent  = tfReady.m ? safe(candle.m.low).toFixed(3)  : "--";
-  $("monthOpen").textContent = tfReady.m ? safe(candle.m.open).toFixed(3) : "--";
-  $("monthMax").textContent  = tfReady.m ? safe(candle.m.high).toFixed(3) : "--";
+  /* Values under bars + flash ATH/ATL */
+  const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
+  const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
+  const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
+
+  if (tfReady.d) {
+    const low = safe(candle.d.low), high = safe(candle.d.high);
+    $("priceMin").textContent  = low.toFixed(3);
+    $("priceOpen").textContent = safe(candle.d.open).toFixed(3);
+    $("priceMax").textContent  = high.toFixed(3);
+
+    if (lastExtremes.d.low !== null && low !== lastExtremes.d.low) flash(pMinEl);
+    if (lastExtremes.d.high !== null && high !== lastExtremes.d.high) flash(pMaxEl);
+    lastExtremes.d.low = low; lastExtremes.d.high = high;
+  } else {
+    $("priceMin").textContent = "--";
+    $("priceOpen").textContent = "--";
+    $("priceMax").textContent = "--";
+  }
+
+  if (tfReady.w) {
+    const low = safe(candle.w.low), high = safe(candle.w.high);
+    $("weekMin").textContent   = low.toFixed(3);
+    $("weekOpen").textContent  = safe(candle.w.open).toFixed(3);
+    $("weekMax").textContent   = high.toFixed(3);
+
+    if (lastExtremes.w.low !== null && low !== lastExtremes.w.low) flash(wMinEl);
+    if (lastExtremes.w.high !== null && high !== lastExtremes.w.high) flash(wMaxEl);
+    lastExtremes.w.low = low; lastExtremes.w.high = high;
+  } else {
+    $("weekMin").textContent = "--";
+    $("weekOpen").textContent = "--";
+    $("weekMax").textContent = "--";
+  }
+
+  if (tfReady.m) {
+    const low = safe(candle.m.low), high = safe(candle.m.high);
+    $("monthMin").textContent  = low.toFixed(3);
+    $("monthOpen").textContent = safe(candle.m.open).toFixed(3);
+    $("monthMax").textContent  = high.toFixed(3);
+
+    if (lastExtremes.m.low !== null && low !== lastExtremes.m.low) flash(mMinEl);
+    if (lastExtremes.m.high !== null && high !== lastExtremes.m.high) flash(mMaxEl);
+    lastExtremes.m.low = low; lastExtremes.m.high = high;
+  } else {
+    $("monthMin").textContent = "--";
+    $("monthOpen").textContent = "--";
+    $("monthMax").textContent = "--";
+  }
 
   /* AVAILABLE */
   const oa = displayed.available;
