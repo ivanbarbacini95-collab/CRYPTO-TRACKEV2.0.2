@@ -14,12 +14,12 @@ body {
   gap: 1rem;
 }
 
-/* ===== HEADER LAYOUT ===== */
+/* ===== HEADER ===== */
 .header { display: flex; flex-direction: column; gap: .6rem; }
 
 .header-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: .8rem;
 }
@@ -43,11 +43,17 @@ body {
 
 .header-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .35rem;
+}
+
+.header-actions > .icon-row {
+  display: flex;
   align-items: center;
   gap: .55rem;
 }
 
-/* icon buttons (menu + lens) */
 .icon-btn {
   width: 38px;
   height: 38px;
@@ -64,6 +70,7 @@ body {
 
 .icon-btn:active { transform: translateY(1px); }
 
+/* SEARCH minimal: input si espande verso sinistra */
 .search-wrap {
   display: flex;
   align-items: center;
@@ -96,42 +103,51 @@ body {
   .search-wrap.open input { width: 210px; }
 }
 
-.header-bottom {
+/* META sotto le icone: wallet + status piccolo e pro */
+.header-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: .8rem;
-}
-
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.status-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #ef4444;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.3); opacity: 1; }
-  100% { transform: scale(1); opacity: 0.8; }
+  justify-content: flex-end;
+  gap: .55rem;
+  margin-top: .1rem;
 }
 
 .address-display .tag {
-  font-size: 0.85rem;
-  color: rgba(249,250,251,.85);
+  font-size: 0.75rem;
+  color: rgba(249,250,251,.82);
   background: rgba(255,255,255,0.06);
   border-radius: 999px;
-  padding: .35rem .65rem;
+  padding: .25rem .55rem;
   display: inline-flex;
   align-items: center;
-  gap: .4rem;
+  gap: .35rem;
+}
+
+/* status più piccolo */
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  opacity: .9;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1.7s infinite;
+}
+
+.status-text {
+  font-size: 0.74rem;
+  color: rgba(249,250,251,.78);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.75; }
+  50% { transform: scale(1.35); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.75; }
 }
 
 /* ===== CARDS ===== */
@@ -247,9 +263,7 @@ body {
 
 /* reward */
 .reward-container { height: 26px; }
-.reward-fill {
-  background: linear-gradient(to right, #0ea5e9, #3b82f6);
-}
+.reward-fill { background: linear-gradient(to right, #0ea5e9, #3b82f6); }
 
 .reward-percent {
   position: absolute;
@@ -265,9 +279,8 @@ body {
 
 /* stake */
 .stake-container { height: 26px; }
-.stake-fill {
-  background: linear-gradient(to right, #22c55e, #10b981);
-}
+.stake-fill { background: linear-gradient(to right, #22c55e, #10b981); }
+
 .stake-percent {
   position: absolute;
   left: 50%;
@@ -280,16 +293,9 @@ body {
 
 .stake-card .bar-label { display: none; }
 
-.stake-chart-wrap {
-  height: 150px;
-  margin-top: 0.7rem;
-  position: relative;
-}
+.stake-chart-wrap { height: 150px; margin-top: 0.7rem; position: relative; }
 
-#stakeChart, #priceChart {
-  width: 100% !important;
-  height: 100% !important;
-}
+#stakeChart, #priceChart { width: 100% !important; height: 100% !important; }
 
 /* chart */
 .chart-card { height: 300px; position: relative; }
@@ -309,10 +315,7 @@ body {
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.chart-overlay.show {
-  opacity: .98;
-  transform: translateY(0);
-}
+.chart-overlay.show { opacity: .98; transform: translateY(0); }
 
 .last-update {
   font-size: 0.8rem;
@@ -320,17 +323,12 @@ body {
   color: #9ca3af;
 }
 
-/* ===== Initial loading shimmer ===== */
+/* ===== Loading shimmer ===== */
 .container.loading .value-row span,
 .container.loading .sub-row,
-.container.loading .bar-values {
-  opacity: 0;
-}
+.container.loading .bar-values { opacity: 0; }
 
-.container.loading .card {
-  position: relative;
-  overflow: hidden;
-}
+.container.loading .card { position: relative; overflow: hidden; }
 
 .container.loading .card::after {
   content: "";
@@ -359,10 +357,8 @@ body {
   transition: opacity 450ms ease;
 }
 
-/* flash yellow for extremes */
-.flash-yellow {
-  animation: flashY 650ms ease;
-}
+/* flash yellow extremes */
+.flash-yellow { animation: flashY 650ms ease; }
 
 @keyframes flashY {
   0%   { color: #facc15; transform: scale(1.08); }
