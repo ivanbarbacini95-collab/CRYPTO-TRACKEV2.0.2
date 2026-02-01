@@ -1,102 +1,176 @@
-/* ================= CONFIG ================= */
-const INITIAL_SETTLE_TIME = 4200; // ms
-let settleStart = Date.now();
+/* =========================================================
+   Injective • Portfolio — app.js (FULL)
+   - Price realtime (Binance WS) + 1D/1W/1M bars
+   - Account (Injective LCD) available / staked / rewards / apr
+   - 1D Price Chart (REST bootstrap + WS 1m) + pan/zoom + overlay
+   - Stake Chart (ALL points) + Y ticks step 1 + persistence chunked
+   - Reward Withdrawals Chart (ALL points) + labels always visible (no overlap) + persistence chunked
+   - Online/Offline: Offline ONLY if no internet
+   - Live/Refresh mode (optional UI hooks)
+========================================================= */
 
-const ACCOUNT_POLL_MS = 2000;
-const REST_SYNC_MS = 60000;
-const CHART_SYNC_MS = 60000;
+/* ===================== CONFIG ===================== */
+const INITIAL_SETTLE_TIME = 4200;
+
+const ACCOUNT_POLL_MS = 2500;
+const REST_SYNC_MS = 60_000;
+const CHART_SYNC_MS = 60_000;
 
 const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
 
-/* stake persistence */
-const STAKE_SERIES_MAX = 360;     // più spazio per scorrere
-const STAKE_LOCAL_VER = 2;
+/* Reward withdrawal detection */
+const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
-/* reward withdrawals persistence */
-const REWARD_WD_SERIES_MAX = 800;
-const REWARD_WD_LOCAL_VER = 2;
-const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ (stacca solo movimenti "veri")
+/* Persistence (chunked append-only) */
+const STORE_VER = 1;
+const CHUNK_SIZE = 220;
 
-/* ================= HELPERS ================= */
+/* "No overlap" windowing */
+const MAX_LABELS_VISIBLE = 80;
+const MIN_PX_PER_POINT_STAKE = 46;  // label "COMPOUND/DELEGATE"
+const MIN_PX_PER_POINT_REWARD = 56; // label "+0.0034 INJ"
+
+/* ===================== HELPERS ===================== */
 const $ = (id) => document.getElementById(id);
-const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
+const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function nowTS() { return Date.now(); }
-function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
+function hasInternet() { return navigator.onLine === true; }
 
-/* ================= THEME / MODE (storage) ================= */
+function fgColor() {
+  // compatibile sia dark che light senza rompere la tua palette
+  const isLight = document.body?.dataset?.theme === "light";
+  return isLight ? "#111827" : "#f9fafb";
+}
+
+/* ===================== OPTIONAL UI HOOKS (menu/search) ===================== */
+const statusDot = $("statusDot");
+const statusText = $("statusText");
+
+const menuBtn = $("menuBtn");
+const backdrop = $("backdrop");
+const drawer = $("drawer");
+const drawerNav = $("drawerNav");
+
+const themeToggle = $("themeToggle");
+const themeIcon = $("themeIcon");
+
+const liveToggle = $("liveToggle");
+const liveIcon = $("liveIcon");
+const modeHint = $("modeHint");
+
+const searchWrap = $("searchWrap");
+const searchBtn = $("searchBtn");
+const addressInput = $("addressInput");
+const addressDisplay = $("addressDisplay");
+
+/* ===================== THEME ===================== */
 const THEME_KEY = "inj_theme";
-const MODE_KEY = "inj_mode"; // live | refresh
-
 let theme = localStorage.getItem(THEME_KEY) || "dark";
-let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
 function applyTheme(t) {
   theme = (t === "light") ? "light" : "dark";
   document.body.dataset.theme = theme;
   localStorage.setItem(THEME_KEY, theme);
-  const themeIcon = $("themeIcon");
   if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
 }
 applyTheme(theme);
 
-/* ================= CONNECTION UI ================= */
-const statusDot = $("statusDot");
-const statusText = $("statusText");
+themeToggle?.addEventListener("click", () => applyTheme(theme === "dark" ? "light" : "dark"), { passive: true });
 
+/* ===================== LIVE/REFRESH MODE ===================== */
+const MODE_KEY = "inj_mode"; // "live" | "refresh"
+let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
+
+function setMode(isLive) {
+  liveMode = !!isLive;
+  localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
+
+  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
+  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
+
+  if (liveMode) {
+    startAllTimers();
+    startTradeWS();
+    startKlineWS();
+    loadAccount(false);
+    loadCandleSnapshot(false);
+    loadChartToday(false);
+  } else {
+    stopAllTimers();
+    stopAllSockets();
+    // in refresh mode: carichi una volta al refresh pagina
+    oneShotRefresh().catch(() => {});
+  }
+  refreshConnUI();
+}
+liveToggle?.addEventListener("click", () => setMode(!liveMode), { passive: true });
+
+/* ===================== CONNECTION UI ===================== */
 let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
 
-function hasInternet() { return navigator.onLine === true; }
-
-/* Offline SOLO se manca internet.
-   Refresh mode: verde se internet.
-   Live mode: Connecting finché WS/account non ok.
-*/
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
 
+  // Offline SOLO se manca internet
   if (!hasInternet()) {
     statusText.textContent = "Offline";
     statusDot.style.background = "#ef4444";
     return;
   }
 
+  // Se refresh mode -> online se internet
   if (!liveMode) {
     statusText.textContent = "Online";
     statusDot.style.background = "#22c55e";
     return;
   }
 
-  const allOk = wsTradeOnline && wsKlineOnline && accountOnline;
-
-  if (!allOk) {
+  // Live mode: ok solo se WS+LCD ok
+  const ok = wsTradeOnline && wsKlineOnline && accountOnline;
+  if (ok) {
+    statusText.textContent = "Online";
+    statusDot.style.background = "#22c55e";
+  } else {
     statusText.textContent = "Connecting...";
     statusDot.style.background = "#facc15";
-    return;
   }
-
-  statusText.textContent = "Online";
-  statusDot.style.background = "#22c55e";
 }
 
-/* ================= HEADER SEARCH UI ================= */
-const searchWrap = $("searchWrap");
-const searchBtn = $("searchBtn");
-const addressInput = $("addressInput");
-const addressDisplay = $("addressDisplay");
+window.addEventListener("online", () => {
+  refreshConnUI();
+  if (liveMode) {
+    startTradeWS();
+    startKlineWS();
+    loadAccount(false);
+  }
+}, { passive: true });
 
+window.addEventListener("offline", () => {
+  wsTradeOnline = false;
+  wsKlineOnline = false;
+  accountOnline = false;
+  refreshConnUI();
+}, { passive: true });
+
+/* ===================== SEARCH (optional lens UX) ===================== */
 let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = address || "";
 
+function shortAddr(a) {
+  a = (a || "").trim();
+  if (!a) return "";
+  return a.length > 18 ? `${a.slice(0, 10)}…${a.slice(-6)}` : a;
+}
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
@@ -116,30 +190,26 @@ function closeSearch() {
 
 if (addressInput) addressInput.value = pendingAddress;
 
-if (searchBtn) {
-  searchBtn.addEventListener("click", () => {
-    if (!searchWrap.classList.contains("open")) openSearch();
-    else addressInput?.focus();
-  }, { passive: true });
-}
+searchBtn?.addEventListener("click", () => {
+  if (!searchWrap?.classList.contains("open")) openSearch();
+  else addressInput?.focus();
+}, { passive: true });
 
-if (addressInput) {
-  addressInput.addEventListener("focus", openSearch, { passive: true });
-  addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
+addressInput?.addEventListener("focus", openSearch, { passive: true });
+addressInput?.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
 
-  addressInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commitAddress(pendingAddress);
-      closeSearch();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      addressInput.value = address || "";
-      pendingAddress = address || "";
-      closeSearch();
-    }
-  });
-}
+addressInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    commitAddress(pendingAddress);
+    closeSearch();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    addressInput.value = address || "";
+    pendingAddress = address || "";
+    closeSearch();
+  }
+});
 
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
@@ -147,31 +217,21 @@ document.addEventListener("click", (e) => {
   closeSearch();
 });
 
-/* ================= DRAWER MENU ================= */
-const menuBtn = $("menuBtn");
-const backdrop = $("backdrop");
-const drawer = $("drawer");
-const drawerNav = $("drawerNav");
-const themeToggle = $("themeToggle");
-const liveToggle = $("liveToggle");
-const liveIcon = $("liveIcon");
-const modeHint = $("modeHint");
-
-let isDrawerOpen = false;
-
+/* ===================== DRAWER MENU (optional) ===================== */
+let drawerOpen = false;
 function openDrawer() {
-  isDrawerOpen = true;
+  drawerOpen = true;
   document.body.classList.add("drawer-open");
   drawer?.setAttribute("aria-hidden", "false");
   backdrop?.setAttribute("aria-hidden", "false");
 }
 function closeDrawer() {
-  isDrawerOpen = false;
+  drawerOpen = false;
   document.body.classList.remove("drawer-open");
   drawer?.setAttribute("aria-hidden", "true");
   backdrop?.setAttribute("aria-hidden", "true");
 }
-function toggleDrawer() { isDrawerOpen ? closeDrawer() : openDrawer(); }
+function toggleDrawer() { drawerOpen ? closeDrawer() : openDrawer(); }
 
 menuBtn?.addEventListener("click", toggleDrawer, { passive: true });
 backdrop?.addEventListener("click", closeDrawer, { passive: true });
@@ -180,58 +240,17 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDrawer();
 });
 
-function setActivePage(pageKey) {
-  const items = drawerNav?.querySelectorAll(".nav-item") || [];
-  items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
-}
 drawerNav?.addEventListener("click", (e) => {
   const btn = e.target?.closest(".nav-item");
   if (!btn) return;
-  setActivePage(btn.dataset.page || "dashboard");
+  // pagina futura: per ora solo evidenzia
+  const items = drawerNav.querySelectorAll(".nav-item");
+  items.forEach(x => x.classList.toggle("active", x === btn));
   closeDrawer();
 });
 
-themeToggle?.addEventListener("click", () => applyTheme(theme === "dark" ? "light" : "dark"), { passive: true });
-
-/* ================= STATE ================= */
-let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
-
-let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-
-/* Candle state */
-const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 },
-  w: { t: 0, open: 0, high: 0, low: 0 },
-  m: { t: 0, open: 0, high: 0, low: 0 },
-};
-const tfReady = { d: false, w: false, m: false };
-
-/* extremes flash */
-const lastExtremes = {
-  d: { low: null, high: null },
-  w: { low: null, high: null },
-  m: { low: null, high: null }
-};
-function flash(el) {
-  if (!el) return;
-  el.classList.remove("flash-yellow");
-  void el.offsetWidth;
-  el.classList.add("flash-yellow");
-}
-
-/* ================= FETCH ================= */
-async function fetchJSON(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-/* ================= SMOOTH DISPLAY ================= */
+/* ===================== SMOOTH DISPLAY ===================== */
+let settleStart = Date.now();
 function scrollSpeed() {
   const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
   const base = 0.08;
@@ -243,8 +262,7 @@ function tick(cur, tgt) {
   return cur + (tgt - cur) * scrollSpeed();
 }
 
-/* ================= COLORED DIGITS ================= */
-function fgColor() { return document.body.dataset.theme === "light" ? "#111827" : "#f9fafb"; }
+/* colored digits */
 function colorNumber(el, n, o, d) {
   if (!el) return;
   const ns = n.toFixed(d), os = o.toFixed(d);
@@ -255,7 +273,7 @@ function colorNumber(el, n, o, d) {
   }).join("");
 }
 
-/* ================= PERF ================= */
+/* ===================== PERFORMANCE ===================== */
 function pctChange(price, open) {
   const p = safe(price), o = safe(open);
   if (!o) return 0;
@@ -273,7 +291,7 @@ function updatePerf(arrowId, pctId, v) {
   pct.textContent = Math.abs(v).toFixed(2) + "%";
 }
 
-/* ================= BAR RENDER ================= */
+/* ===================== BAR RENDER ===================== */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   if (!bar || !line) return;
 
@@ -307,13 +325,50 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   }
 }
 
-/* ================= HEAT COLOR (Rewards bar) ================= */
+/* rewards bar heat */
 function heatColor(p) {
   const t = clamp(p, 0, 100) / 100;
   return `rgb(${14 + (239 - 14) * t},${165 - 165 * t},${233 - 233 * t})`;
 }
 
-/* ================= LIVE/REFRESH timers + sockets ================= */
+/* ===================== STATE ===================== */
+let targetPrice = 0;
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
+
+let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
+
+const candle = {
+  d: { t: 0, open: 0, high: 0, low: 0 },
+  w: { t: 0, open: 0, high: 0, low: 0 },
+  m: { t: 0, open: 0, high: 0, low: 0 },
+};
+const tfReady = { d: false, w: false, m: false };
+
+/* flash extremes (optional) */
+const lastExtremes = {
+  d: { low: null, high: null },
+  w: { low: null, high: null },
+  m: { low: null, high: null }
+};
+function flash(el) {
+  if (!el) return;
+  el.classList.remove("flash-yellow");
+  void el.offsetWidth;
+  el.classList.add("flash-yellow");
+}
+
+/* ===================== FETCH ===================== */
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/* ===================== TIMERS & SOCKETS ===================== */
 let accountPollTimer = null;
 let restSyncTimer = null;
 let chartSyncTimer = null;
@@ -330,7 +385,6 @@ function stopAllTimers() {
   if (chartSyncTimer) { clearInterval(chartSyncTimer); chartSyncTimer = null; }
   if (ensureChartTimer) { clearInterval(ensureChartTimer); ensureChartTimer = null; }
 }
-
 function startAllTimers() {
   stopAllTimers();
   accountPollTimer = setInterval(() => loadAccount(false), ACCOUNT_POLL_MS);
@@ -343,38 +397,443 @@ function stopAllSockets() {
   try { wsTrade?.close(); } catch {}
   try { wsKline?.close(); } catch {}
   wsTrade = null; wsKline = null;
+
   if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
   if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
+
   wsTradeOnline = false;
   wsKlineOnline = false;
 }
 
-function setMode(isLive) {
-  liveMode = !!isLive;
-  localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
-
-  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
-  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-
-  if (!liveMode) {
-    stopAllTimers();
-    stopAllSockets();
-    accountOnline = false;
-    refreshConnUI();
-  } else {
-    startAllTimers();
-    startTradeWS();
-    startKlineWS();
-    loadAccount(false);
-    loadCandleSnapshot(false);
-    loadChartToday(false);
-  }
+/* One-shot refresh (refresh mode) */
+async function oneShotRefresh() {
+  await loadCandleSnapshot(true);
+  await loadChartToday(true);
+  if (address) await loadAccount(true);
   refreshConnUI();
 }
 
-liveToggle?.addEventListener("click", () => setMode(!liveMode), { passive: true });
+/* ===================== ACCOUNT (Injective LCD) ===================== */
+let lastRewardsSeenForWithdraw = null;
+let lastStakeSeenForType = null;
+let lastRewardsSeenForType = null;
 
-/* ================= WS TRADE (price realtime) ================= */
+function inferStakeType(newStake, newRewards) {
+  if (lastStakeSeenForType == null) return "START";
+  const ds = safe(newStake) - safe(lastStakeSeenForType);
+  if (ds === 0) return null;
+
+  if (ds > 0) {
+    if (lastRewardsSeenForType != null) {
+      const dr = safe(lastRewardsSeenForType) - safe(newRewards);
+      if (dr > REWARD_WITHDRAW_THRESHOLD) return "COMPOUND";
+    }
+    return "DELEGATE";
+  }
+  return "UNDELEGATE";
+}
+
+async function loadAccount(forceOnce = false) {
+  if (!liveMode && !forceOnce) return;
+  if (!address || !hasInternet()) {
+    accountOnline = false;
+    refreshConnUI();
+    return;
+  }
+
+  const base = "https://lcd.injective.network";
+  const [b, s, r, i] = await Promise.all([
+    fetchJSON(`${base}/cosmos/bank/v1beta1/balances/${address}`),
+    fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`),
+    fetchJSON(`${base}/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
+    fetchJSON(`${base}/cosmos/mint/v1beta1/inflation`)
+  ]);
+
+  if (!b || !s || !r || !i) {
+    accountOnline = false;
+    refreshConnUI();
+    return;
+  }
+
+  accountOnline = true;
+  refreshConnUI();
+
+  availableInj = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
+  stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
+  rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
+  apr = safe(i.inflation) * 100;
+
+  // 1) record withdrawal event
+  if (lastRewardsSeenForWithdraw == null) lastRewardsSeenForWithdraw = rewardsInj;
+  const diff = safe(lastRewardsSeenForWithdraw) - safe(rewardsInj);
+  if (diff > REWARD_WITHDRAW_THRESHOLD) {
+    addRewardWithdrawalPoint(address, diff);
+  }
+  lastRewardsSeenForWithdraw = rewardsInj;
+
+  // 2) record stake point on EVERY change
+  const type = inferStakeType(stakeInj, rewardsInj);
+  addStakePoint(address, stakeInj, type || "");
+
+  lastStakeSeenForType = stakeInj;
+  lastRewardsSeenForType = rewardsInj;
+}
+
+/* ===================== BINANCE REST SNAPSHOT (1D/1W/1M) ===================== */
+async function loadCandleSnapshot(forceOnce = false) {
+  if (!liveMode && !forceOnce) return;
+  if (!hasInternet()) return;
+
+  const [d, w, m] = await Promise.all([
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1w&limit=1"),
+    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1M&limit=1"),
+  ]);
+
+  if (Array.isArray(d) && d[0]) {
+    candle.d.t = safe(d[0][0]);
+    candle.d.open = safe(d[0][1]);
+    candle.d.high = safe(d[0][2]);
+    candle.d.low  = safe(d[0][3]);
+    if (candle.d.open && Number.isFinite(candle.d.high) && Number.isFinite(candle.d.low)) tfReady.d = true;
+  }
+  if (Array.isArray(w) && w[0]) {
+    candle.w.t = safe(w[0][0]);
+    candle.w.open = safe(w[0][1]);
+    candle.w.high = safe(w[0][2]);
+    candle.w.low  = safe(w[0][3]);
+    if (candle.w.open && Number.isFinite(candle.w.high) && Number.isFinite(candle.w.low)) tfReady.w = true;
+  }
+  if (Array.isArray(m) && m[0]) {
+    candle.m.t = safe(m[0][0]);
+    candle.m.open = safe(m[0][1]);
+    candle.m.high = safe(m[0][2]);
+    candle.m.low  = safe(m[0][3]);
+    if (candle.m.open && Number.isFinite(candle.m.high) && Number.isFinite(candle.m.low)) tfReady.m = true;
+  }
+
+  const root = $("appRoot");
+  if (root && root.classList.contains("loading") && tfReady.d) {
+    root.classList.remove("loading");
+    root.classList.add("ready");
+  }
+}
+
+/* ===================== AUTO-LOAD ZOOM PLUGIN ===================== */
+async function ensureZoomPlugin() {
+  // If already available, try register
+  try {
+    if (window.Chart && window.ChartZoom) {
+      window.Chart.register(window.ChartZoom);
+      return;
+    }
+  } catch {}
+
+  // Load from CDN
+  await new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => resolve();
+    document.head.appendChild(s);
+  });
+
+  try {
+    if (window.Chart && window.ChartZoom) window.Chart.register(window.ChartZoom);
+  } catch {}
+}
+
+/* ===================== PRICE CHART 1D ===================== */
+let priceChart = null;
+let chartLabels = [];
+let chartData = [];
+let lastChartMinuteStart = 0;
+let chartBootstrappedToday = false;
+
+let hoverActive = false;
+let hoverIndex = null;
+let pinnedIndex = null;
+let lastChartSign = "neutral";
+
+const verticalLinePlugin = {
+  id: "verticalLinePlugin",
+  afterDraw(ch) {
+    if (!hoverActive || hoverIndex == null) return;
+    const meta = ch.getDatasetMeta(0);
+    const el = meta?.data?.[hoverIndex];
+    if (!el) return;
+
+    const ctx = ch.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(el.x, ch.chartArea.top);
+    ctx.lineTo(el.x, ch.chartArea.bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(250,204,21,0.9)";
+    ctx.stroke();
+    ctx.restore();
+  }
+};
+
+function applyPriceChartColorBySign(sign) {
+  if (!priceChart) return;
+  const ds = priceChart.data.datasets?.[0];
+  if (!ds) return;
+
+  if (sign === "up") {
+    ds.borderColor = "#22c55e";
+    ds.backgroundColor = "rgba(34,197,94,.20)";
+  } else if (sign === "down") {
+    ds.borderColor = "#ef4444";
+    ds.backgroundColor = "rgba(239,68,68,.18)";
+  } else {
+    ds.borderColor = "#3b82f6";
+    ds.backgroundColor = "rgba(59,130,246,.14)";
+  }
+  priceChart.update("none");
+}
+
+function updatePriceOverlayFromPinned() {
+  const chartEl = $("chartPrice");
+  const overlay = $("chartOverlay");
+  if (!chartEl || !overlay || !priceChart) return;
+
+  if (pinnedIndex == null) {
+    overlay.classList.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
+
+  const ds = priceChart.data.datasets?.[0]?.data || [];
+  const lbs = priceChart.data.labels || [];
+  if (!ds.length || !lbs.length) {
+    overlay.classList.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
+
+  let idx = clamp(Math.round(+pinnedIndex), 0, ds.length - 1);
+  const price = safe(ds[idx]);
+  const label = lbs[idx];
+  if (!Number.isFinite(price) || !label) {
+    overlay.classList.remove("show");
+    chartEl.textContent = "--";
+    return;
+  }
+
+  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
+  overlay.classList.add("show");
+}
+
+async function fetchKlines1mRange(startTime, endTime) {
+  const out = [];
+  let cursor = startTime;
+  const end = endTime || Date.now();
+
+  while (cursor < end && out.length < DAY_MINUTES) {
+    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
+    const d = await fetchJSON(url);
+    if (!Array.isArray(d) || !d.length) break;
+
+    out.push(...d);
+
+    const lastOpenTime = safe(d[d.length - 1][0]);
+    cursor = lastOpenTime + ONE_MIN_MS;
+
+    if (!lastOpenTime) break;
+    if (d.length < 1000) break;
+  }
+  return out.slice(0, DAY_MINUTES);
+}
+
+async function initPriceChart() {
+  await ensureZoomPlugin();
+
+  const canvas = $("priceChart");
+  if (!canvas || !window.Chart) return;
+
+  priceChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: chartLabels,
+      datasets: [{
+        data: chartData,
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59,130,246,.14)",
+        fill: true,
+        pointRadius: 0,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: "x",
+            threshold: 2,
+            onPanComplete: ({ chart }) => {
+              const xScale = chart.scales.x;
+              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
+              pinnedIndex = xScale.getValueForPixel(centerPx);
+              updatePriceOverlayFromPinned();
+            }
+          },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x",
+            onZoomComplete: ({ chart }) => {
+              const xScale = chart.scales.x;
+              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
+              pinnedIndex = xScale.getValueForPixel(centerPx);
+              updatePriceOverlayFromPinned();
+            }
+          }
+        }
+      },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    },
+    plugins: [verticalLinePlugin]
+  });
+
+  setupPriceChartInteractions();
+}
+
+function setupPriceChartInteractions() {
+  const canvas = $("priceChart");
+  if (!canvas || !priceChart) return;
+
+  const getIndexFromEvent = (evt) => {
+    const points = priceChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
+    if (!points || !points.length) return null;
+    return points[0].index;
+  };
+
+  const handleMove = (evt) => {
+    const idx = getIndexFromEvent(evt);
+    if (idx == null) return;
+
+    hoverActive = true;
+    hoverIndex = idx;
+
+    pinnedIndex = idx;
+    updatePriceOverlayFromPinned();
+    priceChart.update("none");
+  };
+
+  const handleLeave = () => {
+    hoverActive = false;
+    hoverIndex = null;
+    pinnedIndex = null;
+    updatePriceOverlayFromPinned();
+    priceChart.update("none");
+  };
+
+  canvas.addEventListener("mousemove", handleMove, { passive: true });
+  canvas.addEventListener("mouseleave", handleLeave, { passive: true });
+
+  canvas.addEventListener("touchstart", (e) => { handleMove(e); }, { passive: true });
+  canvas.addEventListener("touchmove", (e) => { handleMove(e); }, { passive: true });
+  canvas.addEventListener("touchend", handleLeave, { passive: true });
+  canvas.addEventListener("touchcancel", handleLeave, { passive: true });
+}
+
+async function loadChartToday(forceOnce = false) {
+  if (!liveMode && !forceOnce) return;
+  if (!hasInternet()) return;
+  if (!tfReady.d || !candle.d.t) return;
+
+  const kl = await fetchKlines1mRange(candle.d.t, Date.now());
+  if (!kl.length) return;
+
+  chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
+  chartData = kl.map(k => safe(k[4]));
+
+  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
+  const lastClose = safe(kl[kl.length - 1][4]);
+  if (!targetPrice && lastClose) targetPrice = lastClose;
+
+  if (!priceChart && window.Chart) await initPriceChart();
+  if (priceChart) {
+    priceChart.data.labels = chartLabels;
+    priceChart.data.datasets[0].data = chartData;
+    priceChart.update("none");
+  }
+
+  chartBootstrappedToday = true;
+}
+
+function updateChartFrom1mKline(k) {
+  if (!liveMode) return;
+  if (!priceChart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
+
+  const openTime = safe(k.t);
+  const close = safe(k.c);
+  if (!openTime || !close) return;
+  if (openTime < candle.d.t) return;
+
+  if (lastChartMinuteStart === openTime) {
+    const idx = priceChart.data.datasets[0].data.length - 1;
+    if (idx >= 0) {
+      priceChart.data.datasets[0].data[idx] = close;
+      priceChart.update("none");
+    }
+    return;
+  }
+
+  lastChartMinuteStart = openTime;
+
+  priceChart.data.labels.push(fmtHHMM(openTime));
+  priceChart.data.datasets[0].data.push(close);
+
+  while (priceChart.data.labels.length > DAY_MINUTES) priceChart.data.labels.shift();
+  while (priceChart.data.datasets[0].data.length > DAY_MINUTES) priceChart.data.datasets[0].data.shift();
+
+  priceChart.update("none");
+}
+
+async function resetDayAndReloadChart(nextOpenTime) {
+  chartBootstrappedToday = false;
+  chartLabels = [];
+  chartData = [];
+  lastChartMinuteStart = 0;
+
+  if (priceChart) {
+    priceChart.data.labels = [];
+    priceChart.data.datasets[0].data = [];
+    priceChart.update("none");
+  }
+
+  if (nextOpenTime) candle.d.t = nextOpenTime;
+
+  await loadCandleSnapshot(false);
+  await loadChartToday(false);
+
+  hoverActive = false;
+  hoverIndex = null;
+  pinnedIndex = null;
+  updatePriceOverlayFromPinned();
+}
+
+async function ensureChartBootstrapped() {
+  if (!liveMode) return;
+  if (chartBootstrappedToday) return;
+
+  if (!tfReady.d || !candle.d.t) await loadCandleSnapshot(false);
+  if (tfReady.d && candle.d.t) await loadChartToday(false);
+}
+
+/* ===================== BINANCE WS TRADE ===================== */
 function clearTradeRetry() { if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; } }
 function scheduleTradeRetry() {
   clearTradeRetry();
@@ -408,7 +867,7 @@ function startTradeWS() {
   };
 }
 
-/* ================= WS KLINES (1m chart + 1D/1W/1M bars) ================= */
+/* ===================== BINANCE WS KLINES ===================== */
 function clearKlineRetry() { if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; } }
 function scheduleKlineRetry() {
   clearKlineRetry();
@@ -496,610 +955,246 @@ function startKlineWS() {
   };
 }
 
-/* ================= ACCOUNT (Injective LCD) ================= */
-let lastRewardsSeenForWDetect = null;
-let lastStakeSeenForWDetect = null;
-
-async function loadAccount(forceOnce = false) {
-  if (!liveMode && !forceOnce) return;
-
-  if (!address || !hasInternet()) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
-
-  const base = "https://lcd.injective.network";
-  const [b, s, r, i] = await Promise.all([
-    fetchJSON(`${base}/cosmos/bank/v1beta1/balances/${address}`),
-    fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`),
-    fetchJSON(`${base}/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
-    fetchJSON(`${base}/cosmos/mint/v1beta1/inflation`)
-  ]);
-
-  if (!b || !s || !r || !i) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
-
-  accountOnline = true;
-  refreshConnUI();
-
-  const avail = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
-  const staked = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
-  const rw = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
-  const ap = safe(i.inflation) * 100;
-
-  availableInj = avail;
-  stakeInj = staked;
-  rewardsInj = rw;
-  apr = ap;
-
-  // reward withdrawal record
-  maybeRecordRewardWithdrawal(rewardsInj);
-
-  // stake point record + inferred label
-  const inferred = inferStakeEventLabel(stakeInj, rewardsInj);
-  maybeAddStakePoint(stakeInj, inferred);
-
-  lastRewardsSeenForWDetect = rewardsInj;
-  lastStakeSeenForWDetect = stakeInj;
-}
-
-/* Inference label:
-   - se stake aumenta e rewards cala -> COMPOUND (hai ritirato rewards e ributtato)
-   - se stake aumenta e rewards non cala -> DELEGATE (o add stake)
-   - se stake cala -> UNDELEGATE (o slashing/unbond)
-*/
-function inferStakeEventLabel(currStake, currRewards) {
-  const s = safe(currStake);
-  const r = safe(currRewards);
-
-  if (lastStakeSeenForWDetect == null) return "START";
-  const ds = s - safe(lastStakeSeenForWDetect);
-
-  if (Math.abs(ds) < 0.00001) return null;
-
-  if (ds > 0.00001) {
-    if (lastRewardsSeenForWDetect != null) {
-      const dr = safe(lastRewardsSeenForWDetect) - r;
-      if (dr > REWARD_WITHDRAW_THRESHOLD) return "COMPOUND";
-    }
-    return "DELEGATE";
-  }
-  return "UNDELEGATE";
-}
-
-/* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
-async function loadCandleSnapshot(forceOnce = false) {
-  if (!liveMode && !forceOnce) return;
-  if (!hasInternet()) return;
-
-  const [d, w, m] = await Promise.all([
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1w&limit=1"),
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1M&limit=1"),
-  ]);
-
-  if (Array.isArray(d) && d[0]) {
-    candle.d.t = safe(d[0][0]);
-    candle.d.open = safe(d[0][1]);
-    candle.d.high = safe(d[0][2]);
-    candle.d.low  = safe(d[0][3]);
-    if (candle.d.open && Number.isFinite(candle.d.high) && Number.isFinite(candle.d.low)) tfReady.d = true;
-  }
-  if (Array.isArray(w) && w[0]) {
-    candle.w.t = safe(w[0][0]);
-    candle.w.open = safe(w[0][1]);
-    candle.w.high = safe(w[0][2]);
-    candle.w.low  = safe(w[0][3]);
-    if (candle.w.open && Number.isFinite(candle.w.high) && Number.isFinite(candle.w.low)) tfReady.w = true;
-  }
-  if (Array.isArray(m) && m[0]) {
-    candle.m.t = safe(m[0][0]);
-    candle.m.open = safe(m[0][1]);
-    candle.m.high = safe(m[0][2]);
-    candle.m.low  = safe(m[0][3]);
-    if (candle.m.open && Number.isFinite(candle.m.high) && Number.isFinite(candle.m.low)) tfReady.m = true;
-  }
-
-  const root = $("appRoot");
-  if (root && root.classList.contains("loading") && tfReady.d) {
-    root.classList.remove("loading");
-    root.classList.add("ready");
-  }
-}
-
-/* ================= PRICE CHART (1D) ================= */
-let chart = null;
-let chartLabels = [];
-let chartData = [];
-let lastChartMinuteStart = 0;
-let chartBootstrappedToday = false;
-
-let hoverActive = false;
-let hoverIndex = null;
-let pinnedIndex = null;
-let isPanning = false;
-let lastChartSign = "neutral";
-
-/* Zoom plugin register (compatibilità) */
-(function ensureZoomRegistered() {
-  // Se il plugin CDN non è disponibile, niente pan/zoom (grafico comunque ok).
-  // Alcune build registrano automatico: quindi non facciamo errori.
-  try {
-    if (window.Chart && window.Chart.registry && window.ChartZoom) {
-      window.Chart.register(window.ChartZoom);
-    }
-  } catch {}
-})();
-
-const verticalLinePlugin = {
-  id: "verticalLinePlugin",
-  afterDraw(ch) {
-    if (!hoverActive || hoverIndex == null) return;
-    const meta = ch.getDatasetMeta(0);
-    const el = meta?.data?.[hoverIndex];
-    if (!el) return;
-
-    const ctx = ch.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(el.x, ch.chartArea.top);
-    ctx.lineTo(el.x, ch.chartArea.bottom);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(250,204,21,0.9)";
-    ctx.stroke();
-    ctx.restore();
-  }
-};
-
-function applyChartColorBySign(sign) {
-  if (!chart) return;
-  const ds = chart.data.datasets?.[0];
-  if (!ds) return;
-
-  if (sign === "up") {
-    ds.borderColor = "#22c55e";
-    ds.backgroundColor = "rgba(34,197,94,.20)";
-  } else if (sign === "down") {
-    ds.borderColor = "#ef4444";
-    ds.backgroundColor = "rgba(239,68,68,.18)";
-  } else {
-    ds.borderColor = "#3b82f6";
-    ds.backgroundColor = "rgba(59,130,246,.14)";
-  }
-  chart.update("none");
-}
-
-function updatePinnedOverlay() {
-  const overlay = $("chartOverlay");
-  const chartEl = $("chartPrice");
-  if (!overlay || !chartEl || !chart) return;
-
-  if (pinnedIndex == null) {
-    overlay.classList.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
-
-  const ds = chart.data.datasets?.[0]?.data || [];
-  const lbs = chart.data.labels || [];
-  if (!ds.length || !lbs.length) {
-    overlay.classList.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
-
-  let idx = Number.isFinite(+pinnedIndex) ? +pinnedIndex : null;
-  if (idx == null) {
-    overlay.classList.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
-  idx = clamp(Math.round(idx), 0, ds.length - 1);
-
-  const price = safe(ds[idx]);
-  const label = lbs[idx];
-  if (!Number.isFinite(price) || !label) {
-    overlay.classList.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
-
-  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
-  overlay.classList.add("show");
-}
-
-async function fetchKlines1mRange(startTime, endTime) {
-  const out = [];
-  let cursor = startTime;
-  const end = endTime || Date.now();
-
-  while (cursor < end && out.length < DAY_MINUTES) {
-    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
-    const d = await fetchJSON(url);
-    if (!Array.isArray(d) || !d.length) break;
-
-    out.push(...d);
-
-    const lastOpenTime = safe(d[d.length - 1][0]);
-    cursor = lastOpenTime + ONE_MIN_MS;
-
-    if (!lastOpenTime) break;
-    if (d.length < 1000) break;
-  }
-  return out.slice(0, DAY_MINUTES);
-}
-
-function initChartToday() {
-  const canvas = $("priceChart");
-  if (!canvas) return;
-
-  chart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: chartLabels,
-      datasets: [{
-        data: chartData,
-        borderColor: "#3b82f6",
-        backgroundColor: "rgba(59,130,246,.14)",
-        fill: true,
-        pointRadius: 0,
-        tension: 0.3
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false },
-        zoom: {
-          pan: {
-            enabled: true,
-            mode: "x",
-            threshold: 2,
-            onPanStart: () => { isPanning = true; },
-            onPanComplete: ({ chart }) => {
-              isPanning = false;
-              const xScale = chart.scales.x;
-              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(centerPx);
-              updatePinnedOverlay();
-            }
-          },
-          zoom: {
-            wheel: { enabled: true },
-            pinch: { enabled: true },
-            mode: "x",
-            onZoomComplete: ({ chart }) => {
-              const xScale = chart.scales.x;
-              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(centerPx);
-              updatePinnedOverlay();
-            }
-          }
-        }
-      },
-      interaction: { mode: "index", intersect: false },
-      scales: {
-        x: { display: false },
-        y: { ticks: { color: "#9ca3af" } }
-      }
-    },
-    plugins: [verticalLinePlugin]
-  });
-
-  setupChartInteractions();
-}
-
-async function loadChartToday(forceOnce = false) {
-  if (!liveMode && !forceOnce) return;
-  if (!hasInternet()) return;
-  if (!tfReady.d || !candle.d.t) return;
-
-  const kl = await fetchKlines1mRange(candle.d.t, Date.now());
-  if (!kl.length) return;
-
-  chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
-  chartData = kl.map(k => safe(k[4]));
-
-  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
-
-  const lastClose = safe(kl[kl.length - 1][4]);
-  if (!targetPrice && lastClose) targetPrice = lastClose;
-
-  if (!chart && window.Chart) initChartToday();
-  else if (chart) {
-    chart.data.labels = chartLabels;
-    chart.data.datasets[0].data = chartData;
-    chart.update("none");
-  }
-
-  chartBootstrappedToday = true;
-}
-
-function setupChartInteractions() {
-  const canvas = $("priceChart");
-  if (!canvas) return;
-
-  const getIndexFromEvent = (evt) => {
-    if (!chart) return null;
-    const points = chart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
-    if (!points || !points.length) return null;
-    return points[0].index;
-  };
-
-  const handleMove = (evt) => {
-    if (!chart) return;
-    if (isPanning) return;
-
-    const idx = getIndexFromEvent(evt);
-    if (idx == null) return;
-
-    hoverActive = true;
-    hoverIndex = idx;
-
-    pinnedIndex = idx;
-    updatePinnedOverlay();
-    chart.update("none");
-  };
-
-  const handleLeave = () => {
-    hoverActive = false;
-    hoverIndex = null;
-    pinnedIndex = null;
-    updatePinnedOverlay();
-    if (chart) chart.update("none");
-  };
-
-  canvas.addEventListener("mousemove", handleMove, { passive: true });
-  canvas.addEventListener("mouseleave", handleLeave, { passive: true });
-
-  canvas.addEventListener("touchstart", (e) => { handleMove(e); }, { passive: true });
-  canvas.addEventListener("touchmove", (e) => { handleMove(e); }, { passive: true });
-  canvas.addEventListener("touchend", handleLeave, { passive: true });
-  canvas.addEventListener("touchcancel", handleLeave, { passive: true });
-}
-
-async function ensureChartBootstrapped() {
-  if (!liveMode) return;
-  if (chartBootstrappedToday) return;
-  if (!tfReady.d || !candle.d.t) await loadCandleSnapshot(false);
-  if (tfReady.d && candle.d.t) await loadChartToday(false);
-}
-
-async function resetDayAndReloadChart(nextOpenTime) {
-  chartBootstrappedToday = false;
-  chartLabels = [];
-  chartData = [];
-  lastChartMinuteStart = 0;
-
-  if (chart) {
-    chart.data.labels = [];
-    chart.data.datasets[0].data = [];
-    chart.update("none");
-  }
-
-  if (nextOpenTime) candle.d.t = nextOpenTime;
-
-  await loadCandleSnapshot(false);
-  await loadChartToday(false);
-
-  hoverActive = false;
-  hoverIndex = null;
-  pinnedIndex = null;
-  updatePinnedOverlay();
-}
-
-function updateChartFrom1mKline(k) {
-  if (!liveMode) return;
-  if (!chart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
-
-  const openTime = safe(k.t);
-  const close = safe(k.c);
-  if (!openTime || !close) return;
-
-  if (openTime < candle.d.t) return;
-
-  if (lastChartMinuteStart === openTime) {
-    const idx = chart.data.datasets[0].data.length - 1;
-    if (idx >= 0) {
-      chart.data.datasets[0].data[idx] = close;
-      chart.update("none");
-    }
-    return;
-  }
-
-  lastChartMinuteStart = openTime;
-  chart.data.labels.push(fmtHHMM(openTime));
-  chart.data.datasets[0].data.push(close);
-
-  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
-  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
-
-  chart.update("none");
-}
-
-/* ================= STAKE CHART (saved points + labels) ================= */
-let stakeChart = null;
-let stakeLabels = [];
-let stakeData = [];
-let stakeTypes = [];
-let stakeBootstrapped = false;
-
-function stakeStoreKey(addr) {
+/* =========================================================
+   PERSISTENCE — Chunked append-only
+========================================================= */
+function storageBase(prefix, addr) {
   const a = (addr || "").trim();
-  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
+  return a ? `${prefix}_v${STORE_VER}_${a}` : null;
 }
-function stakeResetFlagKey(addr) {
-  const a = (addr || "").trim();
-  return a ? `inj_stake_reset_done_v${STAKE_LOCAL_VER}_${a}` : null;
+function metaKey(prefix, addr) {
+  const b = storageBase(prefix, addr);
+  return b ? `${b}__meta` : null;
 }
-
-function trimStakeSeries() {
-  const n = stakeData.length;
-  if (stakeLabels.length !== n) stakeLabels = stakeLabels.slice(0, n);
-  if (stakeTypes.length !== n) stakeTypes = stakeTypes.slice(0, n);
-
-  if (stakeData.length > STAKE_SERIES_MAX) {
-    stakeData = stakeData.slice(-STAKE_SERIES_MAX);
-    stakeLabels = stakeLabels.slice(-STAKE_SERIES_MAX);
-    stakeTypes = stakeTypes.slice(-STAKE_SERIES_MAX);
-  }
+function chunkKey(prefix, addr, idx) {
+  const b = storageBase(prefix, addr);
+  return b ? `${b}__chunk_${idx}` : null;
 }
-
-function saveStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-  trimStakeSeries();
+function readMeta(prefix, addr) {
+  const k = metaKey(prefix, addr);
+  if (!k) return { chunks: 0, total: 0 };
   try {
-    localStorage.setItem(key, JSON.stringify({
-      v: STAKE_LOCAL_VER,
-      t: Date.now(),
-      labels: stakeLabels,
-      data: stakeData,
-      types: stakeTypes
-    }));
-  } catch {}
-}
-
-function loadStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return false;
-
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
-
-    stakeLabels = Array.isArray(obj.labels) ? obj.labels : [];
-    stakeData = Array.isArray(obj.data) ? obj.data : [];
-    stakeTypes = Array.isArray(obj.types) ? obj.types : [];
-
-    if (stakeLabels.length !== stakeData.length) return false;
-    if (stakeTypes.length !== stakeData.length) {
-      stakeTypes = new Array(stakeData.length).fill("");
-    }
-
-    trimStakeSeries();
-    return true;
+    const raw = localStorage.getItem(k);
+    if (!raw) return { chunks: 0, total: 0 };
+    const m = JSON.parse(raw);
+    return {
+      chunks: Math.max(0, parseInt(m?.chunks || 0, 10)),
+      total: Math.max(0, parseInt(m?.total || 0, 10))
+    };
   } catch {
+    return { chunks: 0, total: 0 };
+  }
+}
+function writeMeta(prefix, addr, meta) {
+  const k = metaKey(prefix, addr);
+  if (!k) return true;
+  try {
+    localStorage.setItem(k, JSON.stringify(meta));
+    return true;
+  } catch (e) {
+    console.warn("[storage] META save failed (quota?)", e);
     return false;
   }
 }
+function readChunk(prefix, addr, idx) {
+  const k = chunkKey(prefix, addr, idx);
+  if (!k) return [];
+  try {
+    const raw = localStorage.getItem(k);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+function writeChunk(prefix, addr, idx, arr) {
+  const k = chunkKey(prefix, addr, idx);
+  if (!k) return true;
+  try {
+    localStorage.setItem(k, JSON.stringify(arr));
+    return true;
+  } catch (e) {
+    console.warn("[storage] CHUNK save failed (quota?)", e);
+    return false;
+  }
+}
+function appendPoint(prefix, addr, pointObj) {
+  const meta = readMeta(prefix, addr);
 
-function maybeResetStakeFromNowOnce() {
-  if (!address) return;
-  const flagK = stakeResetFlagKey(address);
-  if (!flagK) return;
+  let chunkIdx = Math.max(0, meta.chunks - 1);
+  let chunk = meta.chunks > 0 ? readChunk(prefix, addr, chunkIdx) : [];
 
-  const already = localStorage.getItem(flagK);
-  if (already === "1") return;
+  if (chunk.length >= CHUNK_SIZE || meta.chunks === 0) {
+    chunkIdx = meta.chunks;
+    chunk = [];
+    meta.chunks += 1;
+  }
 
-  // reset una sola volta per address: riparti da ora
-  stakeLabels = [];
-  stakeData = [];
-  stakeTypes = [];
+  chunk.push(pointObj);
+  meta.total += 1;
 
-  try { localStorage.removeItem(stakeStoreKey(address)); } catch {}
-  try { localStorage.setItem(flagK, "1"); } catch {}
+  const ok1 = writeChunk(prefix, addr, chunkIdx, chunk);
+  const ok2 = writeMeta(prefix, addr, meta);
 
-  stakeBootstrapped = false;
+  return ok1 && ok2;
+}
+function loadAllPoints(prefix, addr) {
+  const meta = readMeta(prefix, addr);
+  const out = [];
+  for (let i = 0; i < meta.chunks; i++) {
+    out.push(...readChunk(prefix, addr, i));
+  }
+  return out;
 }
 
-const stakePointLabelPlugin = {
-  id: "stakePointLabelPlugin",
-  afterDatasetsDraw(ch) {
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
+/* =========================================================
+   NO-OVERLAP WINDOWING
+========================================================= */
+function ensureReadableWindow(ch, minPxPerPoint, maxLabels = MAX_LABELS_VISIBLE) {
+  if (!ch) return;
+  const ds = ch.data.datasets?.[0];
+  const n = ds?.data?.length || 0;
+  if (n <= 1) return;
 
-    const meta = ch.getDatasetMeta(0);
-    const pts = meta?.data || [];
-    if (!pts.length) return;
+  const area = ch.chartArea;
+  if (!area || !area.width) return;
 
-    const xScale = ch.scales?.x;
-    let min = xScale?.min, max = xScale?.max;
-    const n = ds.data.length;
+  const maxByPx = Math.max(2, Math.floor(area.width / minPxPerPoint));
+  const maxVisible = Math.max(2, Math.min(maxByPx, maxLabels));
 
-    if (!Number.isFinite(min)) min = 0;
-    if (!Number.isFinite(max)) max = n - 1;
+  const xmax = n - 1;
+  const xScale = ch.scales?.x;
+  if (!xScale) return;
 
-    const visible = Math.max(0, Math.floor(max - min + 1));
-    if (visible > 22) return;
+  const curMin = Number.isFinite(xScale.min) ? xScale.min : 0;
+  const curMax = Number.isFinite(xScale.max) ? xScale.max : xmax;
+  const visibleNow = Math.floor(curMax - curMin + 1);
 
-    const ctx = ch.ctx;
-    const area = ch.chartArea;
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(area.left, area.top, area.width, area.height);
-    ctx.clip();
-
-    ctx.font = "800 11px Inter, sans-serif";
-    ctx.fillStyle = (document.body.dataset.theme === "light")
-      ? "rgba(17,24,39,0.82)"
-      : "rgba(249,250,251,0.90)";
-    ctx.textAlign = "center";
-
-    let drawn = 0;
-    const maxDraw = 14;
-
-    for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
-      if (drawn >= maxDraw) break;
-      const el = pts[i];
-      if (!el) continue;
-
-      const type = (stakeTypes[i] || "").toUpperCase();
-      if (!type) continue;
-
-      const x = Math.max(el.x, area.left + 28);
-      ctx.fillText(type, x, el.y - 10);
-      drawn++;
-    }
-
-    ctx.restore();
+  // se troppi punti visibili -> forza finestra leggibile sugli ultimi maxVisible
+  if (visibleNow > maxVisible) {
+    const xmin = Math.max(0, xmax - maxVisible + 1);
+    ch.options.scales.x.min = xmin;
+    ch.options.scales.x.max = xmax;
+    ch.update("none");
   }
-};
+}
 
-function initStakeChart() {
+/* =========================================================
+   LABEL PLUGIN — clipped inside chartArea (never invades Y axis)
+========================================================= */
+function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, sans-serif" }) {
+  return {
+    id,
+    afterDatasetsDraw(ch) {
+      const ds = ch.data.datasets?.[0];
+      if (!ds) return;
+
+      const meta = ch.getDatasetMeta(0);
+      const els = meta?.data || [];
+      if (!els.length) return;
+
+      const area = ch.chartArea;
+      if (!area) return;
+
+      const ctx = ch.ctx;
+      ctx.save();
+
+      // CLIP inside chart area => never touches Y axis column
+      ctx.beginPath();
+      ctx.rect(area.left, area.top, area.width, area.height);
+      ctx.clip();
+
+      ctx.font = font;
+      ctx.fillStyle = (document.body?.dataset?.theme === "light")
+        ? "rgba(17,24,39,0.88)"
+        : "rgba(249,250,251,0.92)";
+      ctx.textBaseline = "bottom";
+
+      const xScale = ch.scales?.x;
+      let min = Number.isFinite(xScale?.min) ? Math.floor(xScale.min) : 0;
+      let max = Number.isFinite(xScale?.max) ? Math.ceil(xScale.max) : (els.length - 1);
+      min = clamp(min, 0, els.length - 1);
+      max = clamp(max, 0, els.length - 1);
+
+      for (let i = min; i <= max; i++) {
+        const el = els[i];
+        if (!el) continue;
+
+        const label = getLabel(i, ds.data[i]);
+        if (!label) continue;
+
+        let x = el.x;
+        const y = el.y - 6;
+
+        const pad = 6;
+        const w = ctx.measureText(label).width;
+
+        if (x - w / 2 < area.left + pad) {
+          ctx.textAlign = "left";
+          x = area.left + pad;
+        } else if (x + w / 2 > area.right - pad) {
+          ctx.textAlign = "right";
+          x = area.right - pad;
+        } else {
+          ctx.textAlign = "center";
+        }
+
+        ctx.fillText(label, x, y);
+      }
+
+      ctx.restore();
+    }
+  };
+}
+
+/* =========================================================
+   STAKE CHART — all points, step=1, no overlap, persistence
+========================================================= */
+let stakeChart = null;
+let stakePoints = []; // {t,label,value,type}
+
+const stakeLabelPlugin = makeClippedPointLabelPlugin({
+  id: "stakeLabelPlugin",
+  getLabel: (i) => (stakePoints[i]?.type ? String(stakePoints[i].type).toUpperCase() : "")
+});
+
+async function initStakeChart() {
+  await ensureZoomPlugin();
+
   const canvas = $("stakeChart");
-  if (!canvas) return;
+  if (!canvas || !window.Chart) return;
 
   stakeChart = new Chart(canvas, {
     type: "line",
     data: {
-      labels: stakeLabels,
+      labels: stakePoints.map(p => p.label),
       datasets: [{
-        data: stakeData,
+        data: stakePoints.map(p => p.value),
         borderColor: "#22c55e",
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
-        pointRadius: 3.5,
-        pointHoverRadius: 6,
-        tension: 0.22
+        tension: 0.22,
+        pointRadius: 4,
+        pointHoverRadius: 7
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: { padding: { left: 12, right: 6, top: 6, bottom: 0 } },
+      layout: { padding: { left: 10, right: 6, top: 8, bottom: 0 } },
       plugins: {
         legend: { display: false },
         tooltip: {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => stakeLabels[items?.[0]?.dataIndex ?? 0] || "",
+            title: (items) => stakePoints[items?.[0]?.dataIndex ?? 0]?.label || "",
             label: (item) => {
               const i = item.dataIndex ?? 0;
-              const t = stakeTypes[i] ? ` • ${stakeTypes[i]}` : "";
-              return `Staked • ${safe(item.raw).toFixed(4)} INJ${t}`;
+              const t = stakePoints[i]?.type ? ` • ${stakePoints[i].type}` : "";
+              return `Staked • ${safe(item.raw).toFixed(6)} INJ${t}`;
             }
           }
         },
@@ -1110,247 +1205,111 @@ function initStakeChart() {
       },
       scales: {
         x: { display: false },
-        y: { ticks: { color: "#9ca3af", padding: 10 } }
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: "#9ca3af",
+            padding: 10,
+            stepSize: 1,
+            callback: (v) => String(Math.round(v))
+          }
+        }
       }
     },
-    plugins: [stakePointLabelPlugin]
+    plugins: [stakeLabelPlugin]
   });
+
+  ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE);
+
+  canvas.addEventListener("wheel", () => setTimeout(() => ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE), 0), { passive: true });
+  canvas.addEventListener("touchend", () => setTimeout(() => ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE), 0), { passive: true });
 }
 
-function drawStakeChart() {
-  if (!stakeChart && window.Chart) initStakeChart();
-  else if (stakeChart) {
-    stakeChart.data.labels = stakeLabels;
-    stakeChart.data.datasets[0].data = stakeData;
-    stakeChart.update("none");
-  }
+function redrawStakeChart() {
+  if (!stakeChart) return;
+  stakeChart.data.labels = stakePoints.map(p => p.label);
+  stakeChart.data.datasets[0].data = stakePoints.map(p => p.value);
+  stakeChart.update("none");
+  ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE);
 }
 
-function seedStakeStartIfEmpty(currentStake) {
-  const s = safe(currentStake);
-  if (!Number.isFinite(s)) return;
-
-  if (!stakeData.length) {
-    stakeLabels.push(nowLabel());
-    stakeData.push(s);
-    stakeTypes.push("START");
-    saveStakeSeries();
-  }
-}
-
-function maybeAddStakePoint(currentStake, typeLabel) {
-  const s = safe(currentStake);
-  if (!Number.isFinite(s)) return;
-
-  // Se non abbiamo mai fatto bootstrap, prova a caricare serie salvata
-  if (!stakeBootstrapped) {
-    const ok = loadStakeSeries();
-    stakeBootstrapped = true;
-    if (!ok) {
-      // se non c'è storico, crea seed con valore attuale
-      seedStakeStartIfEmpty(s);
-    }
-    drawStakeChart();
-  }
-
-  // se array vuoto comunque seed
-  seedStakeStartIfEmpty(s);
-
-  const last = safe(stakeData[stakeData.length - 1]);
-  const delta = s - last;
-
-  // Punto solo quando cambia in modo visibile
-  if (Math.abs(delta) < 0.00001) return;
-
-  // per te: quando aumenta -> pallino verde (qui punto), quando cala -> punto con label UNDELEGATE
-  const label = typeLabel || (delta > 0 ? "DELEGATE" : "UNDELEGATE");
-
-  stakeLabels.push(nowLabel());
-  stakeData.push(s);
-  stakeTypes.push(label);
-
-  trimStakeSeries();
-  saveStakeSeries();
-  drawStakeChart();
-}
-
-/* ================= REWARD WITHDRAWALS (persist + filter + live + timeline) ================= */
-let rewardChart = null;
-
-/* master arrays (saved) */
-let wdLabelsAll = [];
-let wdValuesAll = [];
-let wdTimesAll  = [];
-
-/* view arrays (filtered) */
-let wdLabels = [];
-let wdValues = [];
-let wdTimes  = [];
-
-let wdLastRewardsSeen = null;
-let wdMinFilter = 0; // INJ
-
-function wdStoreKey(addr) {
-  const a = (addr || "").trim();
-  return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
-}
-
-function trimWdAll() {
-  if (wdLabelsAll.length > REWARD_WD_SERIES_MAX) {
-    wdLabelsAll = wdLabelsAll.slice(-REWARD_WD_SERIES_MAX);
-    wdValuesAll = wdValuesAll.slice(-REWARD_WD_SERIES_MAX);
-    wdTimesAll  = wdTimesAll.slice(-REWARD_WD_SERIES_MAX);
-  }
-  const n = wdValuesAll.length;
-  if (wdLabelsAll.length !== n) wdLabelsAll = wdLabelsAll.slice(0, n);
-  if (wdTimesAll.length !== n)  wdTimesAll  = wdTimesAll.slice(0, n);
-}
-
-function saveWdAll() {
-  const key = wdStoreKey(address);
-  if (!key) return;
-  trimWdAll();
-  try {
-    localStorage.setItem(key, JSON.stringify({
-      v: REWARD_WD_LOCAL_VER,
-      t: Date.now(),
-      labels: wdLabelsAll,
-      values: wdValuesAll,
-      times: wdTimesAll
+function loadStakePointsForAddress(addr) {
+  stakePoints = loadAllPoints("inj_stake_points", addr)
+    .filter(p => p && Number.isFinite(+p.value))
+    .map(p => ({
+      t: safe(p.t) || 0,
+      label: p.label || "",
+      value: safe(p.value),
+      type: p.type || ""
     }));
-  } catch {}
 }
 
-function loadWdAll() {
-  const key = wdStoreKey(address);
-  if (!key) return false;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== REWARD_WD_LOCAL_VER) return false;
+function addStakePoint(addr, stakeValue, typeLabel) {
+  const s = safe(stakeValue);
+  if (!Number.isFinite(s)) return;
 
-    wdLabelsAll = Array.isArray(obj.labels) ? obj.labels : [];
-    wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
-    wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
-
-    if (wdLabelsAll.length !== wdValuesAll.length) return false;
-
-    trimWdAll();
-    rebuildWdView();
-    return true;
-  } catch {
-    return false;
+  if (stakePoints.length) {
+    const prev = safe(stakePoints[stakePoints.length - 1].value);
+    if (s === prev) return; // ogni cambiamento -> punto, identico -> no
   }
+
+  const point = { t: nowTS(), label: nowLabel(), value: s, type: typeLabel || "" };
+  stakePoints.push(point);
+
+  const ok = appendPoint("inj_stake_points", addr, point);
+  if (!ok) console.warn("[stake] localStorage quota? point NOT saved");
+
+  if (!stakeChart) initStakeChart().then(() => redrawStakeChart());
+  else redrawStakeChart();
 }
 
-function rebuildWdView() {
-  wdLabels = [];
-  wdValues = [];
-  wdTimes = [];
+/* =========================================================
+   REWARD WITHDRAWALS CHART — all points, label visible, no overlap, step=1, persistence
+========================================================= */
+let rewardChart = null;
+let rewardPoints = []; // {t,label,value}
 
-  for (let i = 0; i < wdValuesAll.length; i++) {
-    const v = safe(wdValuesAll[i]);
-    if (v >= wdMinFilter) {
-      wdLabels.push(wdLabelsAll[i]);
-      wdValues.push(v);
-      wdTimes.push(wdTimesAll[i] || 0);
-    }
+const rewardLabelPlugin = makeClippedPointLabelPlugin({
+  id: "rewardLabelPlugin",
+  getLabel: (i, v) => {
+    const val = safe(v);
+    if (!val) return "";
+    return `+${val.toFixed(4)} INJ`;
   }
+});
 
-  drawRewardWdChart();
-  syncRewardTimelineUI(true);
-}
+async function initRewardChart() {
+  await ensureZoomPlugin();
 
-/* ✅ plugin: CLIP dentro area chart -> non invade asse Y */
-const rewardPointLabelPlugin = {
-  id: "rewardPointLabelPlugin",
-  afterDatasetsDraw(ch) {
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
-
-    const meta = ch.getDatasetMeta(0);
-    const dataEls = meta?.data || [];
-    if (!dataEls.length) return;
-
-    const xScale = ch.scales?.x;
-    let min = xScale?.min;
-    let max = xScale?.max;
-
-    const n = ds.data.length;
-    if (!Number.isFinite(min)) min = 0;
-    if (!Number.isFinite(max)) max = n - 1;
-
-    const visibleCount = Math.max(0, Math.floor(max - min + 1));
-    if (visibleCount > 30) return;
-
-    const ctx = ch.ctx;
-    const area = ch.chartArea;
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(area.left, area.top, area.width, area.height);
-    ctx.clip();
-
-    ctx.font = "700 11px Inter, sans-serif";
-    ctx.fillStyle = (document.body.dataset.theme === "light")
-      ? "rgba(17,24,39,0.85)"
-      : "rgba(249,250,251,0.92)";
-    ctx.textAlign = "center";
-
-    let drawn = 0;
-    const maxDraw = 18;
-
-    for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
-      const el = dataEls[i];
-      if (!el) continue;
-      if (drawn >= maxDraw) break;
-
-      const v = safe(ds.data[i]);
-      if (!v) continue;
-
-      const x = Math.max(el.x, area.left + 26);
-      ctx.fillText(`+${v.toFixed(4)} INJ`, x, el.y - 10);
-      drawn++;
-    }
-
-    ctx.restore();
-  }
-};
-
-function initRewardWdChart() {
   const canvas = $("rewardChart");
-  if (!canvas) return;
+  if (!canvas || !window.Chart) return;
 
   rewardChart = new Chart(canvas, {
     type: "line",
     data: {
-      labels: wdLabels,
+      labels: rewardPoints.map(p => p.label),
       datasets: [{
-        data: wdValues,
+        data: rewardPoints.map(p => p.value),
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         tension: 0.25,
         pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: "#3b82f6",
-        pointBorderColor: "rgba(249,250,251,.6)",
-        pointBorderWidth: 1
+        pointHoverRadius: 7
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: { padding: { left: 12, right: 6, top: 6, bottom: 0 } },
+      layout: { padding: { left: 10, right: 6, top: 8, bottom: 0 } },
       plugins: {
         legend: { display: false },
         tooltip: {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => wdLabels[items?.[0]?.dataIndex ?? 0] || "",
+            title: (items) => rewardPoints[items?.[0]?.dataIndex ?? 0]?.label || "",
             label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
           }
         },
@@ -1360,235 +1319,105 @@ function initRewardWdChart() {
         }
       },
       scales: {
-        x: { ticks: { color: "rgba(156,163,175,.85)", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 } },
-        y: { ticks: { color: "#9ca3af", padding: 10 } }
+        x: { display: false },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: "#9ca3af",
+            padding: 10,
+            stepSize: 1,
+            callback: (v) => String(Math.round(v))
+          }
+        }
       }
     },
-    plugins: [rewardPointLabelPlugin]
+    plugins: [rewardLabelPlugin]
   });
+
+  ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD);
+
+  canvas.addEventListener("wheel", () => setTimeout(() => ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD), 0), { passive: true });
+  canvas.addEventListener("touchend", () => setTimeout(() => ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD), 0), { passive: true });
 }
 
-function drawRewardWdChart() {
-  if (!rewardChart && window.Chart) initRewardWdChart();
-  else if (rewardChart) {
-    rewardChart.data.labels = wdLabels;
-    rewardChart.data.datasets[0].data = wdValues;
-    rewardChart.update("none");
-  }
+function redrawRewardChart() {
+  if (!rewardChart) return;
+  rewardChart.data.labels = rewardPoints.map(p => p.label);
+  rewardChart.data.datasets[0].data = rewardPoints.map(p => p.value);
+  rewardChart.update("none");
+  ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD);
 }
 
-function syncRewardTimelineUI(forceToEnd=false) {
-  const slider = $("rewardTimeline");
-  const meta = $("rewardTimelineMeta");
-  if (!slider || !meta) return;
-
-  const n = wdValues.length;
-  if (!n) {
-    slider.min = 0; slider.max = 0; slider.value = 0;
-    meta.textContent = "—";
-    if (rewardChart) {
-      rewardChart.options.scales.x.min = undefined;
-      rewardChart.options.scales.x.max = undefined;
-      rewardChart.update("none");
-    }
-    return;
-  }
-
-  slider.min = 0;
-  slider.max = String(n - 1);
-  if (forceToEnd) slider.value = String(n - 1);
-
-  const idx = clamp(parseInt(slider.value || "0", 10), 0, n - 1);
-  const win = Math.min(60, n);
-  const minIdx = Math.max(0, idx - win + 1);
-  const maxIdx = idx;
-
-  if (rewardChart) {
-    rewardChart.options.scales.x.min = minIdx;
-    rewardChart.options.scales.x.max = maxIdx;
-    rewardChart.update("none");
-  }
-
-  const from = wdLabels[minIdx] || "";
-  const to = wdLabels[maxIdx] || "";
-  meta.textContent = n <= 1 ? `${to}` : `${from} → ${to}`;
+function loadRewardPointsForAddress(addr) {
+  rewardPoints = loadAllPoints("inj_reward_withdrawals", addr)
+    .filter(p => p && Number.isFinite(+p.value))
+    .map(p => ({
+      t: safe(p.t) || 0,
+      label: p.label || "",
+      value: safe(p.value)
+    }));
 }
 
-function attachRewardTimelineHandlers() {
-  const slider = $("rewardTimeline");
-  if (!slider) return;
-  slider.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
+function addRewardWithdrawalPoint(addr, amount) {
+  const v = safe(amount);
+  if (!Number.isFinite(v) || v <= 0) return;
+
+  const point = { t: nowTS(), label: nowLabel(), value: v };
+  rewardPoints.push(point);
+
+  const ok = appendPoint("inj_reward_withdrawals", addr, point);
+  if (!ok) console.warn("[reward] localStorage quota? point NOT saved");
+
+  if (!rewardChart) initRewardChart().then(() => redrawRewardChart());
+  else redrawRewardChart();
 }
 
-function goRewardLive() {
-  const slider = $("rewardTimeline");
-  if (slider) slider.value = String(Math.max(0, wdValues.length - 1));
-  if (rewardChart?.resetZoom) rewardChart.resetZoom();
-  syncRewardTimelineUI(true);
-}
-
-function attachRewardLiveHandler() {
-  const btn = $("rewardLiveBtn");
-  if (!btn) return;
-  btn.addEventListener("click", () => goRewardLive(), { passive: true });
-}
-
-function attachRewardFilterHandler() {
-  const sel = $("rewardFilter");
-  if (!sel) return;
-  sel.addEventListener("change", () => {
-    wdMinFilter = safe(sel.value);
-    rebuildWdView();
-    goRewardLive();
-  }, { passive: true });
-}
-
-function maybeRecordRewardWithdrawal(newRewards) {
-  const r = safe(newRewards);
-
-  if (wdLastRewardsSeen == null) {
-    wdLastRewardsSeen = r;
-    return;
-  }
-
-  const diff = wdLastRewardsSeen - r;
-  if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    wdTimesAll.push(nowTS());
-    wdLabelsAll.push(nowLabel());
-    wdValuesAll.push(diff);
-
-    trimWdAll();
-    saveWdAll();
-    rebuildWdView();
-    goRewardLive();
-  }
-
-  wdLastRewardsSeen = r;
-}
-
-/* ================= ADDRESS COMMIT ================= */
-async function commitAddress(newAddr) {
+/* ===================== ADDRESS COMMIT ===================== */
+function commitAddress(newAddr) {
   const a = (newAddr || "").trim();
   if (!a) return;
 
   address = a;
   pendingAddress = a;
   localStorage.setItem("inj_address", address);
-
   setAddressDisplay(address);
+
+  // reset smoothing
   settleStart = Date.now();
+  displayed.available = 0;
+  displayed.stake = 0;
+  displayed.rewards = 0;
 
-  // reset visuals
-  availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
-  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
+  // reset withdraw detector
+  lastRewardsSeenForWithdraw = null;
 
-  // reset detectors
-  wdLastRewardsSeen = null;
-  lastRewardsSeenForWDetect = null;
-  lastStakeSeenForWDetect = null;
+  // load charts from storage for this address (no loss)
+  loadStakePointsForAddress(address);
+  loadRewardPointsForAddress(address);
 
-  // stake: reset "da ora" UNA SOLA VOLTA per address (come richiesto) poi rimane salvato
-  maybeResetStakeFromNowOnce();
-  const loadedStake = loadStakeSeries();
-  stakeBootstrapped = true;
-  if (!loadedStake) seedStakeStartIfEmpty(stakeInj);
-  drawStakeChart();
+  if (stakeChart) redrawStakeChart(); else initStakeChart().then(() => redrawStakeChart());
+  if (rewardChart) redrawRewardChart(); else initRewardChart().then(() => redrawRewardChart());
 
-  // reward withdrawals load
-  wdMinFilter = safe($("rewardFilter")?.value || 0);
-  loadWdAll();
-  rebuildWdView();
-  goRewardLive();
-
-  // fetch now depending on mode
+  // refresh data
   if (liveMode) {
-    await loadAccount(false);
+    loadAccount(false);
     startTradeWS();
     startKlineWS();
   } else {
-    await loadAccount(true);
+    oneShotRefresh().catch(() => {});
   }
 
   refreshConnUI();
 }
 
-/* ================= ONLINE / OFFLINE listeners ================= */
-window.addEventListener("online", () => {
-  refreshConnUI();
-  if (!liveMode) return;
-  try { startTradeWS(); } catch {}
-  try { startKlineWS(); } catch {}
-  try { loadAccount(false); } catch {}
-}, { passive: true });
-
-window.addEventListener("offline", () => {
-  wsTradeOnline = false;
-  wsKlineOnline = false;
-  accountOnline = false;
-  refreshConnUI();
-}, { passive: true });
-
-/* ================= BOOT ================= */
-(async function boot() {
-  refreshConnUI();
-
-  // initial UI
-  if (addressInput) addressInput.value = pendingAddress;
-  setAddressDisplay(address);
-
-  // reward ui handlers
-  attachRewardTimelineHandlers();
-  attachRewardLiveHandler();
-  attachRewardFilterHandler();
-
-  // mode icons
-  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
-  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-
-  // stake init
-  if (address) {
-    maybeResetStakeFromNowOnce();
-    loadStakeSeries();
-    stakeBootstrapped = true;
-    drawStakeChart();
-  }
-
-  // reward init
-  if (address) {
-    wdMinFilter = safe($("rewardFilter")?.value || 0);
-    loadWdAll();
-    rebuildWdView();
-    goRewardLive();
-  }
-
-  if (liveMode) {
-    await loadCandleSnapshot(false);
-    await loadChartToday(false);
-    startTradeWS();
-    startKlineWS();
-    if (address) await loadAccount(false);
-    startAllTimers();
-  } else {
-    // REFRESH: carica tutto UNA volta al refresh pagina
-    stopAllTimers();
-    stopAllSockets();
-
-    await loadCandleSnapshot(true);
-    await loadChartToday(true);
-    if (address) await loadAccount(true);
-
-    refreshConnUI();
-  }
-})();
-
-/* ================= LOOP (UI animate) ================= */
+/* ===================== MAIN ANIMATION LOOP ===================== */
 function animate() {
-  /* PRICE */
+  /* PRICE card */
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  /* PERFORMANCE */
+  /* PERF */
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -1597,14 +1426,14 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* CHART COLOR by 24h sign */
+  /* price chart color by 24h sign */
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "neutral");
   if (sign !== lastChartSign) {
     lastChartSign = sign;
-    applyChartColorBySign(sign);
+    applyPriceChartColorBySign(sign);
   }
 
-  /* BARS gradients (1D red/green, 1W blue-ish, 1M orange/pink) */
+  /* bars gradients */
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
@@ -1616,7 +1445,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* Values under bars + flash if extreme changes */
+  /* bar numbers + flash extremes */
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -1670,86 +1499,104 @@ function animate() {
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
-  $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
+  const availableUsd = $("availableUsd");
+  if (availableUsd) availableUsd.textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
 
   /* STAKE */
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-  $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
+  const stakeUsd = $("stakeUsd");
+  if (stakeUsd) stakeUsd.textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
 
   const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
-  $("stakeBar").style.width = stakePct + "%";
-  $("stakeLine").style.left = stakePct + "%";
-  $("stakePercent").textContent = stakePct.toFixed(1) + "%";
-  $("stakeMin").textContent = "0";
-  $("stakeMax").textContent = String(STAKE_TARGET_MAX);
+  const stakeBar = $("stakeBar");
+  const stakeLine = $("stakeLine");
+  const stakePercent = $("stakePercent");
+  if (stakeBar) stakeBar.style.width = stakePct + "%";
+  if (stakeLine) stakeLine.style.left = stakePct + "%";
+  if (stakePercent) stakePercent.textContent = stakePct.toFixed(1) + "%";
+
+  const stakeMin = $("stakeMin");
+  const stakeMax = $("stakeMax");
+  if (stakeMin) stakeMin.textContent = "0";
+  if (stakeMax) stakeMax.textContent = String(STAKE_TARGET_MAX);
 
   /* REWARDS */
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
-  $("rewardsUsd").textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
+  const rewardsUsd = $("rewardsUsd");
+  if (rewardsUsd) rewardsUsd.textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
 
   const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
 
-  $("rewardBar").style.width = rp + "%";
-  $("rewardLine").style.left = rp + "%";
-  $("rewardPercent").textContent = rp.toFixed(1) + "%";
-  $("rewardBar").style.background = heatColor(rp);
-  $("rewardMin").textContent = "0";
-  $("rewardMax").textContent = maxR.toFixed(1);
+  const rewardBar = $("rewardBar");
+  const rewardLine = $("rewardLine");
+  const rewardPercent = $("rewardPercent");
+  if (rewardBar) {
+    rewardBar.style.width = rp + "%";
+    rewardBar.style.background = heatColor(rp);
+  }
+  if (rewardLine) rewardLine.style.left = rp + "%";
+  if (rewardPercent) rewardPercent.textContent = rp.toFixed(1) + "%";
 
-  /* APR + update */
-  $("apr").textContent = safe(apr).toFixed(2) + "%";
-  $("updated").textContent = "Last update: " + nowLabel();
+  const rewardMin = $("rewardMin");
+  const rewardMax = $("rewardMax");
+  if (rewardMin) rewardMin.textContent = "0";
+  if (rewardMax) rewardMax.textContent = maxR.toFixed(1);
+
+  /* APR */
+  const aprEl = $("apr");
+  if (aprEl) aprEl.textContent = safe(apr).toFixed(2) + "%";
+
+  /* Updated */
+  const upd = $("updated");
+  if (upd) upd.textContent = "Last update: " + nowLabel();
 
   requestAnimationFrame(animate);
 }
-animate();
 
-/* ================= SEARCH SUBMIT HOOK (in caso) ================= */
-function bindSearchCommitFallback() {
-  // Se user scrive e non preme invio, può aprire menu ecc: commit solo con invio.
-  // (già gestito sopra)
-}
-bindSearchCommitFallback();
+/* ===================== BOOT ===================== */
+(async function boot() {
+  // initial UI
+  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
+  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
+  setAddressDisplay(address);
+  refreshConnUI();
 
-/* ================= START TIMERS / BOOT HELPERS ================= */
-function startAllTimers() {
-  stopAllTimers();
-  accountPollTimer = setInterval(() => loadAccount(false), ACCOUNT_POLL_MS);
-  restSyncTimer = setInterval(() => loadCandleSnapshot(false), REST_SYNC_MS);
-  chartSyncTimer = setInterval(() => loadChartToday(false), CHART_SYNC_MS);
-  ensureChartTimer = setInterval(ensureChartBootstrapped, 1500);
-}
+  // load saved points for current address (no loss)
+  if (address) {
+    loadStakePointsForAddress(address);
+    loadRewardPointsForAddress(address);
+    // init charts
+    await initStakeChart();
+    await initRewardChart();
+    redrawStakeChart();
+    redrawRewardChart();
+  }
 
-/* ================= One-shot load in refresh mode ================= */
-async function oneShotRefresh() {
+  // load price snapshots + chart once
   await loadCandleSnapshot(true);
   await loadChartToday(true);
-  if (address) await loadAccount(true);
-  refreshConnUI();
-}
 
-/* ================= Initial address (if exists) ================= */
-setAddressDisplay(address);
+  // mode start
+  if (liveMode) {
+    startTradeWS();
+    startKlineWS();
+    startAllTimers();
+    if (address) loadAccount(false);
+  } else {
+    stopAllTimers();
+    stopAllSockets();
+    if (address) await loadAccount(true);
+    refreshConnUI();
+  }
 
-/* If user already has an address stored, ensure commit logic sets charts properly */
-if (address) {
-  // rebuild stake chart saved
-  maybeResetStakeFromNowOnce();
-  loadStakeSeries();
-  stakeBootstrapped = true;
-  drawStakeChart();
+  // start UI loop
+  animate();
+})();
 
-  // rebuild reward chart saved
-  wdMinFilter = safe($("rewardFilter")?.value || 0);
-  loadWdAll();
-  rebuildWdView();
-  goRewardLive();
-}
-
-/* Expose commitAddress for debugging (optional) */
+/* expose commitAddress for debug */
 window.commitAddress = commitAddress;
