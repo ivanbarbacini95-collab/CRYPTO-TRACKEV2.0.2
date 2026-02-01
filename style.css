@@ -52,12 +52,77 @@ body {
   100% { transform: scale(1); opacity: 0.8; }
 }
 
-#addressInput {
-  padding: 0.8rem;
-  border-radius: 0.5rem;
-  border: 2px solid #4b5563;
+/* ===== SEARCH: lente che si allunga ===== */
+.search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   background: #0a0f1f;
+  border: 2px solid #4b5563;
+  border-radius: 999px;
+  padding: 0.38rem 0.45rem;
+  height: 46px;
+  width: 52px;              /* COLLASSATO (solo lente) */
+  overflow: hidden;
+  transition: width 240ms ease, border-color 240ms ease, box-shadow 240ms ease;
+}
+
+.search-wrap.open {
+  width: 100%;
+  border-color: rgba(34,197,94,0.55);
+  box-shadow: 0 0 0 4px rgba(34,197,94,0.08);
+}
+
+.search-btn {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
   color: #f9fafb;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.search-btn:active { transform: scale(0.98); }
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: #f9fafb;
+  font-size: 0.95rem;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.search-wrap.open .search-input {
+  opacity: 1;
+  transform: translateX(0px);
+}
+
+/* indirizzo confermato sotto */
+.address-display {
+  font-size: 0.86rem;
+  color: rgba(249,250,251,0.72);
+  margin-top: -0.25rem;
+  padding-left: 0.25rem;
+  min-height: 18px;
+}
+.address-display .tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+.address-display .tag strong {
+  color: rgba(249,250,251,0.92);
+  font-weight: 800;
+  letter-spacing: 0.2px;
 }
 
 .cards-wrapper {
@@ -143,7 +208,7 @@ body {
   transition: left 0.25s ease;
 }
 
-/* timeframe label DENTRO la barra (solo price bars, perché stake/reward la nascondono) */
+/* timeframe label DENTRO la barra */
 .bar-label {
   position: absolute;
   left: 50%;
@@ -176,9 +241,7 @@ body {
 
 /* reward */
 .reward-container { height: 26px; }
-.reward-fill {
-  background: linear-gradient(to right, #0ea5e9, #3b82f6);
-}
+.reward-fill { background: linear-gradient(to right, #0ea5e9, #3b82f6); }
 
 .reward-percent {
   position: absolute;
@@ -195,9 +258,8 @@ body {
 
 /* STAKE bar */
 .stake-container { height: 26px; }
-.stake-fill {
-  background: linear-gradient(to right, #22c55e, #10b981);
-}
+.stake-fill { background: linear-gradient(to right, #22c55e, #10b981); }
+
 .stake-percent {
   position: absolute;
   left: 50%;
@@ -233,7 +295,7 @@ body {
   height: 100% !important;
 }
 
-/* overlay: mostra solo quando interagisci (classe .show) */
+/* overlay: show only during interaction */
 .chart-overlay {
   position: absolute;
   top: 12px;
@@ -295,9 +357,8 @@ body {
 }
 
 /* ===== Flash giallo per ATH/ATL laterali ===== */
-.flash-yellow {
-  animation: flashYellow 700ms ease;
-}
+.flash-yellow { animation: flashYellow 700ms ease; }
+
 @keyframes flashYellow {
   0%   { color: #facc15; transform: scale(1.08); text-shadow: 0 0 12px rgba(250,204,21,.35); }
   50%  { color: #facc15; transform: scale(1.12); text-shadow: 0 0 18px rgba(250,204,21,.45); }
