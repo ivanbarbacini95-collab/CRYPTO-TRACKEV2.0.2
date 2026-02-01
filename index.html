@@ -6,9 +6,9 @@
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <!-- Chart.js zoom/pan plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Zoom/Pan plugin (per grafico price + reward) -->
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
 
   <script src="app.js" defer></script>
@@ -18,26 +18,27 @@
 <div class="container loading" id="appRoot">
 
   <div class="header">
-
     <div class="header-grid">
+
       <!-- LEFT: MENU (bigger) -->
       <div class="header-left">
         <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
       </div>
 
-      <!-- CENTER: TITLE (always centered) -->
+      <!-- CENTER: TITLE -->
       <div class="header-center">
         <h1>Injective <span class="dot">•</span> Portfolio</h1>
         <div class="subtitle">Realtime staking & rewards dashboard</div>
       </div>
 
-      <!-- RIGHT: SEARCH (lens centered right) -->
+      <!-- RIGHT: SEARCH -->
       <div class="header-right">
         <div class="search-wrap" id="searchWrap">
           <input id="addressInput" placeholder="inj..." autocomplete="off" />
           <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
         </div>
       </div>
+
     </div>
 
     <!-- META: wallet + status (small, under right icons) -->
@@ -49,7 +50,6 @@
         <span class="status-text" id="statusText">Offline</span>
       </div>
     </div>
-
   </div>
 
   <div class="cards-wrapper">
@@ -159,12 +159,28 @@
         <span id="rewardMax" class="right">0.1</span>
       </div>
 
-      <!-- NEW: Reward Withdrawals chart -->
+      <!-- Reward Withdrawals chart -->
       <div class="reward-chart-wrap">
         <canvas id="rewardChart"></canvas>
       </div>
 
-      <!-- NEW: timeline to scroll back -->
+      <!-- Tools -->
+      <div class="reward-tools">
+        <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
+
+        <div class="mini-select-wrap">
+          <span class="mini-select-label">Filtro</span>
+          <select id="rewardFilter" class="mini-select">
+            <option value="0">Tutti</option>
+            <option value="0.0005">≥ 0.0005</option>
+            <option value="0.001">≥ 0.001</option>
+            <option value="0.002">≥ 0.002</option>
+            <option value="0.005">≥ 0.005</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Timeline -->
       <div class="reward-timeline">
         <input id="rewardTimeline" type="range" min="0" max="0" value="0" />
         <div class="reward-timeline-meta" id="rewardTimelineMeta">—</div>
@@ -177,7 +193,7 @@
       <div class="value-row"><span id="apr">0%</span></div>
     </div>
 
-    <!-- CHART -->
+    <!-- 1D PRICE CHART -->
     <div class="card chart-card">
       <div class="label">1D Price Chart</div>
 
@@ -191,7 +207,7 @@
   </div>
 
   <div id="updated" class="last-update">Last update: --:--</div>
-
 </div>
+
 </body>
 </html>
