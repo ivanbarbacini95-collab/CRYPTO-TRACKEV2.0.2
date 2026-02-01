@@ -143,7 +143,7 @@ body {
   transition: left 0.25s ease;
 }
 
-/* ✅ TIMEFRAME sempre leggibile: centrato in alto, sopra al fill */
+/* TIMEFRAME sempre leggibile: centrato in alto, sopra al fill */
 .bar-label {
   position: absolute;
   left: 50%;
@@ -194,6 +194,29 @@ body {
 
 /* nasconde scritta REWARD dentro la barra */
 .reward-card .bar-label { display: none; }
+
+/* staked */
+.stake-container { height: 26px; }
+.stake-fill {
+  background: linear-gradient(to right, #22c55e, #10b981);
+}
+.stake-percent {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.8rem;
+  font-weight: bold;
+  text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+}
+.stake-chart-wrap {
+  height: 170px;
+  margin-top: 0.65rem;
+}
+#stakeChart {
+  width: 100% !important;
+  height: 100% !important;
+}
 
 /* CHART */
 .chart-card {
