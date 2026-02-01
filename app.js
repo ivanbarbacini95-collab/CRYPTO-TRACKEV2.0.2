@@ -62,10 +62,10 @@ let lastChartMinuteStart = 0;
 
 let chartBootstrappedToday = false;
 
-/* Hover interaction state */
+/* Hover interaction state (solo per vertical line) */
 let hoverActive = false;
 let hoverIndex = null;
-let hoverPrice = null;
+let hoverPrice = null; // mantenuto per compatibilità, non mostrato in UI
 
 /* Color state (performance daily) */
 let lastChartSign = "neutral";
@@ -125,7 +125,7 @@ function updatePerf(arrowId, pctId, v) {
 
 /* ================= BAR RENDER =================
    - open è al centro (marker CSS)
-   - bar fill: da centro verso dx (verde) se val>=open, oppure verso sx (rosso) se val<open
+   - bar fill: da centro verso dx (positivo) oppure verso sx (negativo)
    - bar-line gialla: posizione del prezzo reale (val)
 */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
@@ -149,7 +149,6 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   const pos = clamp(((val - min) / (max - min)) * 100, 0, 100);
   const center = 50;
 
-  // linea gialla = prezzo reale
   line.style.left = pos + "%";
 
   if (val >= open) {
@@ -679,21 +678,27 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* BARS con gradient diversi (1W e 1M NON usano verde/rosso del giornaliero) */
-  const upGradD = "linear-gradient(to right,#22c55e,#10b981)";
-  const dnGradD = "linear-gradient(to left,#ef4444,#f87171)";
+  /* ===== BARS – GRADIENT MOLTO DECISI E DISTINTI ===== */
+  /* 1D — GREEN vs RED (classico, potente) */
+  const upGradD = "linear-gradient(90deg,#16a34a 0%,#22c55e 50%,#4ade80 100%)";
+  const dnGradD = "linear-gradient(270deg,#b91c1c 0%,#ef4444 50%,#fb7185 100%)";
 
-  // 1W: palette fredda (azzurro -> blu) / palette calda (ambra -> viola)
-  const upGradW = "linear-gradient(to right,#22d3ee,#3b82f6)";
-  const dnGradW = "linear-gradient(to left,#f59e0b,#8b5cf6)";
+  /* 1W — ICE vs FIRE (freddo / caldo) */
+  const upGradW = "linear-gradient(90deg,#06b6d4 0%,#0ea5e9 50%,#2563eb 100%)";
+  const dnGradW = "linear-gradient(270deg,#f97316 0%,#f59e0b 50%,#fde047 100%)";
 
-  // 1M: palette “neon” (fucsia -> viola) / palette “tramonto” (arancio -> rosa)
-  const upGradM = "linear-gradient(to right,#f472b6,#a855f7)";
-  const dnGradM = "linear-gradient(to left,#fb923c,#ec4899)";
+  /* 1M — NEON PURPLE vs ELECTRIC MAGENTA */
+  const upGradM = "linear-gradient(90deg,#7c3aed 0%,#a855f7 50%,#e879f9 100%)";
+  const dnGradM = "linear-gradient(270deg,#be185d 0%,#ec4899 50%,#fb7185 100%)";
 
-  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, upGradD, dnGradD);
-  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, upGradW, dnGradW);
-  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, upGradM, dnGradM);
+  renderBar($("priceBar"), $("priceLine"),
+    targetPrice, candle.d.open, candle.d.low, candle.d.high, upGradD, dnGradD);
+
+  renderBar($("weekBar"), $("weekLine"),
+    targetPrice, candle.w.open, candle.w.low, candle.w.high, upGradW, dnGradW);
+
+  renderBar($("monthBar"), $("monthLine"),
+    targetPrice, candle.m.open, candle.m.low, candle.m.high, upGradM, dnGradM);
 
   /* Values under bars */
   $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
@@ -733,6 +738,7 @@ function animate() {
   $("rewardLine").style.left = rp + "%";
   $("rewardPercent").textContent = rp.toFixed(1) + "%";
 
+  /* reward: gradient più deciso + heat */
   const heat = heatColor(rp);
   $("rewardBar").style.background = `linear-gradient(90deg, ${heat} 0%, #2563eb 45%, #7c3aed 100%)`;
 
