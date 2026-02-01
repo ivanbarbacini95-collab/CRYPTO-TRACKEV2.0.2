@@ -3,13 +3,14 @@ const INITIAL_SETTLE_TIME = 2800; // ms
 let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
-const PRICE_POLL_MS = 60000;
+const BINANCE_24H_POLL_MS = 5000;   // più frequente: % e OHLC 24h ultra allineati
+const TF_POLL_MS = 60000;           // 7D/30D refresh
 
 /* Rolling windows */
-const WEEK_HOURS = 24 * 7;        // 168
-const MONTH_HOURS = 24 * 30;      // 720
-const WEEK_INTERVAL = "1h";       // 168 candles
-const MONTH_INTERVAL = "2h";      // 360 candles
+const WEEK_HOURS = 24 * 7;          // 168
+const MONTH_HOURS = 24 * 30;        // 720
+const WEEK_INTERVAL = "1h";         // 168 candles
+const MONTH_INTERVAL = "2h";        // 360 candles
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -38,17 +39,23 @@ function refreshConnUI() {
 /* ================= STATE ================= */
 let address = localStorage.getItem("inj_address") || "";
 
-let targetPrice = 0; // prezzo REALE live
+/* Live price (WS) */
+let targetPrice = 0;                 // prezzo REALE live WS (Binance trade)
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
+
+/* Account */
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
-/* Rolling OHLC */
+/* 24H (Binance OFFICIAL) */
 let price24hOpen = 0, price24hLow = 0, price24hHigh = 0;
+let binance24hLast = 0;              // lastPrice del 24hr ticker
+let binance24hPct = 0;               // priceChangePercent del 24hr ticker (ESATTO Binance)
+
+/* 7D / 30D (Binance klines rolling) */
 let priceWeekOpen = 0, priceWeekLow = 0, priceWeekHigh = 0;
 let priceMonthOpen = 0, priceMonthLow = 0, priceMonthHigh = 0;
 
-/* SOLO per animazione visiva */
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
-
+/* Chart */
 let chart = null, chartData = [];
 let ws = null;
 let wsRetryTimer = null;
@@ -88,13 +95,14 @@ function updatePerf(arrowId, pctId, v) {
 }
 
 /* ================= BAR RENDER =================
-   open sempre al centro (50%), linea = pos reale prezzo
+   - open sempre al centro (50%)
+   - linea = posizione reale del prezzo sulla barra
+   - fill tira dal centro in verde/rosso
 */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   open = safe(open); low = safe(low); high = safe(high); val = safe(val);
   if (!open || !low || !high || high === low) return;
 
-  // range simmetrico attorno a open
   const range = Math.max(Math.abs(high - open), Math.abs(open - low));
   const min = open - range;
   const max = open + range;
@@ -168,82 +176,80 @@ async function loadAccount() {
 loadAccount();
 setInterval(loadAccount, ACCOUNT_POLL_MS);
 
-/* ================= BINANCE DATA ================= */
-async function klines(interval, limit) {
-  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${limit}`;
-  const j = await fetchJSON(url);
-  return Array.isArray(j) ? j : [];
-}
-
-function calcOHLCFromKlines(d) {
-  return {
-    open: safe(d[0]?.[1]),
-    high: Math.max(...d.map(x => safe(x[2]))),
-    low: Math.min(...d.map(x => safe(x[3]))),
-    close: safe(d.at(-1)?.[4]),
-  };
-}
-
-/* --- 24H ROLLING EXACT (Binance ticker/24hr) --- */
-async function load24hTicker() {
+/* ================= BINANCE 24H OFFICIAL =================
+   Usa esattamente gli stessi numeri che vedi su Binance:
+   openPrice / highPrice / lowPrice / lastPrice / priceChangePercent
+*/
+async function loadBinance24h() {
   const t = await fetchJSON("https://api.binance.com/api/v3/ticker/24hr?symbol=INJUSDT");
   if (!t) return;
 
   price24hOpen = safe(t.openPrice);
   price24hHigh = safe(t.highPrice);
-  price24hLow = safe(t.lowPrice);
+  price24hLow  = safe(t.lowPrice);
 
-  // lastPrice rolling 24h
-  targetPrice = safe(t.lastPrice) || targetPrice;
-}
+  binance24hLast = safe(t.lastPrice);
+  binance24hPct  = safe(t.priceChangePercent); // ESATTO BINANCE
 
-/* --- 24H chart source (1m x 1440) for visual chart only --- */
-async function loadChart24h() {
-  const d = await klines("1m", 1440);
-  if (!d.length) return;
+  // fallback prezzo se WS non è ancora partito
+  if (!targetPrice && binance24hLast) targetPrice = binance24hLast;
 
-  chartData = d.map(x => safe(x[4]));
-  const lastClose = safe(d.at(-1)?.[4]);
-  if (lastClose) targetPrice = lastClose;
-
-  if (!chart && window.Chart) initChart();
-
+  // stop shimmer quando abbiamo almeno dati prezzo
   const root = $("appRoot");
-  root.classList.remove("loading");
-  root.classList.add("ready");
+  if (root && root.classList.contains("loading")) {
+    root.classList.remove("loading");
+    root.classList.add("ready");
+  }
+}
+loadBinance24h();
+setInterval(loadBinance24h, BINANCE_24H_POLL_MS);
+
+/* ================= BINANCE TF (7D/30D) ================= */
+async function klines(interval, limit) {
+  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${limit}`;
+  const j = await fetchJSON(url);
+  return Array.isArray(j) ? j : [];
+}
+function calcOHLCFromKlines(d) {
+  return {
+    open: safe(d[0]?.[1]),
+    high: Math.max(...d.map(x => safe(x[2]))),
+    low:  Math.min(...d.map(x => safe(x[3]))),
+    close: safe(d.at(-1)?.[4]),
+  };
 }
 
-/* --- Rolling 7D and 30D exact --- */
 async function loadRollingTF() {
-  // 7D: 1h * 168
   const w = await klines(WEEK_INTERVAL, WEEK_HOURS);
   if (w.length) {
     const o = calcOHLCFromKlines(w);
     priceWeekOpen = o.open;
     priceWeekHigh = o.high;
-    priceWeekLow = o.low;
+    priceWeekLow  = o.low;
   }
 
-  // 30D: 2h * 360 (30 giorni)
   const m = await klines(MONTH_INTERVAL, MONTH_HOURS / 2);
   if (m.length) {
     const o = calcOHLCFromKlines(m);
     priceMonthOpen = o.open;
     priceMonthHigh = o.high;
-    priceMonthLow = o.low;
+    priceMonthLow  = o.low;
   }
 }
-
-/* Initial loads + intervals */
-load24hTicker();
-loadChart24h();
 loadRollingTF();
+setInterval(loadRollingTF, TF_POLL_MS);
 
-setInterval(load24hTicker, PRICE_POLL_MS);
-setInterval(loadChart24h, PRICE_POLL_MS);
-setInterval(loadRollingTF, PRICE_POLL_MS);
+/* ================= CHART (24H visual) ================= */
+async function loadChart24h() {
+  const d = await klines("1m", 1440);
+  if (!d.length) return;
 
-/* ================= CHART ================= */
+  chartData = d.map(x => safe(x[4]));
+  if (!chart && window.Chart) initChart();
+}
+loadChart24h();
+setInterval(loadChart24h, TF_POLL_MS);
+
 function initChart() {
   const canvas = $("priceChart");
   if (!canvas) return;
@@ -320,18 +326,12 @@ function startWS() {
     const p = safe(JSON.parse(e.data).p);
     if (!p) return;
 
-    targetPrice = p;
-
-    // aggiorno chart live
+    targetPrice = p;      // live tick
     updateChart(p);
 
-    // aggiorno i rolling high/low "al volo" senza aspettare il refresh:
-    if (price24hHigh) price24hHigh = Math.max(price24hHigh, p);
-    if (price24hLow)  price24hLow  = Math.min(price24hLow, p);
-
-    if (priceWeekHigh) priceWeekHigh = Math.max(priceWeekHigh, p);
-    if (priceWeekLow)  priceWeekLow  = Math.min(priceWeekLow, p);
-
+    // aggiorniamo anche hi/low “live” per week/month (migliora reattività)
+    if (priceWeekHigh)  priceWeekHigh  = Math.max(priceWeekHigh, p);
+    if (priceWeekLow)   priceWeekLow   = Math.min(priceWeekLow, p);
     if (priceMonthHigh) priceMonthHigh = Math.max(priceMonthHigh, p);
     if (priceMonthLow)  priceMonthLow  = Math.min(priceMonthLow, p);
   };
@@ -340,13 +340,16 @@ startWS();
 
 /* ================= LOOP ================= */
 function animate() {
-  /* PRICE (visual smooth) */
+  /* PRICE (visual smooth, WS) */
   const prevDisp = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, prevDisp, 4);
 
-  /* PERFORMANCE (REAL rolling) */
-  const p24 = pctChange(targetPrice, price24hOpen);
+  /* ===== PERFORMANCE =====
+     24H: ESATTO Binance (priceChangePercent)
+     7D/30D: da Binance klines rolling con prezzo live WS
+  */
+  const p24 = binance24hPct; // esatto Binance
   const pW  = pctChange(targetPrice, priceWeekOpen);
   const pM  = pctChange(targetPrice, priceMonthOpen);
 
@@ -354,8 +357,13 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* BARS (REAL rolling) */
-  renderBar($("priceBar"), $("priceLine"), targetPrice, price24hOpen, price24hLow, price24hHigh,
+  /* ===== BARS =====
+     24H: usa lastPrice del 24hr ticker (stessa base di Binance)
+     7D/30D: usa prezzo live WS
+  */
+  const barPrice24 = binance24hLast || targetPrice;
+
+  renderBar($("priceBar"), $("priceLine"), barPrice24, price24hOpen, price24hLow, price24hHigh,
     "linear-gradient(to right,#22c55e,#10b981)",
     "linear-gradient(to left,#ef4444,#f87171)");
 
@@ -367,6 +375,7 @@ function animate() {
     "linear-gradient(to right,#8b5cf6,#c084fc)",
     "linear-gradient(to left,#6b21a8,#c084fc)");
 
+  /* Values under bars */
   $("priceMin").textContent  = safe(price24hLow).toFixed(3);
   $("priceOpen").textContent = safe(price24hOpen).toFixed(3);
   $("priceMax").textContent  = safe(price24hHigh).toFixed(3);
