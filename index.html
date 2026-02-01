@@ -18,7 +18,7 @@
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
     <!-- Connection Status -->
-    <div class="connection-status offline" id="connectionStatus">
+    <div class="connection-status" id="connectionStatus">
       <span class="status-dot"></span>
       <span class="status-text">Offline</span>
     </div>
@@ -75,13 +75,6 @@
 
     <div class="card chart-card">
       <div class="label">24h Price Chart</div>
-
-      <!-- compare solo quando interagisci col grafico -->
-      <div id="chartHover" class="chart-hover hidden">
-        <span id="chartHoverTime">--:--</span>
-        <span id="chartHoverPrice">$0.0000</span>
-      </div>
-
       <canvas id="priceChart"></canvas>
     </div>
 
