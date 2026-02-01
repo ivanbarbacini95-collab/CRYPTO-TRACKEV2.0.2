@@ -89,7 +89,6 @@ body {
   text-align: right;
 }
 
-/* performance row */
 .perf {
   display: flex;
   justify-content: flex-end;
@@ -112,10 +111,8 @@ body {
   background: #111827;
   border-radius: 0.35rem;
   overflow: hidden;
-
-  /* ⬇️ spacing "ancora un pelo" */
-  margin-top: 0.7rem;       /* prima 0.55rem */
-  margin-bottom: 0.15rem;   /* aria sotto la barra */
+  margin-top: 0.7rem;
+  margin-bottom: 0.15rem;
 }
 
 .bar-fill {
@@ -148,9 +145,7 @@ body {
   color: #9ca3af;
   position: relative;
   height: 18px;
-
-  /* ⬇️ spacing "ancora un pelo" */
-  margin-top: 0.5rem;     /* prima 0.35rem */
+  margin-top: 0.5rem;
   padding-bottom: 0.2rem;
 }
 
@@ -158,9 +153,8 @@ body {
 .bar-values .center { position: absolute; left: 50%; transform: translateX(-50%); }
 .bar-values .right { position: absolute; right: 0; }
 
-/* maggiore separazione tra i 3 blocchi (24H/W/M) dentro price card */
-.price-card .perf { margin-top: 0.35rem; }       /* prima 0.25rem */
-.price-card .bar-values { margin-bottom: 0.65rem; } /* prima 0.45rem */
+.price-card .perf { margin-top: 0.35rem; }
+.price-card .bar-values { margin-bottom: 0.65rem; }
 
 /* reward */
 .reward-container { height: 26px; }
@@ -178,8 +172,10 @@ body {
   text-shadow: 0 1px 10px rgba(0,0,0,0.55);
 }
 
-.reward-values { margin-bottom: 0; }
+/* nasconde scritta REWARD dentro la barra */
+.reward-card .bar-label { display: none; }
 
+/* CHART */
 .chart-card { height: 300px; }
 
 #priceChart {
@@ -191,4 +187,43 @@ body {
   font-size: 0.8rem;
   text-align: center;
   color: #9ca3af;
+}
+
+/* ===== Elegant initial loading ===== */
+.container.loading .value-row span,
+.container.loading .sub-row,
+.container.loading .bar-values {
+  opacity: 0;
+}
+
+.container.loading .card {
+  position: relative;
+  overflow: hidden;
+}
+
+.container.loading .card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    rgba(255,255,255,0.00) 25%,
+    rgba(255,255,255,0.06) 35%,
+    rgba(255,255,255,0.00) 45%
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.1s infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.container.ready .value-row span,
+.container.ready .sub-row,
+.container.ready .bar-values {
+  opacity: 1;
+  transition: opacity 450ms ease;
 }
