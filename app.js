@@ -1,753 +1,521 @@
 /* ================= CONFIG ================= */
-const INITIAL_SETTLE_TIME = 2800; // ms
+const LCD_BASE = "https://sentry.lcd.injective.network:443";
+const BINANCE_REST = "https://api.binance.com";
+const BINANCE_WS_BASE = "wss://stream.binance.com:9443/ws";
+
+const SYMBOL = "INJUSDT";
+const STREAM_TRADE = "injusdt@trade";
+const STREAM_KLINE = "injusdt@kline_5m";
+
+const ACCOUNT_POLL_MS = 5000;
+const TICKER24H_POLL_MS = 15000;
+const CHART_SYNC_MS = 60000;
+
+const INJ_DECIMALS = 18;
+
+const INITIAL_SETTLE_TIME = 3200;
 let settleStart = Date.now();
-
-const ACCOUNT_POLL_MS = 2000;
-const REST_SYNC_MS = 60000;     // safety sync candele 1D/1W/1M
-const CHART_SYNC_MS = 60000;    // safety sync grafico giornata
-
-const DAY_MINUTES = 24 * 60;
-const ONE_MIN_MS = 60_000;
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
 
-function pad2(n) { return String(n).padStart(2, "0"); }
-function fmtHHMM(ms) {
+function pad2(n){ return String(n).padStart(2, "0"); }
+function fmtHHMM(ms){
   const d = new Date(ms);
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+function nowMs(){ return Date.now(); }
 
-/* ================= CONNECTION UI ================= */
-const statusDot = $("statusDot");
-const statusText = $("statusText");
+function fmtNum(n, decimals){
+  const x = safe(n);
+  return x.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+function fmtUsd(n){
+  const x = safe(n);
+  return x.toLocaleString("en-US", { style:"currency", currency:"USD" });
+}
+function injFromBaseAmount(amountStr){
+  return safe(amountStr) / 10 ** INJ_DECIMALS;
+}
+
+function setConnection(online){
+  const box = $("connectionStatus");
+  if(!box) return;
+  box.classList.toggle("online", !!online);
+  box.classList.toggle("offline", !online);
+  box.querySelector(".status-text").textContent = online ? "Online" : "Offline";
+}
+
+function addPulse(el, dir){
+  if(!el) return;
+  el.classList.remove("pulse-up","pulse-down");
+  void el.offsetWidth;
+  el.classList.add(dir === "up" ? "pulse-up" : "pulse-down");
+}
+
+function tweenNumber(el, toValue, decimals, opts={}){
+  if(!el) return;
+  const from = safe(el.dataset._v ?? el.textContent.replace(/,/g,""));
+  const to = safe(toValue);
+
+  const inSettle = (nowMs() - settleStart) < INITIAL_SETTLE_TIME;
+  const duration = opts.duration ?? (inSettle ? 950 : 420);
+
+  const start = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+
+  function frame(ts){
+    const t = clamp((ts - start) / duration, 0, 1);
+    const v = from + (to - from) * ease(t);
+    el.textContent = fmtNum(v, decimals);
+    if(t < 1) requestAnimationFrame(frame);
+    else el.dataset._v = String(to);
+  }
+  requestAnimationFrame(frame);
+}
+
+function isValidInjAddress(a){
+  return /^inj1[0-9a-z]{30,90}$/i.test((a||"").trim());
+}
+
+/* ================= DOM ================= */
+const elAddress = $("addressInput");
+
+const elPrice = $("price");
+const elPrice24h = $("price24h");
+
+const elAvail = $("available");
+const elAvailUsd = $("availableUsd");
+
+const elStake = $("stake");
+const elStakeUsd = $("stakeUsd");
+
+const elRewards = $("rewards");
+const elRewardsUsd = $("rewardsUsd");
+
+const elApr = $("apr");
+const elUpdated = $("updated");
+
+const elPriceMin = $("priceMin");
+const elPriceMax = $("priceMax");
+const elPriceOpen = $("priceOpen");
+
+const elPriceBar = $("priceBar");
+const elPriceLine = $("priceLine");
+
+const elRewardBar = $("rewardBar");
+const elRewardPercent = $("rewardPercent");
+
+/* Badge top-right */
+const elChartBadge = $("chartBadge");
+const elChartBadgeTime = $("chartBadgeTime");
+const elChartBadgePrice = $("chartBadgePrice");
+
+/* ================= STATE ================= */
+let address = "";
+let wsTrade = null;
+let wsKline = null;
 
 let wsTradeOnline = false;
 let wsKlineOnline = false;
-let accountOnline = false;
 
-function refreshConnUI() {
-  const ok = wsTradeOnline && wsKlineOnline && accountOnline;
-  statusText.textContent = ok ? "Online" : "Offline";
-  statusDot.style.background = ok ? "#22c55e" : "#ef4444";
-}
+let lastRestOkAt = 0;
+let lastPrice = 0;
 
-/* ================= STATE ================= */
-let address = localStorage.getItem("inj_address") || "";
+let price24h = { changePercent:0, high:0, low:0, open:0 };
 
-/* live price */
-let targetPrice = 0; // prezzo reale (trade WS)
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
-
-/* Injective account */
-let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-
-/* Candle state (current candles) */
-const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 }, // 1D (t = openTime ms)
-  w: { t: 0, open: 0, high: 0, low: 0 }, // 1W
-  m: { t: 0, open: 0, high: 0, low: 0 }, // 1M
-};
-
-/* Ready flags (evita barre “-100” all’avvio) */
-const tfReady = { d: false, w: false, m: false };
-
-/* ================= CHART ================= */
 let chart = null;
-let chartLabels = [];
-let chartData = [];
-let lastChartMinuteStart = 0;
+let chartData = []; // [{t, c}]
 
-let chartBootstrappedToday = false;
+let lastAvail = 0, lastStake = 0, lastRew = 0;
 
-/* Hover interaction state */
-let hoverActive = false;
-let hoverIndex = null;      // indice selezionato
-let hoverPrice = null;      // valore al punto
-
-/* Overlay price (top-right) */
-let displayedChartPrice = 0;
-
-/* Color state (performance daily) */
-let lastChartSign = "neutral";
-
-/* ws */
-let wsTrade = null;
-let wsKline = null;
-let tradeRetryTimer = null;
-let klineRetryTimer = null;
-
-/* ================= SMOOTH DISPLAY ================= */
-function scrollSpeed() {
-  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
-  return t < 1 ? 0.12 + t * 0.55 : 0.85;
-}
-function tick(cur, tgt) {
-  if (!Number.isFinite(tgt)) return cur;
-  return cur + (tgt - cur) * scrollSpeed();
+function allOnline(){
+  const restOk = (nowMs() - lastRestOkAt) < 20000;
+  return (wsTradeOnline || wsKlineOnline) && restOk;
 }
 
-/* ================= COLORED DIGITS ================= */
-function colorNumber(el, n, o, d) {
-  const ns = n.toFixed(d), os = o.toFixed(d);
-  if (ns === os) {
-    el.textContent = ns;
-    return;
-  }
-  el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : "#f9fafb";
-    return `<span style="color:${col}">${c}</span>`;
-  }).join("");
-}
-
-/* ================= PERF ================= */
-function pctChange(price, open) {
-  const p = safe(price), o = safe(open);
-  if (!o) return 0;
-  const v = ((p - o) / o) * 100;
-  return Number.isFinite(v) ? v : 0;
-}
-
-function updatePerf(arrowId, pctId, v) {
-  const arrow = $(arrowId), pct = $(pctId);
-
-  if (v > 0) { arrow.textContent = "▲"; arrow.className = "arrow up"; pct.className = "pct up"; }
-  else if (v < 0) { arrow.textContent = "▼"; arrow.className = "arrow down"; pct.className = "pct down"; }
-  else { arrow.textContent = "►"; arrow.className = "arrow flat"; pct.className = "pct flat"; }
-
-  pct.textContent = Math.abs(v).toFixed(2) + "%";
-}
-
-/* ================= BAR RENDER ================= */
-function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
-  open = safe(open); low = safe(low); high = safe(high); val = safe(val);
-
-  if (!open || !low || !high || high === low) {
-    line.style.left = "50%";
-    bar.style.left = "50%";
-    bar.style.width = "0%";
-    bar.style.background = "rgba(255,255,255,0.08)";
-    return;
-  }
-
-  const range = Math.max(Math.abs(high - open), Math.abs(open - low));
-  const min = open - range;
-  const max = open + range;
-
-  const pos = clamp(((val - min) / (max - min)) * 100, 0, 100);
-  const center = 50;
-
-  line.style.left = pos + "%";
-
-  if (val >= open) {
-    bar.style.left = center + "%";
-    bar.style.width = Math.max(0, pos - center) + "%";
-    bar.style.background = gradUp;
-  } else {
-    bar.style.left = pos + "%";
-    bar.style.width = Math.max(0, center - pos) + "%";
-    bar.style.background = gradDown;
-  }
-}
-
-/* ================= HEAT COLOR (Rewards) ================= */
-function heatColor(p) {
-  const t = clamp(p, 0, 100) / 100;
-  return `rgb(${14 + (239 - 14) * t},${165 - 165 * t},${233 - 233 * t})`;
-}
-
-/* ================= FETCH ================= */
-async function fetchJSON(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-/* ================= ADDRESS ================= */
-$("addressInput").value = address;
-$("addressInput").oninput = (e) => {
-  address = e.target.value.trim();
-  localStorage.setItem("inj_address", address);
-  settleStart = Date.now();
-  loadAccount();
-};
-
-/* ================= ACCOUNT (Injective LCD) ================= */
-async function loadAccount() {
-  if (!address) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
-
-  const base = "https://lcd.injective.network";
-  const [b, s, r, i] = await Promise.all([
-    fetchJSON(`${base}/cosmos/bank/v1beta1/balances/${address}`),
-    fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`),
-    fetchJSON(`${base}/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
-    fetchJSON(`${base}/cosmos/mint/v1beta1/inflation`)
-  ]);
-
-  if (!b || !s || !r || !i) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
-
-  accountOnline = true;
-  refreshConnUI();
-
-  availableInj = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
-  stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
-  rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
-  apr = safe(i.inflation) * 100;
-}
-loadAccount();
-setInterval(loadAccount, ACCOUNT_POLL_MS);
-
-/* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
-async function loadCandleSnapshot() {
-  const [d, w, m] = await Promise.all([
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1d&limit=1"),
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1w&limit=1"),
-    fetchJSON("https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1M&limit=1"),
-  ]);
-
-  if (Array.isArray(d) && d[0]) {
-    candle.d.t = safe(d[0][0]);
-    candle.d.open = safe(d[0][1]);
-    candle.d.high = safe(d[0][2]);
-    candle.d.low  = safe(d[0][3]);
-    if (candle.d.open && candle.d.high && candle.d.low) tfReady.d = true;
-  }
-  if (Array.isArray(w) && w[0]) {
-    candle.w.t = safe(w[0][0]);
-    candle.w.open = safe(w[0][1]);
-    candle.w.high = safe(w[0][2]);
-    candle.w.low  = safe(w[0][3]);
-    if (candle.w.open && candle.w.high && candle.w.low) tfReady.w = true;
-  }
-  if (Array.isArray(m) && m[0]) {
-    candle.m.t = safe(m[0][0]);
-    candle.m.open = safe(m[0][1]);
-    candle.m.high = safe(m[0][2]);
-    candle.m.low  = safe(m[0][3]);
-    if (candle.m.open && candle.m.high && candle.m.low) tfReady.m = true;
-  }
-
-  const root = $("appRoot");
-  if (root && root.classList.contains("loading") && tfReady.d) {
-    root.classList.remove("loading");
-    root.classList.add("ready");
-  }
-}
-setInterval(loadCandleSnapshot, REST_SYNC_MS);
-
-/* ================= CHART: vertical line plugin (solo quando hoverActive) ================= */
-const verticalLinePlugin = {
-  id: "verticalLinePlugin",
-  afterDraw(ch) {
-    if (!hoverActive || hoverIndex == null) return;
-
-    const meta = ch.getDatasetMeta(0);
-    const el = meta?.data?.[hoverIndex];
-    if (!el) return;
-
-    const ctx = ch.ctx;
-    const x = el.x;
-    const topY = ch.chartArea.top;
-    const bottomY = ch.chartArea.bottom;
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, topY);
-    ctx.lineTo(x, bottomY);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(250, 204, 21, 0.9)";
-    ctx.stroke();
-    ctx.restore();
-  }
-};
-
-function applyChartColorBySign(sign) {
-  if (!chart) return;
-  const ds = chart.data.datasets[0];
-  if (!ds) return;
-
-  if (sign === "up") {
-    ds.borderColor = "#22c55e";
-    ds.backgroundColor = "rgba(34,197,94,.20)";
-  } else if (sign === "down") {
-    ds.borderColor = "#ef4444";
-    ds.backgroundColor = "rgba(239,68,68,.18)";
-  } else {
-    ds.borderColor = "#9ca3af";
-    ds.backgroundColor = "rgba(156,163,175,.12)";
-  }
-  chart.update("none");
-}
-
-/* ================= CHART: giornata corrente (REST bootstrap) ================= */
-async function fetchKlines1mRange(startTime, endTime) {
-  const out = [];
-  let cursor = startTime;
-  const end = endTime || Date.now();
-
-  while (cursor < end && out.length < DAY_MINUTES) {
-    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${end}`;
-    const d = await fetchJSON(url);
-    if (!Array.isArray(d) || !d.length) break;
-
-    out.push(...d);
-
-    const lastOpenTime = safe(d[d.length - 1][0]);
-    cursor = lastOpenTime + ONE_MIN_MS;
-
-    if (!lastOpenTime) break;
-    if (d.length < 1000) break;
-  }
-  return out.slice(0, DAY_MINUTES);
-}
-
-function initChartToday() {
-  const canvas = $("priceChart");
-  if (!canvas) return;
-
-  chart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: chartLabels,
-      datasets: [{
-        data: chartData,
-        borderColor: "#9ca3af",
-        backgroundColor: "rgba(156,163,175,.12)",
-        fill: true,
-        pointRadius: 0,
-        tension: 0.3
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false } // IMPORTANT: niente prezzo vicino alla linea
-      },
-      interaction: { mode: "index", intersect: false },
-      scales: {
-        x: { display: false },
-        y: { ticks: { color: "#9ca3af" } }
-      }
-    },
-    plugins: [verticalLinePlugin]
-  });
-
-  setupChartInteractions();
-  applyChartColorBySign(lastChartSign);
-}
-
-async function loadChartToday() {
-  if (!tfReady.d || !candle.d.t) return;
-
-  const kl = await fetchKlines1mRange(candle.d.t, Date.now());
-  if (!kl.length) return;
-
-  chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
-  chartData = kl.map(k => safe(k[4]));
-
-  lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
-
-  const lastClose = safe(kl[kl.length - 1][4]);
-  if (!targetPrice && lastClose) targetPrice = lastClose;
-
-  if (!chart && window.Chart) initChartToday();
-  else if (chart) {
-    chart.data.labels = chartLabels;
-    chart.data.datasets[0].data = chartData;
-    chart.update("none");
-  }
-
-  chartBootstrappedToday = true;
-}
-
-/* ================= CHART: interactions (line + top-right price) ================= */
-function setHoverState(active, idx, price) {
-  hoverActive = active;
-  hoverIndex = active ? idx : null;
-  hoverPrice = active ? price : null;
-
-  // ridisegna per far apparire/sparire la linea gialla
-  if (chart) chart.update("none");
-}
-
-function setupChartInteractions() {
-  const canvas = $("priceChart");
-  if (!canvas) return;
-
-  const getIndexFromEvent = (evt) => {
-    if (!chart) return null;
-    const points = chart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
-    if (!points || !points.length) return null;
-    return points[0].index;
-  };
-
-  const handleMove = (evt) => {
-    const idx = getIndexFromEvent(evt);
-    if (idx == null) {
-      setHoverState(false);
-      return;
-    }
-    const v = safe(chart.data.datasets[0].data[idx]);
-    setHoverState(true, idx, v);
-  };
-
-  const handleLeave = () => {
-    setHoverState(false);
-  };
-
-  // Mouse
-  canvas.addEventListener("mousemove", handleMove, { passive: true });
-  canvas.addEventListener("mouseleave", handleLeave, { passive: true });
-
-  // Touch
-  canvas.addEventListener("touchstart", (e) => { handleMove(e); }, { passive: true });
-  canvas.addEventListener("touchmove", (e) => { handleMove(e); }, { passive: true });
-  canvas.addEventListener("touchend", handleLeave, { passive: true });
-  canvas.addEventListener("touchcancel", handleLeave, { passive: true });
-}
-
-/* ================= BOOTSTRAP ensure chart is never empty on reload ================= */
-async function ensureChartBootstrapped() {
-  if (chartBootstrappedToday) return;
-
-  if (!tfReady.d || !candle.d.t) {
-    await loadCandleSnapshot();
-  }
-  if (tfReady.d && candle.d.t) {
-    await loadChartToday();
-  }
-}
-setInterval(ensureChartBootstrapped, 1500);
-setInterval(loadChartToday, CHART_SYNC_MS);
-
-/* ================= WS TRADE (price realtime) ================= */
-function clearTradeRetry() {
-  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
-}
-function scheduleTradeRetry() {
-  clearTradeRetry();
-  tradeRetryTimer = setTimeout(() => startTradeWS(), 1200);
-}
-
-function startTradeWS() {
-  try { if (wsTrade) wsTrade.close(); } catch {}
-
+/* ================= BINANCE ================= */
+function connectTradeWS(){
+  if(wsTrade) try{ wsTrade.close(); }catch{}
   wsTradeOnline = false;
-  refreshConnUI();
 
-  wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
+  wsTrade = new WebSocket(`${BINANCE_WS_BASE}/${STREAM_TRADE}`);
 
-  wsTrade.onopen = () => {
-    wsTradeOnline = true;
-    refreshConnUI();
-    clearTradeRetry();
-  };
+  wsTrade.onopen = () => { wsTradeOnline = true; setConnection(allOnline()); };
+  wsTrade.onclose = () => { wsTradeOnline = false; setConnection(allOnline()); setTimeout(connectTradeWS, 1200); };
+  wsTrade.onerror = () => { try{ wsTrade.close(); }catch{} };
 
-  wsTrade.onclose = () => {
-    wsTradeOnline = false;
-    refreshConnUI();
-    scheduleTradeRetry();
-  };
+  wsTrade.onmessage = (ev) => {
+    try{
+      const msg = JSON.parse(ev.data);
+      const p = safe(msg.p);
+      if(!p) return;
 
-  wsTrade.onerror = () => {
-    wsTradeOnline = false;
-    refreshConnUI();
-    try { wsTrade.close(); } catch {}
-    scheduleTradeRetry();
-  };
+      const dir = (lastPrice && p < lastPrice) ? "down" : "up";
+      lastPrice = p;
 
-  wsTrade.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    const p = safe(msg.p);
-    if (!p) return;
+      // SOLO questa è realtime (card prezzo). Il grafico NON mostra prezzo realtime fisso.
+      tweenNumber(elPrice, p, 4);
+      elPrice.classList.toggle("up", dir === "up");
+      elPrice.classList.toggle("down", dir === "down");
+      addPulse(elPrice, dir);
 
-    targetPrice = p;
-
-    if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
-    if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
-    if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
+      updatePriceBarAndLine();
+      setConnection(allOnline());
+    }catch{}
   };
 }
-startTradeWS();
 
-/* ================= WS KLINES (1m chart + 1D/1W/1M bars) ================= */
-function clearKlineRetry() {
-  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
-}
-function scheduleKlineRetry() {
-  clearKlineRetry();
-  klineRetryTimer = setTimeout(() => startKlineWS(), 1200);
-}
-
-function applyKline(intervalKey, k) {
-  const t = safe(k.t);
-  const o = safe(k.o);
-  const h = safe(k.h);
-  const l = safe(k.l);
-
-  if (o && h && l) {
-    candle[intervalKey].t = t || candle[intervalKey].t;
-    candle[intervalKey].open = o;
-    candle[intervalKey].high = h;
-    candle[intervalKey].low  = l;
-
-    if (!tfReady[intervalKey]) {
-      tfReady[intervalKey] = true;
-      settleStart = Date.now();
-    }
-  }
-}
-
-function updateChartFrom1mKline(k) {
-  if (!chart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
-
-  const openTime = safe(k.t);
-  const close = safe(k.c);
-  if (!openTime || !close) return;
-
-  if (openTime < candle.d.t) return;
-
-  // stesso minuto
-  if (lastChartMinuteStart === openTime) {
-    const idx = chart.data.datasets[0].data.length - 1;
-    if (idx >= 0) {
-      chart.data.datasets[0].data[idx] = close;
-      chart.update("none");
-    }
-    return;
-  }
-
-  // minuto nuovo
-  lastChartMinuteStart = openTime;
-
-  chart.data.labels.push(fmtHHMM(openTime));
-  chart.data.datasets[0].data.push(close);
-
-  while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
-  while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
-
-  chart.update("none");
-}
-
-async function resetDayAndReloadChart(nextOpenTime) {
-  chartBootstrappedToday = false;
-
-  chartLabels = [];
-  chartData = [];
-  lastChartMinuteStart = 0;
-
-  if (chart) {
-    chart.data.labels = [];
-    chart.data.datasets[0].data = [];
-    chart.update("none");
-  }
-
-  if (nextOpenTime) candle.d.t = nextOpenTime;
-
-  await loadCandleSnapshot();
-  await loadChartToday();
-
-  // reset hover
-  setHoverState(false);
-}
-
-function startKlineWS() {
-  try { if (wsKline) wsKline.close(); } catch {}
-
+function connectKlineWS(){
+  if(wsKline) try{ wsKline.close(); }catch{}
   wsKlineOnline = false;
-  refreshConnUI();
 
-  const url =
-    "wss://stream.binance.com:9443/stream?streams=" +
-    "injusdt@kline_1m/" +
-    "injusdt@kline_1d/" +
-    "injusdt@kline_1w/" +
-    "injusdt@kline_1M";
+  wsKline = new WebSocket(`${BINANCE_WS_BASE}/${STREAM_KLINE}`);
 
-  wsKline = new WebSocket(url);
+  wsKline.onopen = () => { wsKlineOnline = true; setConnection(allOnline()); };
+  wsKline.onclose = () => { wsKlineOnline = false; setConnection(allOnline()); setTimeout(connectKlineWS, 1200); };
+  wsKline.onerror = () => { try{ wsKline.close(); }catch{} };
 
-  wsKline.onopen = () => {
-    wsKlineOnline = true;
-    refreshConnUI();
-    clearKlineRetry();
-  };
+  wsKline.onmessage = (ev) => {
+    try{
+      const msg = JSON.parse(ev.data);
+      const k = msg.k;
+      if(!k) return;
 
-  wsKline.onclose = () => {
-    wsKlineOnline = false;
-    refreshConnUI();
-    scheduleKlineRetry();
-  };
+      const t = safe(k.t);
+      const close = safe(k.c);
+      if(!t || !close) return;
 
-  wsKline.onerror = () => {
-    wsKlineOnline = false;
-    refreshConnUI();
-    try { wsKline.close(); } catch {}
-    scheduleKlineRetry();
-  };
-
-  wsKline.onmessage = async (e) => {
-    const payload = JSON.parse(e.data);
-    const data = payload.data;
-    if (!data || !data.k) return;
-
-    const stream = payload.stream || "";
-    const k = data.k;
-
-    if (stream.includes("@kline_1m")) {
-      updateChartFrom1mKline(k);
-      return;
-    }
-
-    if (stream.includes("@kline_1d")) {
-      const prevDayOpen = candle.d.t;
-      applyKline("d", k);
-
-      // bootstrap chart appena abbiamo daily
-      if (!chartBootstrappedToday && tfReady.d && candle.d.t) {
-        await loadChartToday();
+      const last = chartData[chartData.length - 1];
+      if(last && last.t === t) last.c = close;
+      else{
+        chartData.push({ t, c: close });
+        if(chartData.length > 288) chartData.shift();
       }
 
-      // reset quando candela 1D chiude
-      if (k.x === true) {
-        const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
-        await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
-      } else {
-        // se cambia openTime senza x
-        if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
-          await resetDayAndReloadChart(candle.d.t);
+      buildOrUpdateChart(true);
+      updatePriceBarAndLine();
+      setConnection(allOnline());
+    }catch{}
+  };
+}
+
+async function fetch24hTicker(){
+  const url = `${BINANCE_REST}/api/v3/ticker/24hr?symbol=${SYMBOL}`;
+  const r = await fetch(url);
+  if(!r.ok) throw new Error("ticker_24hr_failed");
+  const j = await r.json();
+
+  price24h.changePercent = safe(j.priceChangePercent);
+  price24h.high = safe(j.highPrice);
+  price24h.low = safe(j.lowPrice);
+
+  lastRestOkAt = nowMs();
+
+  update24hChangeUI();
+  updatePriceBarAndLine();
+  setConnection(allOnline());
+}
+
+function update24hChangeUI(){
+  const pct = safe(price24h.changePercent);
+  elPrice24h.textContent = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+  elPrice24h.classList.toggle("up", pct >= 0);
+  elPrice24h.classList.toggle("down", pct < 0);
+}
+
+async function fetchChartHistory(){
+  const url = `${BINANCE_REST}/api/v3/klines?symbol=${SYMBOL}&interval=5m&limit=288`;
+  const r = await fetch(url);
+  if(!r.ok) throw new Error("klines_failed");
+  const arr = await r.json();
+
+  chartData = arr.map(k => ({ t: k[0], c: safe(k[4]) })).filter(x => x.c > 0);
+  if(arr.length) price24h.open = safe(arr[0][1]);
+
+  lastRestOkAt = nowMs();
+
+  buildOrUpdateChart(false);
+  updatePriceBarAndLine();
+  setConnection(allOnline());
+}
+
+/* ================= CHART BADGE (only interaction) ================= */
+function badgeShow(){
+  if(!elChartBadge) return;
+  elChartBadge.classList.remove("hidden");
+  elChartBadge.setAttribute("aria-hidden", "false");
+}
+function badgeHide(){
+  if(!elChartBadge) return;
+  elChartBadge.classList.add("hidden");
+  elChartBadge.setAttribute("aria-hidden", "true");
+}
+function badgeSet(timeMs, price){
+  elChartBadgeTime.textContent = fmtHHMM(timeMs);
+  elChartBadgePrice.textContent = `$${safe(price).toFixed(4)}`;
+}
+
+function nearestPointFromEvent(evt){
+  if(!chart || !chartData.length) return null;
+
+  const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true);
+  if(!points || !points.length) return null;
+
+  const idx = points[0].index;
+  const p = chartData[idx];
+  if(!p) return null;
+  return { t: p.t, c: p.c };
+}
+
+function bindBadgeEvents(canvas){
+  const onMove = (evt) => {
+    const p = nearestPointFromEvent(evt);
+    if(!p){ badgeHide(); return; }
+    badgeSet(p.t, p.c);
+    badgeShow();
+  };
+
+  const onLeave = () => badgeHide();
+
+  canvas.addEventListener("mousemove", onMove);
+  canvas.addEventListener("mouseleave", onLeave);
+
+  canvas.addEventListener("touchstart", onMove, { passive: true });
+  canvas.addEventListener("touchmove", onMove, { passive: true });
+  canvas.addEventListener("touchend", onLeave);
+  canvas.addEventListener("touchcancel", onLeave);
+
+  badgeHide();
+}
+
+/* ================= CHART.JS ================= */
+function buildOrUpdateChart(soft=false){
+  const canvas = $("priceChart");
+  if(!canvas) return;
+
+  const labels = chartData.map(p => fmtHHMM(p.t));
+  const values = chartData.map(p => p.c);
+
+  if(!chart){
+    chart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "INJ/USDT",
+          data: values,
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.22,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: soft ? false : { duration: 450 },
+
+        // DISATTIVO tooltip Chart.js in modo “hard”
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            enabled: false,
+            external: () => {} // evita qualsiasi render esterno
+          }
+        },
+
+        interaction: { mode: "nearest", intersect: false },
+        events: ["mousemove","mouseout","touchstart","touchmove","touchend","touchcancel"],
+
+        scales: {
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
+          y: {
+            grid: { color: "rgba(255,255,255,.08)" },
+            ticks: { callback: (v) => `$${safe(v).toFixed(2)}` }
+          }
         }
       }
-    }
-    else if (stream.includes("@kline_1w")) applyKline("w", k);
-    else if (stream.includes("@kline_1M")) applyKline("m", k);
+    });
 
-    const root = $("appRoot");
-    if (root && root.classList.contains("loading") && tfReady.d) {
-      root.classList.remove("loading");
-      root.classList.add("ready");
-    }
-  };
-}
-startKlineWS();
-
-/* ================= BOOT ================= */
-(async function boot() {
-  await loadCandleSnapshot();
-  await loadChartToday();
-})();
-
-/* ================= LOOP ================= */
-function animate() {
-  /* PRICE (card INJ Price) */
-  const op = displayed.price;
-  displayed.price = tick(displayed.price, targetPrice);
-  colorNumber($("price"), displayed.price, op, 4);
-
-  /* PERFORMANCE */
-  const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
-  const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
-  const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
-
-  updatePerf("arrow24h", "pct24h", pD);
-  updatePerf("arrowWeek", "pctWeek", pW);
-  updatePerf("arrowMonth", "pctMonth", pM);
-
-  /* Colore grafico = performance daily */
-  const sign =
-    !tfReady.d ? "neutral" :
-    pD > 0 ? "up" :
-    pD < 0 ? "down" : "neutral";
-
-  if (sign !== lastChartSign) {
-    lastChartSign = sign;
-    applyChartColorBySign(sign);
+    bindBadgeEvents(canvas);
+    return;
   }
 
-  /* TOP-RIGHT GRAPH PRICE:
-     - se hover attivo: mostra prezzo del punto
-     - altrimenti: torna al prezzo reale live (con animazione)
-  */
-  const chartEl = $("chartPrice");
-  const targetChartVal = hoverActive && Number.isFinite(hoverPrice) ? hoverPrice : displayed.price;
-  const prevChartVal = displayedChartPrice;
-  displayedChartPrice = tick(displayedChartPrice, targetChartVal);
-  // stessa animazione “digits” della card prezzo
-  if (chartEl) colorNumber(chartEl, displayedChartPrice, prevChartVal, 4);
-
-  /* BARS */
-  renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high,
-    "linear-gradient(to right,#22c55e,#10b981)",
-    "linear-gradient(to left,#ef4444,#f87171)");
-
-  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high,
-    "linear-gradient(to right,#f59e0b,#fbbf24)",
-    "linear-gradient(to left,#f97316,#f87171)");
-
-  renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high,
-    "linear-gradient(to right,#8b5cf6,#c084fc)",
-    "linear-gradient(to left,#6b21a8,#c084fc)");
-
-  /* Values under bars */
-  $("priceMin").textContent  = tfReady.d ? safe(candle.d.low).toFixed(3)  : "--";
-  $("priceOpen").textContent = tfReady.d ? safe(candle.d.open).toFixed(3) : "--";
-  $("priceMax").textContent  = tfReady.d ? safe(candle.d.high).toFixed(3) : "--";
-
-  $("weekMin").textContent   = tfReady.w ? safe(candle.w.low).toFixed(3)  : "--";
-  $("weekOpen").textContent  = tfReady.w ? safe(candle.w.open).toFixed(3) : "--";
-  $("weekMax").textContent   = tfReady.w ? safe(candle.w.high).toFixed(3) : "--";
-
-  $("monthMin").textContent  = tfReady.m ? safe(candle.m.low).toFixed(3)  : "--";
-  $("monthOpen").textContent = tfReady.m ? safe(candle.m.open).toFixed(3) : "--";
-  $("monthMax").textContent  = tfReady.m ? safe(candle.m.high).toFixed(3) : "--";
-
-  /* AVAILABLE */
-  const oa = displayed.available;
-  displayed.available = tick(displayed.available, availableInj);
-  colorNumber($("available"), displayed.available, oa, 6);
-  $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
-
-  /* STAKE */
-  const os = displayed.stake;
-  displayed.stake = tick(displayed.stake, stakeInj);
-  colorNumber($("stake"), displayed.stake, os, 4);
-  $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
-
-  /* REWARDS */
-  const or = displayed.rewards;
-  displayed.rewards = tick(displayed.rewards, rewardsInj);
-  colorNumber($("rewards"), displayed.rewards, or, 7);
-  $("rewardsUsd").textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
-
-  const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
-  const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
-
-  $("rewardBar").style.width = rp + "%";
-  $("rewardLine").style.left = rp + "%";
-  $("rewardPercent").textContent = rp.toFixed(1) + "%";
-  $("rewardBar").style.background = heatColor(rp);
-  $("rewardMin").textContent = "0";
-  $("rewardMax").textContent = maxR.toFixed(1);
-
-  $("apr").textContent = safe(apr).toFixed(2) + "%";
-  $("updated").textContent = "Last update: " + new Date().toLocaleTimeString();
-
-  requestAnimationFrame(animate);
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = values;
+  chart.update(soft ? "none" : undefined);
 }
-animate();
+
+/* ================= PRICE BAR LOGIC ================= */
+function updatePriceBarAndLine(){
+  const min = safe(price24h.low);
+  const max = safe(price24h.high);
+  const open = safe(price24h.open);
+  const price = safe(lastPrice || chartData?.[chartData.length-1]?.c);
+
+  if(!(min > 0 && max > 0 && max > min)) return;
+
+  elPriceMin.textContent = fmtNum(min, 3);
+  elPriceMax.textContent = fmtNum(max, 3);
+  elPriceOpen.textContent = fmtNum(open || ((min + max) / 2), 3);
+
+  const container = elPriceBar.parentElement;
+  const w = container.getBoundingClientRect().width;
+
+  const pos = clamp((price - min) / (max - min), 0, 1);
+  elPriceLine.style.left = `${Math.round(pos * (w - 2))}px`;
+
+  const openPos = (open > 0) ? clamp((open - min) / (max - min), 0, 1) : 0.5;
+  const delta = pos - openPos;
+
+  const isUp = delta >= 0;
+  elPriceBar.classList.toggle("upbar", isUp);
+  elPriceBar.classList.toggle("downbar", !isUp);
+
+  const abs = clamp(Math.abs(delta) * 2, 0, 1);
+  const widthPct = 12 + abs * 88;
+  elPriceBar.style.width = `${widthPct.toFixed(2)}%`;
+
+  const openX = openPos * w;
+  const barW = (widthPct / 100) * w;
+
+  let leftPx = isUp ? openX : (openX - barW);
+  leftPx = clamp(leftPx, 0, Math.max(0, w - barW));
+  elPriceBar.style.left = `${Math.round(leftPx)}px`;
+}
+
+/* ================= INJECTIVE LCD ================= */
+async function lcdJson(path){
+  const url = `${LCD_BASE}${path}`;
+  const r = await fetch(url, { headers: { "Accept":"application/json" }});
+  if(!r.ok) throw new Error(`lcd_failed_${r.status}`);
+  lastRestOkAt = nowMs();
+  return r.json();
+}
+
+async function fetchAccountSnapshot(addr){
+  const balances = await lcdJson(`/cosmos/bank/v1beta1/balances/${addr}`);
+  const coins = balances?.balances || [];
+  const injCoin = coins.find(c => c.denom === "inj");
+  const availableInj = injCoin ? injFromBaseAmount(injCoin.amount) : 0;
+
+  const dels = await lcdJson(`/cosmos/staking/v1beta1/delegations/${addr}`);
+  const ds = dels?.delegation_responses || [];
+  const stakedInj = ds.reduce((sum, d) => sum + injFromBaseAmount(d?.balance?.amount || 0), 0);
+
+  const rew = await lcdJson(`/cosmos/distribution/v1beta1/delegators/${addr}/rewards`);
+  const total = rew?.total || [];
+  const injTotal = total.find(c => c.denom === "inj");
+  const rewardsInj = injTotal ? injFromBaseAmount(injTotal.amount) : 0;
+
+  let apr = 0;
+  try{
+    const inf = await lcdJson(`/cosmos/mint/v1beta1/inflation`);
+    const inflation = safe(inf?.inflation);
+
+    const pool = await lcdJson(`/cosmos/staking/v1beta1/pool`);
+    const bonded = safe(pool?.pool?.bonded_tokens);
+    const notBonded = safe(pool?.pool?.not_bonded_tokens);
+    const bondedRatio = (bonded + notBonded) > 0 ? bonded / (bonded + notBonded) : 0;
+
+    if(bondedRatio > 0) apr = (inflation / bondedRatio) * 100;
+  }catch{}
+
+  return { availableInj, stakedInj, rewardsInj, apr };
+}
+
+/* ================= UI APPLY ================= */
+function pulseDelta(el, current, prev){
+  if(!el) return;
+  if(prev === 0) return;
+  const dir = current >= prev ? "up" : "down";
+  el.classList.toggle("up", dir === "up");
+  el.classList.toggle("down", dir === "down");
+  addPulse(el, dir);
+}
+
+function applyAccountUI(s, price){
+  const p = safe(price);
+
+  tweenNumber(elAvail, s.availableInj, 6);
+  elAvailUsd.textContent = `≈ ${fmtUsd(s.availableInj * p)}`;
+  pulseDelta(elAvail, s.availableInj, lastAvail);
+  lastAvail = s.availableInj;
+
+  tweenNumber(elStake, s.stakedInj, 4);
+  elStakeUsd.textContent = `≈ ${fmtUsd(s.stakedInj * p)}`;
+  pulseDelta(elStake, s.stakedInj, lastStake);
+  lastStake = s.stakedInj;
+
+  tweenNumber(elRewards, s.rewardsInj, 7);
+  elRewardsUsd.textContent = `≈ ${fmtUsd(s.rewardsInj * p)}`;
+  pulseDelta(elRewards, s.rewardsInj, lastRew);
+  lastRew = s.rewardsInj;
+
+  elApr.textContent = `${safe(s.apr).toFixed(2)}%`;
+
+  const base = Math.max(s.stakedInj, 0.000001);
+  const ratio = (s.rewardsInj / base) * 100;
+  elRewardPercent.textContent = `${ratio.toFixed(2)}%`;
+
+  const maxVisual = 5;
+  const width = clamp((ratio / maxVisual) * 100, 0, 100);
+  elRewardBar.style.width = `${width.toFixed(2)}%`;
+}
+
+/* ================= MAIN LOOP ================= */
+async function tickAccount(){
+  if(!isValidInjAddress(address)) return;
+
+  try{
+    const price = safe(lastPrice || chartData?.[chartData.length-1]?.c);
+    const snap = await fetchAccountSnapshot(address);
+    applyAccountUI(snap, price);
+
+    elUpdated.textContent = `Last update: ${fmtHHMM(nowMs())}`;
+    setConnection(allOnline());
+  }catch{
+    setConnection(allOnline());
+  }
+}
+
+/* ================= BOOT ================= */
+async function boot(){
+  settleStart = nowMs();
+
+  connectTradeWS();
+  connectKlineWS();
+
+  try{ await fetchChartHistory(); } catch{}
+  try{ await fetch24hTicker(); } catch{}
+
+  setInterval(() => fetch24hTicker().catch(()=>{}), TICKER24H_POLL_MS);
+  setInterval(() => fetchChartHistory().catch(()=>{}), CHART_SYNC_MS);
+
+  setInterval(tickAccount, ACCOUNT_POLL_MS);
+
+  const saved = localStorage.getItem("inj_addr") || "";
+  if(saved){
+    elAddress.value = saved;
+    address = saved.trim();
+    setTimeout(tickAccount, 350);
+  }
+
+  elAddress.addEventListener("change", () => {
+    const v = elAddress.value.trim();
+    if(isValidInjAddress(v)){
+      address = v;
+      localStorage.setItem("inj_addr", v);
+      settleStart = nowMs();
+      tickAccount();
+    }
+  });
+
+  setConnection(false);
+  elUpdated.textContent = "Last update: --:--";
+  badgeHide();
+}
+
+boot();
