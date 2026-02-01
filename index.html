@@ -19,29 +19,34 @@
 
   <div class="header">
 
-    <div class="header-top">
-      <div class="title-wrap">
+    <div class="header-grid">
+      <!-- LEFT: MENU (bigger) -->
+      <div class="header-left">
+        <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
+      </div>
+
+      <!-- CENTER: TITLE (always centered) -->
+      <div class="header-center">
         <h1>Injective <span class="dot">•</span> Portfolio</h1>
         <div class="subtitle">Realtime staking & rewards dashboard</div>
       </div>
 
-      <div class="header-actions">
-        <button class="icon-btn" id="menuBtn" aria-label="Menu">≡</button>
-
+      <!-- RIGHT: SEARCH (lens centered right) -->
+      <div class="header-right">
         <div class="search-wrap" id="searchWrap">
           <input id="addressInput" placeholder="inj..." autocomplete="off" />
           <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
         </div>
+      </div>
+    </div>
 
-        <!-- META sotto le icone -->
-        <div class="header-meta">
-          <div id="addressDisplay" class="address-display"></div>
+    <!-- META: wallet + status (small, under right icons) -->
+    <div class="header-meta-right">
+      <div id="addressDisplay" class="address-display"></div>
 
-          <div class="connection-status" id="connectionStatus">
-            <span class="status-dot" id="statusDot"></span>
-            <span class="status-text" id="statusText">Offline</span>
-          </div>
-        </div>
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Offline</span>
       </div>
     </div>
 
