@@ -16,12 +16,12 @@ const STAKE_SERIES_MAX = 240;
 const STAKE_LOCAL_VER = 1;
 const RESET_STAKE_FROM_NOW_ON_BOOT = true;
 
-/* NEW: reward withdrawals persistence */
-const REWARD_WD_SERIES_MAX = 600;     // più alto: più storico
+/* reward withdrawals persistence */
+const REWARD_WD_SERIES_MAX = 600;
 const REWARD_WD_LOCAL_VER = 1;
 
 /* detection thresholds */
-const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ: evita falsi micro-cambi
+const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -33,7 +33,10 @@ function fmtHHMM(ms) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 function nowLabel() { return new Date().toLocaleTimeString(); }
-function fmtInj(x, d=4) { return `${safe(x).toFixed(d)} INJ`; }
+function shortAddr(a) {
+  if (!a) return "";
+  return a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : a;
+}
 
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
@@ -59,10 +62,6 @@ const menuBtn = $("menuBtn");
 let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = address || "";
 
-function shortAddr(a) {
-  if (!a) return "";
-  return a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : a;
-}
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
@@ -106,9 +105,8 @@ if (addressInput) {
   });
 }
 document.addEventListener("click", (e) => {
-  const t = e.target;
   if (!searchWrap) return;
-  if (searchWrap.contains(t)) return;
+  if (searchWrap.contains(e.target)) return;
   closeSearch();
 });
 if (menuBtn) {
@@ -375,42 +373,51 @@ function maybeAddStakePoint(currentStake) {
   drawStakeChart();
 }
 
-/* ================= NEW: REWARD WITHDRAWALS CHART + TIMELINE ================= */
+/* ================= REWARD WITHDRAWALS (persist + filter + live + timeline) ================= */
 let rewardChart = null;
-let wdLabels = [];     // time strings
-let wdValues = [];     // withdrawn amounts (+)
-let wdTimes = [];      // timestamps ms (for ordering)
+
+/* master arrays (saved) */
+let wdLabelsAll = [];
+let wdValuesAll = [];
+let wdTimesAll  = [];
+
+/* view arrays (filtered) */
+let wdLabels = [];
+let wdValues = [];
+let wdTimes  = [];
+
 let wdLastRewardsSeen = null;
+let wdMinFilter = 0; // INJ
 
 function wdStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
 }
-function trimWd() {
-  if (wdLabels.length > REWARD_WD_SERIES_MAX) {
-    wdLabels = wdLabels.slice(-REWARD_WD_SERIES_MAX);
-    wdValues = wdValues.slice(-REWARD_WD_SERIES_MAX);
-    wdTimes  = wdTimes.slice(-REWARD_WD_SERIES_MAX);
+function trimWdAll() {
+  if (wdLabelsAll.length > REWARD_WD_SERIES_MAX) {
+    wdLabelsAll = wdLabelsAll.slice(-REWARD_WD_SERIES_MAX);
+    wdValuesAll = wdValuesAll.slice(-REWARD_WD_SERIES_MAX);
+    wdTimesAll  = wdTimesAll.slice(-REWARD_WD_SERIES_MAX);
   }
-  const n = wdValues.length;
-  if (wdLabels.length !== n) wdLabels = wdLabels.slice(0, n);
-  if (wdTimes.length !== n) wdTimes = wdTimes.slice(0, n);
+  const n = wdValuesAll.length;
+  if (wdLabelsAll.length !== n) wdLabelsAll = wdLabelsAll.slice(0, n);
+  if (wdTimesAll.length !== n)  wdTimesAll  = wdTimesAll.slice(0, n);
 }
-function saveWd() {
+function saveWdAll() {
   const key = wdStoreKey(address);
   if (!key) return;
-  trimWd();
+  trimWdAll();
   try {
     localStorage.setItem(key, JSON.stringify({
       v: REWARD_WD_LOCAL_VER,
       t: Date.now(),
-      labels: wdLabels,
-      values: wdValues,
-      times: wdTimes
+      labels: wdLabelsAll,
+      values: wdValuesAll,
+      times: wdTimesAll
     }));
   } catch {}
 }
-function loadWd() {
+function loadWdAll() {
   const key = wdStoreKey(address);
   if (!key) return false;
   try {
@@ -419,32 +426,48 @@ function loadWd() {
     const obj = JSON.parse(raw);
     if (!obj || obj.v !== REWARD_WD_LOCAL_VER) return false;
 
-    wdLabels = Array.isArray(obj.labels) ? obj.labels : [];
-    wdValues = Array.isArray(obj.values) ? obj.values : [];
-    wdTimes  = Array.isArray(obj.times)  ? obj.times  : [];
+    wdLabelsAll = Array.isArray(obj.labels) ? obj.labels : [];
+    wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
+    wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
 
-    if (!wdLabels.length || wdLabels.length !== wdValues.length) return false;
-    trimWd();
-    drawRewardWdChart();
-    syncRewardTimelineUI(true);
+    if (wdLabelsAll.length !== wdValuesAll.length) return false;
+
+    trimWdAll();
+    rebuildWdView();
     return true;
   } catch {
     return false;
   }
 }
-function clearWd() {
+function rebuildWdView() {
+  wdLabels = [];
+  wdValues = [];
+  wdTimes  = [];
+
+  for (let i = 0; i < wdValuesAll.length; i++) {
+    const v = safe(wdValuesAll[i]);
+    if (v >= wdMinFilter) {
+      wdLabels.push(wdLabelsAll[i]);
+      wdValues.push(v);
+      wdTimes.push(wdTimesAll[i] || 0);
+    }
+  }
+
+  drawRewardWdChart();
+  syncRewardTimelineUI(true);
+}
+function clearWdAll() {
   const key = wdStoreKey(address);
   if (!key) return;
   try { localStorage.removeItem(key); } catch {}
-  wdLabels = [];
-  wdValues = [];
-  wdTimes = [];
+  wdLabelsAll = []; wdValuesAll = []; wdTimesAll = [];
+  wdLabels = []; wdValues = []; wdTimes = [];
   wdLastRewardsSeen = null;
   drawRewardWdChart();
   syncRewardTimelineUI(true);
 }
 
-/* plugin: label sopra ai punti (+0.0034 INJ) */
+/* labels only when zoom-in (or not too many points visible) */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -455,35 +478,43 @@ const rewardPointLabelPlugin = {
     const dataEls = meta?.data || [];
     if (!dataEls.length) return;
 
-    const ctx = ch.ctx;
+    // visible window size
     const xScale = ch.scales?.x;
-    if (!xScale) return;
+    let min = xScale?.min;
+    let max = xScale?.max;
 
-    // disegna solo se non è troppo zoom-out (evita confusione)
-    // e limita max etichette visibili
-    let drawn = 0;
-    const maxDraw = 24;
+    // Chart.js category scale uses numeric indices
+    const n = ds.data.length;
+    if (!Number.isFinite(min)) min = 0;
+    if (!Number.isFinite(max)) max = n - 1;
 
+    const visibleCount = Math.max(0, Math.floor(max - min + 1));
+
+    // show labels only when zoomed enough
+    if (visibleCount > 30) return;
+
+    const ctx = ch.ctx;
     ctx.save();
     ctx.font = "700 11px Inter, sans-serif";
     ctx.fillStyle = "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
 
-    for (let i = 0; i < dataEls.length; i++) {
+    // draw at most 18 labels
+    let drawn = 0;
+    const maxDraw = 18;
+
+    for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
       if (!el) continue;
-
-      const x = el.x;
-      const y = el.y;
-
-      if (x < ch.chartArea.left || x > ch.chartArea.right) continue;
 
       if (drawn >= maxDraw) break;
 
       const v = safe(ds.data[i]);
       if (!v) continue;
 
-      // piccolo “bubble text”
+      const x = el.x;
+      const y = el.y;
+
       const text = `+${v.toFixed(4)} INJ`;
       ctx.fillText(text, x, y - 10);
       drawn++;
@@ -551,7 +582,7 @@ function drawRewardWdChart() {
   }
 }
 
-/* timeline slider (scroll back in time) */
+/* timeline slider: window around selected idx */
 function syncRewardTimelineUI(forceToEnd=false) {
   const slider = $("rewardTimeline");
   const meta = $("rewardTimelineMeta");
@@ -561,6 +592,11 @@ function syncRewardTimelineUI(forceToEnd=false) {
   if (!n) {
     slider.min = 0; slider.max = 0; slider.value = 0;
     meta.textContent = "—";
+    if (rewardChart) {
+      rewardChart.options.scales.x.min = undefined;
+      rewardChart.options.scales.x.max = undefined;
+      rewardChart.update("none");
+    }
     return;
   }
 
@@ -574,7 +610,6 @@ function syncRewardTimelineUI(forceToEnd=false) {
   const minIdx = Math.max(0, idx - win + 1);
   const maxIdx = idx;
 
-  // category scale accepts numeric index as min/max
   if (rewardChart) {
     rewardChart.options.scales.x.min = minIdx;
     rewardChart.options.scales.x.max = maxIdx;
@@ -592,6 +627,31 @@ function attachRewardTimelineHandlers() {
   slider.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
 }
 
+/* LIVE button: go to last + reset zoom/pan */
+function goRewardLive() {
+  const slider = $("rewardTimeline");
+  if (slider) slider.value = String(Math.max(0, wdValues.length - 1));
+  if (rewardChart?.resetZoom) rewardChart.resetZoom();
+  syncRewardTimelineUI(true);
+}
+function attachRewardLiveHandler() {
+  const btn = $("rewardLiveBtn");
+  if (!btn) return;
+  btn.addEventListener("click", () => goRewardLive());
+}
+
+/* filter select */
+function attachRewardFilterHandler() {
+  const sel = $("rewardFilter");
+  if (!sel) return;
+
+  sel.addEventListener("change", () => {
+    wdMinFilter = safe(sel.value);
+    rebuildWdView();
+    goRewardLive();
+  });
+}
+
 /* detect “withdrawal” from rewards drop */
 function maybeRecordRewardWithdrawal(newRewards) {
   const r = safe(newRewards);
@@ -602,19 +662,18 @@ function maybeRecordRewardWithdrawal(newRewards) {
   }
 
   const diff = wdLastRewardsSeen - r;
-  // se scende abbastanza -> prelievo/claim
   if (diff > REWARD_WITHDRAW_THRESHOLD) {
     const ts = Date.now();
-    wdTimes.push(ts);
-    wdLabels.push(nowLabel());
-    wdValues.push(diff);
+    wdTimesAll.push(ts);
+    wdLabelsAll.push(nowLabel());
+    wdValuesAll.push(diff);
 
-    trimWd();
-    saveWd();
-    drawRewardWdChart();
+    trimWdAll();
+    saveWdAll();
 
-    // auto focus su fine timeline
-    syncRewardTimelineUI(true);
+    // rebuild filtered view
+    rebuildWdView();
+    goRewardLive();
   }
 
   wdLastRewardsSeen = r;
@@ -641,10 +700,13 @@ async function commitAddress(newAddr) {
     resetStakeSeriesFromNow();
   }
 
-  // load reward withdrawals history for this wallet
+  // reset reward detection baseline and load withdrawals history for this wallet
   wdLastRewardsSeen = null;
-  loadWd();
-  syncRewardTimelineUI(true);
+  wdMinFilter = safe($("rewardFilter")?.value || 0);
+
+  loadWdAll();
+  rebuildWdView();
+  goRewardLive();
 
   await loadAccount();
 }
@@ -685,10 +747,9 @@ async function loadAccount() {
   // staked points
   maybeAddStakePoint(stakeInj);
 
-  // NEW: reward withdrawals points (detect drop)
+  // reward withdrawals points (detect drop)
   maybeRecordRewardWithdrawal(rewardsInj);
 }
-setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
 
 /* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
 async function loadCandleSnapshot() {
@@ -728,7 +789,7 @@ async function loadCandleSnapshot() {
 }
 setInterval(loadCandleSnapshot, REST_SYNC_MS);
 
-/* ================= PRICE CHART ================= */
+/* ================= PRICE CHART (1D) ================= */
 let chart = null;
 let chartLabels = [];
 let chartData = [];
@@ -746,7 +807,6 @@ const verticalLinePlugin = {
   id: "verticalLinePlugin",
   afterDraw(ch) {
     if (!hoverActive || hoverIndex == null) return;
-
     const meta = ch.getDatasetMeta(0);
     const el = meta?.data?.[hoverIndex];
     if (!el) return;
@@ -885,10 +945,7 @@ function initChartToday() {
         }
       },
       interaction: { mode: "index", intersect: false },
-      scales: {
-        x: { display: false },
-        y: { ticks: { color: "#9ca3af" } }
-      }
+      scales: { x: { display: false }, y: { ticks: { color: "#9ca3af" } } }
     },
     plugins: [verticalLinePlugin]
   });
@@ -1003,19 +1060,30 @@ startTradeWS();
   await loadChartToday();
 
   attachRewardTimelineHandlers();
+  attachRewardLiveHandler();
+  attachRewardFilterHandler();
 
   if (addressInput) addressInput.value = address || "";
   pendingAddress = address || "";
   setAddressDisplay(address);
+
+  // init filter from select
+  wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (address) {
     if (RESET_STAKE_FROM_NOW_ON_BOOT) {
       clearStakeSeriesStorage();
       resetStakeSeriesFromNow();
     }
-    loadWd();               // load reward withdrawals
-    syncRewardTimelineUI(true);
+
+    loadWdAll();
+    rebuildWdView();
+    goRewardLive();
+
     await loadAccount();
+    setInterval(loadAccount, ACCOUNT_POLL_MS);
+  } else {
+    setInterval(() => { if (address) loadAccount(); }, ACCOUNT_POLL_MS);
   }
 })();
 
@@ -1035,7 +1103,6 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* chart color by 24h perf */
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   if (sign !== lastChartSign) {
     lastChartSign = sign;
