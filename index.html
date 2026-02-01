@@ -17,6 +17,7 @@
     <h1>Injective <span class="dot">•</span> Portfolio</h1>
     <div class="subtitle">Realtime staking & rewards dashboard</div>
 
+    <!-- Connection Status -->
     <div class="connection-status offline" id="connectionStatus">
       <span class="status-dot"></span>
       <span class="status-text">Offline</span>
@@ -32,7 +33,7 @@
       <div class="value-row"><span id="price">0.0000</span></div>
       <div class="sub-row"><span id="price24h" class="sub">±0.00%</span></div>
 
-      <div class="price-bar-container" id="priceBarContainer">
+      <div class="price-bar-container">
         <div id="priceBar" class="price-bar"></div>
         <div id="priceLine" class="price-line"></div>
       </div>
@@ -72,19 +73,13 @@
       <div class="value-row"><span id="apr">0%</span></div>
     </div>
 
-    <!-- Grafico come prima, ma valori solo su interazione (box top-right) -->
-    <div class="card chart-card" id="chartCard">
+    <div class="card chart-card">
       <div class="label">24h Price Chart</div>
 
-      <div id="chartBadge" class="chart-badge hidden" aria-hidden="true">
-        <div class="chart-badge-line">
-          <span class="k">Time</span>
-          <span id="chartBadgeTime" class="v">--:--</span>
-        </div>
-        <div class="chart-badge-line">
-          <span class="k">Price</span>
-          <span id="chartBadgePrice" class="v">$0.0000</span>
-        </div>
+      <!-- compare solo quando interagisci col grafico -->
+      <div id="chartHover" class="chart-hover hidden">
+        <span id="chartHoverTime">--:--</span>
+        <span id="chartHoverPrice">$0.0000</span>
       </div>
 
       <canvas id="priceChart"></canvas>
