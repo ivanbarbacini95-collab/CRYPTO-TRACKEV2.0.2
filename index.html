@@ -32,7 +32,7 @@
       <div class="value-row"><span id="price">0.0000</span></div>
       <div class="sub-row"><span id="price24h" class="sub">±0.00%</span></div>
 
-      <div class="price-bar-container">
+      <div class="price-bar-container" id="priceBarContainer">
         <div id="priceBar" class="price-bar"></div>
         <div id="priceLine" class="price-line"></div>
       </div>
@@ -72,11 +72,10 @@
       <div class="value-row"><span id="apr">0%</span></div>
     </div>
 
-    <!-- GRAFICO: nessun prezzo fisso/realtime qui -->
+    <!-- Grafico come prima, ma valori solo su interazione (box top-right) -->
     <div class="card chart-card" id="chartCard">
       <div class="label">24h Price Chart</div>
 
-      <!-- compare SOLO su interazione -->
       <div id="chartBadge" class="chart-badge hidden" aria-hidden="true">
         <div class="chart-badge-line">
           <span class="k">Time</span>
