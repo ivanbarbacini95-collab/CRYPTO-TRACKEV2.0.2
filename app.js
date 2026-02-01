@@ -12,6 +12,8 @@ const TICKER24H_POLL_MS = 15000;
 const CHART_SYNC_MS = 60000;
 
 const INJ_DECIMALS = 18;
+
+/* “scorrimento” iniziale più lungo */
 const INITIAL_SETTLE_TIME = 3200;
 let settleStart = Date.now();
 
@@ -44,8 +46,7 @@ function setConnection(online){
   if(!box) return;
   box.classList.toggle("online", !!online);
   box.classList.toggle("offline", !online);
-  const t = box.querySelector(".status-text");
-  if(t) t.textContent = online ? "Online" : "Offline";
+  box.querySelector(".status-text").textContent = online ? "Online" : "Offline";
 }
 
 function addPulse(el, dir){
@@ -96,23 +97,23 @@ const elRewards = $("rewards");
 const elRewardsUsd = $("rewardsUsd");
 
 const elApr = $("apr");
+
 const elUpdated = $("updated");
 
 const elPriceMin = $("priceMin");
 const elPriceMax = $("priceMax");
 const elPriceOpen = $("priceOpen");
 
-const elPriceBarContainer = $("priceBarContainer");
 const elPriceBar = $("priceBar");
 const elPriceLine = $("priceLine");
 
 const elRewardBar = $("rewardBar");
 const elRewardPercent = $("rewardPercent");
 
-/* Chart badge */
-const elChartBadge = $("chartBadge");
-const elChartBadgeTime = $("chartBadgeTime");
-const elChartBadgePrice = $("chartBadgePrice");
+/* Hover badge grafico */
+const elChartHover = $("chartHover");
+const elChartHoverTime = $("chartHoverTime");
+const elChartHoverPrice = $("chartHoverPrice");
 
 /* ================= STATE ================= */
 let address = "";
@@ -121,10 +122,17 @@ let wsKline = null;
 
 let wsTradeOnline = false;
 let wsKlineOnline = false;
+
 let lastRestOkAt = 0;
 
 let lastPrice = 0;
-let price24h = { changePercent:0, high:0, low:0, open:0 };
+
+let price24h = {
+  changePercent: 0,
+  high: 0,
+  low: 0,
+  open: 0,
+};
 
 let chart = null;
 let chartData = []; // [{t, c}]
@@ -188,8 +196,9 @@ function connectKlineWS(){
       if(!t || !close) return;
 
       const last = chartData[chartData.length - 1];
-      if(last && last.t === t) last.c = close;
-      else{
+      if(last && last.t === t){
+        last.c = close;
+      }else{
         chartData.push({ t, c: close });
         if(chartData.length > 288) chartData.shift();
       }
@@ -232,7 +241,10 @@ async function fetchChartHistory(){
   const arr = await r.json();
 
   chartData = arr.map(k => ({ t: k[0], c: safe(k[4]) })).filter(x => x.c > 0);
-  if(arr.length) price24h.open = safe(arr[0][1]);
+
+  if(arr.length){
+    price24h.open = safe(arr[0][1]);
+  }
 
   lastRestOkAt = nowMs();
 
@@ -241,58 +253,48 @@ async function fetchChartHistory(){
   setConnection(allOnline());
 }
 
-/* ================= CHART BADGE (top-right only on interaction) ================= */
-function badgeShow(){
-  if(!elChartBadge) return;
-  elChartBadge.classList.remove("hidden");
-  elChartBadge.setAttribute("aria-hidden", "false");
-}
-function badgeHide(){
-  if(!elChartBadge) return;
-  elChartBadge.classList.add("hidden");
-  elChartBadge.setAttribute("aria-hidden", "true");
-}
-function badgeSet(timeMs, price){
-  if(!elChartBadgeTime || !elChartBadgePrice) return;
-  elChartBadgeTime.textContent = fmtHHMM(timeMs);
-  elChartBadgePrice.textContent = `$${safe(price).toFixed(4)}`;
+/* ================= CHART HOVER BADGE ================= */
+function showChartHover(timeLabel, priceValue){
+  if(!elChartHover) return;
+  elChartHoverTime.textContent = timeLabel;
+  elChartHoverPrice.textContent = `$${safe(priceValue).toFixed(4)}`;
+  elChartHover.classList.remove("hidden");
 }
 
-function nearestPointFromEvent(evt){
-  if(!chart || !chartData.length) return null;
-
-  const pts = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true);
-  if(!pts || !pts.length) return null;
-
-  const idx = pts[0].index;
-  const p = chartData[idx];
-  if(!p) return null;
-  return { t: p.t, c: p.c };
+function hideChartHover(){
+  if(!elChartHover) return;
+  elChartHover.classList.add("hidden");
 }
 
-function bindBadgeEvents(canvas){
+function bindChartHoverEvents(canvas){
   if(!canvas) return;
 
-  const onMove = (evt) => {
-    const p = nearestPointFromEvent(evt);
-    if(!p){ badgeHide(); return; }
-    badgeSet(p.t, p.c);
-    badgeShow();
+  const updateFromEvent = (evt) => {
+    if(!chart || !chartData.length) return;
+
+    const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true);
+    if(!points || !points.length){
+      hideChartHover();
+      return;
+    }
+
+    const idx = points[0].index;
+    const p = chartData[idx];
+    if(!p){ hideChartHover(); return; }
+
+    showChartHover(fmtHHMM(p.t), p.c);
   };
-  const onLeave = () => badgeHide();
 
-  canvas.addEventListener("mousemove", onMove);
-  canvas.addEventListener("mouseleave", onLeave);
+  canvas.addEventListener("mousemove", updateFromEvent);
+  canvas.addEventListener("mouseleave", hideChartHover);
 
-  canvas.addEventListener("touchstart", onMove, { passive: true });
-  canvas.addEventListener("touchmove", onMove, { passive: true });
-  canvas.addEventListener("touchend", onLeave);
-  canvas.addEventListener("touchcancel", onLeave);
-
-  badgeHide();
+  canvas.addEventListener("touchstart", (e) => updateFromEvent(e), { passive: true });
+  canvas.addEventListener("touchmove", (e) => updateFromEvent(e), { passive: true });
+  canvas.addEventListener("touchend", hideChartHover);
+  canvas.addEventListener("touchcancel", hideChartHover);
 }
 
-/* ================= CHART.JS (grafico come prima) ================= */
+/* ================= CHART.JS ================= */
 function buildOrUpdateChart(soft=false){
   const canvas = $("priceChart");
   if(!canvas) return;
@@ -319,9 +321,8 @@ function buildOrUpdateChart(soft=false){
         animation: soft ? false : { duration: 450 },
         plugins: {
           legend: { display: false },
-          tooltip: { enabled: false } // niente tooltip standard
+          tooltip: { enabled: false } // usiamo solo il badge custom
         },
-        interaction: { mode: "nearest", intersect: false },
         scales: {
           x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
           y: {
@@ -332,7 +333,8 @@ function buildOrUpdateChart(soft=false){
       }
     });
 
-    bindBadgeEvents(canvas);
+    hideChartHover();
+    bindChartHoverEvents(canvas);
     return;
   }
 
@@ -341,20 +343,8 @@ function buildOrUpdateChart(soft=false){
   chart.update(soft ? "none" : undefined);
 }
 
-/* ================= PRICE BAR LOGIC (fix disallineamento) ================= */
-let _pendingBarUpdate = false;
-function schedulePriceBarUpdate(){
-  if(_pendingBarUpdate) return;
-  _pendingBarUpdate = true;
-  requestAnimationFrame(() => {
-    _pendingBarUpdate = false;
-    updatePriceBarAndLine();
-  });
-}
-
+/* ================= PRICE BAR LOGIC ================= */
 function updatePriceBarAndLine(){
-  if(!elPriceBar || !elPriceLine || !elPriceBarContainer) return;
-
   const min = safe(price24h.low);
   const max = safe(price24h.high);
   const open = safe(price24h.open);
@@ -362,12 +352,12 @@ function updatePriceBarAndLine(){
 
   if(!(min > 0 && max > 0 && max > min)) return;
 
-  const w = elPriceBarContainer.getBoundingClientRect().width;
-  if(!(w > 5)) return; // evita calcoli a width=0 (disallineamento)
-
   elPriceMin.textContent = fmtNum(min, 3);
   elPriceMax.textContent = fmtNum(max, 3);
   elPriceOpen.textContent = fmtNum(open || ((min + max) / 2), 3);
+
+  const container = elPriceBar.parentElement;
+  const w = container.getBoundingClientRect().width;
 
   const pos = clamp((price - min) / (max - min), 0, 1);
   elPriceLine.style.left = `${Math.round(pos * (w - 2))}px`;
@@ -386,7 +376,10 @@ function updatePriceBarAndLine(){
   const openX = openPos * w;
   const barW = (widthPct / 100) * w;
 
-  let leftPx = isUp ? openX : (openX - barW);
+  let leftPx;
+  if(isUp) leftPx = openX;
+  else leftPx = openX - barW;
+
   leftPx = clamp(leftPx, 0, Math.max(0, w - barW));
   elPriceBar.style.left = `${Math.round(leftPx)}px`;
 }
@@ -493,11 +486,12 @@ async function boot(){
   connectTradeWS();
   connectKlineWS();
 
-  try{ await fetchChartHistory(); }catch{}
-  try{ await fetch24hTicker(); }catch{}
+  try{ await fetchChartHistory(); } catch{}
+  try{ await fetch24hTicker(); } catch{}
 
   setInterval(() => fetch24hTicker().catch(()=>{}), TICKER24H_POLL_MS);
   setInterval(() => fetchChartHistory().catch(()=>{}), CHART_SYNC_MS);
+
   setInterval(tickAccount, ACCOUNT_POLL_MS);
 
   const saved = localStorage.getItem("inj_addr") || "";
@@ -517,16 +511,9 @@ async function boot(){
     }
   });
 
-  // fix disallineamento su resize/orientamento
-  window.addEventListener("resize", schedulePriceBarUpdate);
-  window.addEventListener("orientationchange", schedulePriceBarUpdate);
-
-  // primo ricalcolo dopo paint
-  requestAnimationFrame(schedulePriceBarUpdate);
-
   setConnection(false);
   elUpdated.textContent = "Last update: --:--";
-  badgeHide();
+  hideChartHover();
 }
 
 boot();
