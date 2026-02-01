@@ -57,7 +57,7 @@ const candle = {
 /* Ready flags (evita barre “-100” all’avvio) */
 const tfReady = { d: false, w: false, m: false };
 
-/* Flash tracking ATH/ATL (valori laterali) */
+/* Flash tracking ATH/ATL laterali */
 const lastExtremes = {
   d: { low: null, high: null },
   w: { low: null, high: null },
@@ -66,7 +66,7 @@ const lastExtremes = {
 function flash(el) {
   if (!el) return;
   el.classList.remove("flash-yellow");
-  void el.offsetWidth; // reflow
+  void el.offsetWidth;
   el.classList.add("flash-yellow");
 }
 
@@ -80,11 +80,10 @@ let chartBootstrappedToday = false;
 /* Hover interaction state */
 let hoverActive = false;
 let hoverIndex = null;
-let hoverPrice = null;
-let hoverLabel = null;
 
-/* Overlay content */
-let overlayVisible = false;
+/* pinned (quando ti fermi dopo pan/drag) */
+let pinnedIndex = null;
+let isPanning = false;
 
 /* Color state (performance daily) */
 let lastChartSign = "neutral";
@@ -99,20 +98,18 @@ let klineRetryTimer = null;
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
-let stakeMoves = [];        // +1 up, -1 down, 0 neutral (punti evento)
-let stakeEventTypes = [];   // "Delegate", "Undelegate", "Mixed", "Delegate / Compound", "Initial"
+let stakeMoves = [];        // +1 up, -1 down, 0 neutral
+let stakeEventTypes = [];   // testo tooltip per evento
 let lastStakeRecorded = null;
 let stakeBootstrapped = false;
 
 /* ================= SMOOTH DISPLAY ================= */
 function scrollSpeed() {
-  // più soft all’inizio, poi accelera gradualmente
   const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
-  const base = 0.08;           // più lento all’inizio
-  const maxExtra = 0.80;       // tende a 0.88 circa
+  const base = 0.08;
+  const maxExtra = 0.80;
   return base + (t * t) * maxExtra;
 }
-
 function tick(cur, tgt) {
   if (!Number.isFinite(tgt)) return cur;
   return cur + (tgt - cur) * scrollSpeed();
@@ -122,10 +119,7 @@ function tick(cur, tgt) {
 function colorNumber(el, n, o, d) {
   if (!el) return;
   const ns = n.toFixed(d), os = o.toFixed(d);
-  if (ns === os) {
-    el.textContent = ns;
-    return;
-  }
+  if (ns === os) { el.textContent = ns; return; }
   el.innerHTML = [...ns].map((c, i) => {
     const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : "#f9fafb";
     return `<span style="color:${col}">${c}</span>`;
@@ -139,7 +133,6 @@ function pctChange(price, open) {
   const v = ((p - o) / o) * 100;
   return Number.isFinite(v) ? v : 0;
 }
-
 function updatePerf(arrowId, pctId, v) {
   const arrow = $(arrowId), pct = $(pctId);
   if (!arrow || !pct) return;
@@ -151,11 +144,7 @@ function updatePerf(arrowId, pctId, v) {
   pct.textContent = Math.abs(v).toFixed(2) + "%";
 }
 
-/* ================= BAR RENDER =================
-   - open è al centro (marker CSS)
-   - bar fill: da centro verso dx (verde) se val>=open, oppure verso sx (rosso) se val<open
-   - bar-line gialla: posizione del prezzo reale (val)
-*/
+/* ================= BAR RENDER ================= */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   if (!bar || !line) return;
 
@@ -169,7 +158,6 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
     return;
   }
 
-  // range simmetrico intorno all’open -> open sempre centrale
   const range = Math.max(Math.abs(high - open), Math.abs(open - low));
   const min = open - range;
   const max = open + range;
@@ -177,7 +165,6 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   const pos = clamp(((val - min) / (max - min)) * 100, 0, 100);
   const center = 50;
 
-  // linea gialla = prezzo reale
   line.style.left = pos + "%";
 
   if (val >= open) {
@@ -216,7 +203,7 @@ $("addressInput").oninput = (e) => {
   settleStart = Date.now();
   stakeBootstrapped = false;
   loadAccount();
-  bootstrapStakeHistory(); // tenta recupero storico completo
+  bootstrapStakeHistory();
 };
 
 /* ================= ACCOUNT (Injective LCD) ================= */
@@ -249,7 +236,7 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  // punti evento su stake chart (su o giù)
+  // punti stake evento (su o giù)
   maybeAddStakePoint(stakeInj);
 }
 loadAccount();
@@ -293,7 +280,7 @@ async function loadCandleSnapshot() {
 }
 setInterval(loadCandleSnapshot, REST_SYNC_MS);
 
-/* ================= CHART: vertical line plugin (solo quando hoverActive) ================= */
+/* ================= CHART: vertical line plugin ================= */
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
   afterDraw(ch) {
@@ -359,6 +346,33 @@ async function fetchKlines1mRange(startTime, endTime) {
   return out.slice(0, DAY_MINUTES);
 }
 
+function updatePinnedOverlay() {
+  const overlay = $("chartOverlay");
+  const chartEl = $("chartPrice");
+  if (!overlay || !chartEl || !chart) return;
+
+  if (pinnedIndex == null) {
+    overlay.classList.remove("show");
+    return;
+  }
+
+  const ds = chart.data.datasets?.[0]?.data || [];
+  const lbs = chart.data.labels || [];
+  if (!ds.length || !lbs.length) { overlay.classList.remove("show"); return; }
+
+  let idx = Number.isFinite(+pinnedIndex) ? +pinnedIndex : null;
+  if (idx == null) { overlay.classList.remove("show"); return; }
+  idx = clamp(Math.round(idx), 0, ds.length - 1);
+
+  const price = safe(ds[idx]);
+  const label = lbs[idx];
+
+  if (!Number.isFinite(price) || !label) { overlay.classList.remove("show"); return; }
+
+  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
+  overlay.classList.add("show");
+}
+
 function initChartToday() {
   const canvas = $("priceChart");
   if (!canvas) return;
@@ -382,7 +396,36 @@ function initChartToday() {
       animation: false,
       plugins: {
         legend: { display: false },
-        tooltip: { enabled: false }
+        tooltip: { enabled: false },
+
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: "x",
+            threshold: 2,
+            onPanStart: () => { isPanning = true; },
+            onPanComplete: ({ chart }) => {
+              isPanning = false;
+              const xScale = chart.scales.x;
+              const centerPixel = (chart.chartArea.left + chart.chartArea.right) / 2;
+              const value = xScale.getValueForPixel(centerPixel);
+              pinnedIndex = value;
+              updatePinnedOverlay();
+            }
+          },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x",
+            onZoomComplete: ({ chart }) => {
+              const xScale = chart.scales.x;
+              const centerPixel = (chart.chartArea.left + chart.chartArea.right) / 2;
+              const value = xScale.getValueForPixel(centerPixel);
+              pinnedIndex = value;
+              updatePinnedOverlay();
+            }
+          }
+        }
       },
       interaction: { mode: "index", intersect: false },
       scales: {
@@ -421,16 +464,7 @@ async function loadChartToday() {
   chartBootstrappedToday = true;
 }
 
-/* ================= CHART: interactions (line + top-right hover label) ================= */
-function setHoverState(active, idx, price, label) {
-  hoverActive = active;
-  hoverIndex = active ? idx : null;
-  hoverPrice = active ? price : null;
-  hoverLabel = active ? label : null;
-  overlayVisible = active;
-  if (chart) chart.update("none");
-}
-
+/* ================= CHART: interactions (hover/touch mostra overlay sul punto) ================= */
 function setupChartInteractions() {
   const canvas = $("priceChart");
   if (!canvas) return;
@@ -443,17 +477,28 @@ function setupChartInteractions() {
   };
 
   const handleMove = (evt) => {
+    if (!chart) return;
+    if (isPanning) return; // durante il pan, lasciamo che sia onPanComplete a “pinnare”
+
     const idx = getIndexFromEvent(evt);
-    if (idx == null) {
-      setHoverState(false);
-      return;
-    }
-    const v = safe(chart.data.datasets[0].data[idx]);
-    const l = chart.data.labels[idx];
-    setHoverState(true, idx, v, l);
+    if (idx == null) return;
+
+    hoverActive = true;
+    hoverIndex = idx;
+
+    pinnedIndex = idx;
+    updatePinnedOverlay();
+
+    chart.update("none");
   };
 
-  const handleLeave = () => setHoverState(false);
+  const handleLeave = () => {
+    hoverActive = false;
+    hoverIndex = null;
+    pinnedIndex = null;
+    updatePinnedOverlay();
+    if (chart) chart.update("none");
+  };
 
   canvas.addEventListener("mousemove", handleMove, { passive: true });
   canvas.addEventListener("mouseleave", handleLeave, { passive: true });
@@ -562,7 +607,6 @@ function updateChartFrom1mKline(k) {
   const openTime = safe(k.t);
   const close = safe(k.c);
   if (!openTime || !close) return;
-
   if (openTime < candle.d.t) return;
 
   if (lastChartMinuteStart === openTime) {
@@ -570,6 +614,7 @@ function updateChartFrom1mKline(k) {
     if (idx >= 0) {
       chart.data.datasets[0].data[idx] = close;
       chart.update("none");
+      updatePinnedOverlay();
     }
     return;
   }
@@ -583,6 +628,7 @@ function updateChartFrom1mKline(k) {
   while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
 
   chart.update("none");
+  updatePinnedOverlay();
 }
 
 async function resetDayAndReloadChart(nextOpenTime) {
@@ -591,6 +637,7 @@ async function resetDayAndReloadChart(nextOpenTime) {
   chartLabels = [];
   chartData = [];
   lastChartMinuteStart = 0;
+  pinnedIndex = null;
 
   if (chart) {
     chart.data.labels = [];
@@ -602,8 +649,10 @@ async function resetDayAndReloadChart(nextOpenTime) {
 
   await loadCandleSnapshot();
   await loadChartToday();
+  updatePinnedOverlay();
 
-  setHoverState(false);
+  hoverActive = false;
+  hoverIndex = null;
 }
 
 function startKlineWS() {
@@ -682,7 +731,7 @@ function startKlineWS() {
 }
 startKlineWS();
 
-/* ================= STAKE CHART INIT (punti + tooltip con tipo) ================= */
+/* ================= STAKE CHART INIT (punti + tooltip tipo) ================= */
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas) return;
@@ -698,7 +747,6 @@ function initStakeChart() {
         fill: true,
         tension: 0.3,
 
-        // punti solo sugli eventi: ↑ verde / ↓ rosso
         pointRadius: (ctx) => {
           const i = ctx.dataIndex;
           const m = stakeMoves[i] || 0;
@@ -745,7 +793,6 @@ function initStakeChart() {
           }
         }
       },
-      // tooltip SOLO se punti il pallino
       interaction: { mode: "nearest", intersect: true },
       scales: {
         x: { display: false },
@@ -755,12 +802,12 @@ function initStakeChart() {
   });
 }
 
-/* aggiunge un punto quando stake cambia (su o giù) + tipo evento */
+/* aggiunge punto evento quando stake cambia (su o giù) */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
 
-  const TH = 0.0005; // soglia anti-rumore (alza a 0.001 se vuoi più filtro)
+  const TH = 0.0005;
 
   if (lastStakeRecorded == null) {
     lastStakeRecorded = s;
@@ -795,10 +842,7 @@ function maybeAddStakePoint(currentStake) {
   }
 }
 
-/* ================= STAKE FULL HISTORY (best-effort) =================
-   - prova a ricostruire eventi di staking da /cosmos/tx/v1beta1/txs (message.sender=address)
-   - se non disponibile/decodificabile: fallback al live
-*/
+/* ================= STAKE FULL HISTORY (best-effort) ================= */
 function isDelegateMsg(m) {
   const t = (m?.["@type"] || m?.type || "").toLowerCase();
   return t.includes("msgdelegate");
@@ -828,7 +872,6 @@ async function fetchAllTxsBySenderCosmos(addressInj, maxPages = 80) {
   let offset = 0;
   const out = [];
 
-  // solo message.sender (deleghe sono quasi sempre inviate dal delegatore)
   const ev = encodeURIComponent(`message.sender='${addressInj}'`);
 
   for (let p = 0; p < maxPages; p++) {
@@ -853,7 +896,6 @@ async function bootstrapStakeHistory() {
   if (!address) return;
   stakeBootstrapped = false;
 
-  // reset arrays
   stakeLabels = [];
   stakeData = [];
   stakeMoves = [];
@@ -922,7 +964,6 @@ async function bootstrapStakeHistory() {
     }
   }
 
-  // fallback: almeno un punto iniziale live
   maybeAddStakePoint(stakeInj);
   stakeBootstrapped = true;
 }
@@ -959,21 +1000,6 @@ function animate() {
   if (sign !== lastChartSign) {
     lastChartSign = sign;
     applyChartColorBySign(sign);
-  }
-
-  /* TOP-RIGHT GRAPH OVERLAY:
-     - quando hover/touch: mostra "HH:MM • $PRICE"
-     - quando molli: scompare davvero (classe .show via CSS)
-  */
-  const chartEl = $("chartPrice");
-  const overlay = $("chartOverlay");
-  if (chartEl && overlay) {
-    if (overlayVisible && hoverActive && hoverLabel && Number.isFinite(hoverPrice)) {
-      chartEl.textContent = `${hoverLabel} • $${safe(hoverPrice).toFixed(4)}`;
-      overlay.classList.add("show");
-    } else {
-      overlay.classList.remove("show");
-    }
   }
 
   /* BARS: gradient vivaci diversi per timeframe */
@@ -1052,7 +1078,6 @@ function animate() {
   colorNumber($("stake"), displayed.stake, os, 4);
   $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
 
-  // STAKE BAR (0-1000)
   const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
   $("stakeBar").style.width = stakePct + "%";
   $("stakeLine").style.left = stakePct + "%";
