@@ -365,6 +365,10 @@ function initChartToday() {
 
   setupChartInteractions();
   applyChartColorBySign(lastChartSign);
+
+  /* ✅ overlay nascosta finché non interagisci */
+  const overlay = $("chartPrice")?.parentElement;
+  if (overlay) overlay.style.display = "none";
 }
 
 async function loadChartToday() {
@@ -391,11 +395,21 @@ async function loadChartToday() {
   chartBootstrappedToday = true;
 }
 
-/* ================= CHART: interactions (line + top-right price) ================= */
+/* ================= CHART: interactions (line + top-right info) ================= */
 function setHoverState(active, idx, price) {
   hoverActive = active;
   hoverIndex = active ? idx : null;
   hoverPrice = active ? price : null;
+
+  const label = active && chart ? (chart.data.labels?.[idx] ?? "--") : "--";
+  const p = safe(price);
+
+  const txt = $("chartPrice");
+  const overlay = txt ? txt.parentElement : null;
+
+  if (overlay) overlay.style.display = active ? "block" : "none";
+  if (txt && active) txt.textContent = `${label} • $${p.toFixed(4)}`;
+
   if (chart) chart.update("none");
 }
 
@@ -681,13 +695,6 @@ function animate() {
     lastChartSign = sign;
     applyChartColorBySign(sign);
   }
-
-  /* TOP-RIGHT GRAPH PRICE */
-  const chartEl = $("chartPrice");
-  const targetChartVal = hoverActive && Number.isFinite(hoverPrice) ? hoverPrice : displayed.price;
-  const prevChartVal = displayedChartPrice;
-  displayedChartPrice = tick(displayedChartPrice, targetChartVal);
-  if (chartEl) colorNumber(chartEl, displayedChartPrice, prevChartVal, 4);
 
   /* BARS (tutte green/red coerenti con performance) */
   const upGrad = "linear-gradient(to right,#22c55e,#10b981)";
