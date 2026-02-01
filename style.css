@@ -29,10 +29,7 @@ body {
 }
 
 /* LEFT */
-.header-left {
-  display: flex;
-  align-items: center;
-}
+.header-left { display: flex; align-items: center; }
 
 .menu-btn {
   width: 44px;
@@ -68,10 +65,7 @@ body {
 }
 
 /* RIGHT */
-.header-right {
-  display: flex;
-  justify-content: flex-end;
-}
+.header-right { display: flex; justify-content: flex-end; }
 
 /* search */
 .search-wrap {
@@ -297,6 +291,53 @@ body {
 
 .reward-card .bar-label { display: none; }
 
+/* NEW: reward withdrawals chart */
+.reward-chart-wrap {
+  height: 140px;
+  margin-top: 0.8rem;
+  position: relative;
+}
+
+#rewardChart {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* NEW: timeline */
+.reward-timeline {
+  margin-top: .55rem;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+.reward-timeline input[type="range"] {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(255,255,255,0.16);
+  outline: none;
+}
+
+.reward-timeline input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(249,250,251,.95);
+  border: 2px solid rgba(59,130,246,.65);
+  cursor: pointer;
+}
+
+.reward-timeline-meta {
+  font-size: .74rem;
+  color: rgba(249,250,251,.72);
+  text-align: right;
+}
+
 /* stake */
 .stake-container { height: 26px; }
 .stake-fill { background: linear-gradient(to right, #22c55e, #10b981); }
@@ -319,21 +360,11 @@ body {
   position: relative;
 }
 
-#stakeChart {
-  width: 100% !important;
-  height: 100% !important;
-}
+#stakeChart { width: 100% !important; height: 100% !important; }
 
-/* ================= CHART ================= */
-.chart-card {
-  height: 300px;
-  position: relative;
-}
-
-#priceChart {
-  width: 100% !important;
-  height: 100% !important;
-}
+/* ================= PRICE CHART ================= */
+.chart-card { height: 300px; position: relative; }
+#priceChart { width: 100% !important; height: 100% !important; }
 
 .chart-overlay {
   position: absolute;
@@ -349,11 +380,7 @@ body {
   transform: translateY(-4px);
   transition: opacity 160ms ease, transform 160ms ease;
 }
-
-.chart-overlay.show {
-  opacity: .98;
-  transform: translateY(0);
-}
+.chart-overlay.show { opacity: .98; transform: translateY(0); }
 
 .last-update {
   font-size: 0.8rem;
@@ -364,14 +391,9 @@ body {
 /* ================= LOADING ================= */
 .container.loading .value-row span,
 .container.loading .sub-row,
-.container.loading .bar-values {
-  opacity: 0;
-}
+.container.loading .bar-values { opacity: 0; }
 
-.container.loading .card {
-  position: relative;
-  overflow: hidden;
-}
+.container.loading .card { position: relative; overflow: hidden; }
 
 .container.loading .card::after {
   content: "";
