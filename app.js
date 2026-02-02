@@ -23,6 +23,11 @@ const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 const NW_LOCAL_VER = 1;
 const NW_MAX_POINTS = 4800;
 
+/* ✅ NET WORTH: densità punti al massimo (senza lag) */
+const NW_MIN_DT_MS = 2500;     // registra max ~1 punto ogni 2.5s
+const NW_MIN_DUSD  = 0.02;     // soglia minima cambio USD per registrare punto
+const NW_FORCE_DT_MS = 15000;  // comunque registra almeno 1 punto ogni 15s
+
 /* REFRESH mode staging */
 const REFRESH_RED_MS = 220;
 let refreshLoaded = false;
@@ -38,6 +43,10 @@ const safe = (n) => (Number.isFinite(+n) ? +n : 0);
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+function fmtDDMM(ms){
+  const d = new Date(ms);
+  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}`;
+}
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
 function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
@@ -809,7 +818,6 @@ async function loadCandleSnapshot(isRefresh=false) {
 }
 
 /* ================= PRICE CHART (1D) ================= */
-/* --- (tutto il tuo codice chart identico: non lo tocco) --- */
 let chart = null;
 let chartLabels = [];
 let chartData = [];
@@ -1318,7 +1326,6 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* --- reward chart code identico al tuo (non lo taglio ulteriormente) --- */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1349,7 +1356,6 @@ const rewardPointLabelPlugin = {
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
 
-    // area utile (dove non si deve uscire)
     const leftBound  = ch.chartArea.left + 6;
     const rightBound = ch.chartArea.right - 6;
 
@@ -1364,12 +1370,10 @@ const rewardPointLabelPlugin = {
       const v = safe(ds.data[i]);
       const text = `+${v.toFixed(6)} INJ`;
 
-      // ✅ clamp X per non tagliare testo a sinistra/destra
       const halfW = ctx.measureText(text).width / 2;
       let x = el.x;
       x = Math.max(leftBound + halfW, Math.min(rightBound - halfW, x));
 
-      // y un filo sopra il punto, ma senza uscire dal top
       let y = el.y - 10;
       y = Math.max(ch.chartArea.top + 12, y);
 
@@ -1407,7 +1411,7 @@ function initRewardWdChart() {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-     layout: { padding: { left: 18, right: 18, top: 6, bottom: 4 } },
+      layout: { padding: { left: 18, right: 18, top: 6, bottom: 4 } },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1529,6 +1533,38 @@ function nwStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
 }
+
+/* ✅ last value cache: evita restart da 0 al refresh */
+function nwLastKey(addr){
+  const a = (addr || "").trim();
+  return a ? `inj_networth_last_v${NW_LOCAL_VER}_${a}` : null;
+}
+function saveNWLast(usd, inj, px){
+  const key = nwLastKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({
+      t: Date.now(),
+      usd: safe(usd),
+      inj: safe(inj),
+      px: safe(px)
+    }));
+  } catch {}
+}
+function loadNWLast(){
+  const key = nwLastKey(address);
+  if (!key) return null;
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj) return null;
+    return { usd: safe(obj.usd), inj: safe(obj.inj), px: safe(obj.px) };
+  } catch {
+    return null;
+  }
+}
+
 function saveNW(){
   const key = nwStoreKey(address);
   if (!key) return;
@@ -1546,7 +1582,6 @@ function saveNW(){
   }
 }
 
-/* --- resto networth identico al tuo --- */
 function loadNW(){
   const key = nwStoreKey(address);
   if (!key) return false;
@@ -1567,6 +1602,7 @@ function loadNW(){
     return false;
   }
 }
+
 function clampNWArrays(){
   const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
   nwTAll = nwTAll.slice(-n);
@@ -1578,12 +1614,20 @@ function clampNWArrays(){
     nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
   }
 }
+
 function nwWindowMs(tf){
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
 }
+
+/* ✅ label più pro: 1d = HH:MM, altri = DD/MM */
+function nwLabelFor(tf, t){
+  if (tf === "1d") return fmtHHMM(t);
+  return fmtDDMM(t);
+}
+
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
@@ -1595,7 +1639,7 @@ function nwBuildView(tf){
   for (let i = 0; i < nwTAll.length; i++){
     const t = safe(nwTAll[i]);
     if (t >= minT){
-      labels.push(fmtHHMM(t));
+      labels.push(nwLabelFor(tf, t));
       data.push(safe(nwUsdAll[i]));
     }
   }
@@ -1693,6 +1737,9 @@ function recordNetWorthPoint(){
   const totalUsd = totalInj * safe(targetPrice);
   if (!Number.isFinite(totalUsd)) return;
 
+  /* ✅ salva ultimo valore per non ripartire da 0 */
+  saveNWLast(totalUsd, totalInj, targetPrice);
+
   const now = Date.now();
 
   const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
@@ -1701,7 +1748,12 @@ function recordNetWorthPoint(){
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
 
-  if (lastT && dt < 30_000 && dUsd < 1) return;
+  // ✅ densità massima controllata
+  if (lastT) {
+    const allowByDelta = (dt >= NW_MIN_DT_MS && dUsd >= NW_MIN_DUSD);
+    const allowByTime  = (dt >= NW_FORCE_DT_MS);
+    if (!allowByDelta && !allowByTime) return;
+  }
 
   nwTAll.push(now);
   nwUsdAll.push(totalUsd);
@@ -1767,7 +1819,12 @@ async function commitAddress(newAddr) {
   settleStart = Date.now();
 
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
-  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0;
+  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
+
+  // ✅ seed net worth display from last cache (no restart from 0)
+  const last = loadNWLast();
+  if (last && last.usd > 0) displayed.netWorthUsd = last.usd;
+  else displayed.netWorthUsd = 0;
 
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
@@ -1859,6 +1916,14 @@ window.addEventListener("offline", () => {
   }
 
   if (address) loadNW();
+
+  // ✅ seed net worth display from last cached value
+  const last = loadNWLast();
+  if (last && last.usd > 0) {
+    displayed.netWorthUsd = last.usd;
+    if (!targetPrice && last.px > 0) targetPrice = last.px;
+  }
+
   attachNWTFHandlers();
   drawNW();
 
@@ -2013,12 +2078,12 @@ function animate() {
   displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
   colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
 
-  /* ✅ FIX "2 INJ": qui SOLO il totale mostra 'INJ', la riga coin mostra solo numero */
-  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+  /* ✅ card net worth migliorata: una sola riga INJ in basso */
   setText("nwInjQty", totalInj.toFixed(4));            // no ticker
   setText("nwInjPx", `$${safe(displayed.price).toFixed(2)}`);
 
-  if (address && liveMode) recordNetWorthPoint();
+  /* ✅ densità alta: registra spesso ma con gate */
+  if (address) recordNetWorthPoint();
 
   refreshConnUI();
   requestAnimationFrame(animate);
