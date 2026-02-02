@@ -87,6 +87,20 @@ function refreshConnUI() {
   statusDot.style.background = "#22c55e";
 }
 
+/* ================= UI READY FAILSAFE ================= */
+let uiReadyForced = false;
+function setUIReady(force=false){
+  const root = $("appRoot");
+  if (!root) return;
+  if (root.classList.contains("ready")) return;
+
+  if (!force && !tfReady.d) return;
+
+  root.classList.remove("loading");
+  root.classList.add("ready");
+  uiReadyForced = force;
+}
+
 /* ================= HEADER SEARCH UI ================= */
 const searchWrap = $("searchWrap");
 const searchBtn = $("searchBtn");
@@ -399,8 +413,9 @@ function startTradeWS() {
   wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
 
   wsTrade.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    const p = safe(msg.p);
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    const p = safe(msg?.p);
     if (!p) return;
 
     targetPrice = p;
@@ -456,12 +471,14 @@ function startKlineWS() {
 
   wsKline = new WebSocket(url);
 
-  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); };
+  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); clearKlineRetry(); };
   wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
   wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
 
   wsKline.onmessage = async (e) => {
-    const payload = JSON.parse(e.data);
+    let payload;
+    try { payload = JSON.parse(e.data); } catch { return; }
+
     const data = payload.data;
     if (!data || !data.k) return;
 
@@ -492,11 +509,7 @@ function startKlineWS() {
     } else if (stream.includes("@kline_1w")) applyKline("w", k);
     else if (stream.includes("@kline_1M")) applyKline("m", k);
 
-    const root = $("appRoot");
-    if (root && root.classList.contains("loading") && tfReady.d) {
-      root.classList.remove("loading");
-      root.classList.add("ready");
-    }
+    setUIReady(false);
   };
 }
 
@@ -571,11 +584,7 @@ async function loadCandleSnapshot() {
     if (candle.m.open && candle.m.high && candle.m.low) tfReady.m = true;
   }
 
-  const root = $("appRoot");
-  if (root && root.classList.contains("loading") && tfReady.d) {
-    root.classList.remove("loading");
-    root.classList.add("ready");
-  }
+  setUIReady(false);
 }
 
 /* ================= PRICE CHART (1D) ================= */
@@ -954,7 +963,7 @@ function resetStakeSeriesFromNow() {
 }
 
 function stakeAxisColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.55)" : "rgba(249,250,251,.35)";
+  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.12)" : "rgba(249,250,251,.10)";
 }
 
 function initStakeChart() {
@@ -972,13 +981,13 @@ function initStakeChart() {
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
         tension: 0.25,
-        pointRadius: 3,         // ✅ sempre visibili
+        pointRadius: 3,         // ✅ sempre punto visibile
         pointHoverRadius: 6,
         pointBackgroundColor: (ctx) => {
           const m = stakeMoves[ctx.dataIndex] || 0;
           return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(249,250,251,.25)");
         },
-        pointBorderColor: "rgba(0,0,0,.0)",
+        pointBorderColor: "rgba(0,0,0,0)",
         pointBorderWidth: 0
       }]
     },
@@ -1066,7 +1075,7 @@ function drawStakeChart(forceLiveWindow=false) {
   stakeChart?.update("none");
 }
 
-/* ✅ crea punto su OGNI movimento (anche micro compound) */
+/* ✅ punto per OGNI singolo movimento (anche micro-compound) */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -1196,7 +1205,6 @@ const rewardPointLabelPlugin = {
     if (!Number.isFinite(min)) min = 0;
     if (!Number.isFinite(max)) max = n - 1;
 
-    // quando troppi punti visibili, non disegno label
     const visibleCount = Math.max(0, Math.floor(max - min + 1));
     if (visibleCount > 26) return;
 
@@ -1212,7 +1220,7 @@ const rewardPointLabelPlugin = {
     const maxDraw = 18;
 
     const pad = 10;
-    const leftBound = area.left + 22;   // ⬅ lascia spazio ai tick interni
+    const leftBound = area.left + 22;   // spazio tick interni
     const rightBound = area.right - 12;
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
@@ -1223,7 +1231,6 @@ const rewardPointLabelPlugin = {
       const v = safe(ds.data[i]);
       if (!v) continue;
 
-      // clamp x dentro chartArea per non “toccare” la colonna verticale/ticks
       const x = clamp(el.x, leftBound, rightBound);
       const y = Math.max(area.top + pad, el.y - 10);
 
@@ -1293,8 +1300,7 @@ function initRewardWdChart() {
           ticks: {
             color: (document.body.dataset.theme === "light") ? "rgba(17,24,39,.65)" : "rgba(249,250,251,.60)",
             callback: (v) => fmtSmart(v),
-            // ✅ tick “dentro”
-            mirror: true,
+            mirror: true,   // ✅ tick dentro grafico
             padding: 6
           },
           grid: { color: rewardAxisColor(), drawTicks: false }
@@ -1458,6 +1464,9 @@ window.addEventListener("offline", () => {
 (async function boot() {
   refreshConnUI();
 
+  // ✅ failsafe: se Binance candle non arriva, dopo 3s mostro comunque tutte le card
+  setTimeout(() => setUIReady(true), 3000);
+
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
   attachRewardFilterHandler();
@@ -1500,6 +1509,7 @@ window.addEventListener("offline", () => {
     stopAllSockets();
     accountOnline = false;
     refreshConnUI();
+    setUIReady(true);
   }
 })();
 
