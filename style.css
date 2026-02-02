@@ -859,3 +859,24 @@ body[data-theme="light"] .pro-pill{
 }
 .pro-dot{ opacity: .6; }
 .pro-meta{ opacity: .85; }
+
+/* --- ONLY % inside STAKED & REWARD bars --- */
+.stake-container .bar-label,
+.reward-container .bar-label{
+  display: none !important;
+}
+
+/* percent sempre leggibile */
+.stake-percent,
+.reward-percent{
+  z-index: 3;
+  color: rgba(249,250,251,0.95);
+  text-shadow: 0 1px 14px rgba(0,0,0,0.65);
+}
+
+body[data-theme="light"] .stake-percent,
+body[data-theme="light"] .reward-percent{
+  color: rgba(15,23,42,0.92);
+  text-shadow: 0 1px 10px rgba(255,255,255,0.55);
+}
+
