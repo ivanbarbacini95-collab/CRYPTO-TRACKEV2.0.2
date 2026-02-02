@@ -13,7 +13,8 @@ const STAKE_TARGET_MAX = 1000;
 
 /* persistence */
 const STAKE_LOCAL_VER = 2;
-const RESET_STAKE_FROM_NOW_ON_BOOT = true;
+/* ✅ non resettare più ad ogni refresh: mantieni punti anche se ricarichi pagina */
+const RESET_STAKE_FROM_NOW_ON_BOOT = false;
 
 const REWARD_WD_LOCAL_VER = 2;
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
@@ -54,7 +55,6 @@ function setStatusError(msg){
 }
 
 window.addEventListener("error", (e) => {
-  // evita silent crash: se qualcosa esplode, lo vedi subito
   setStatusError("JS Error");
   console.error("JS Error:", e?.error || e);
 });
@@ -92,12 +92,8 @@ let ZOOM_OK = false;
 function tryRegisterZoom(){
   try{
     if (!window.Chart) return false;
-    // CDN: spesso espone ChartZoom o "chartjs-plugin-zoom"
     const plug = window.ChartZoom || window["chartjs-plugin-zoom"];
-    if (plug) {
-      Chart.register(plug);
-    }
-    // in Chart.js 4: plugin id = "zoom"
+    if (plug) Chart.register(plug);
     const has = !!(Chart?.registry?.plugins?.get && Chart.registry.plugins.get("zoom"));
     return has;
   } catch (e){
@@ -117,16 +113,6 @@ let accountOnline = false;
 
 function hasInternet() { return navigator.onLine === true; }
 
-/*
-STATUS RULES:
-- no internet => OFFLINE red
-- REFRESH:
-  - switch -> red briefly
-  - then orange "Connecting..." until refreshLoaded
-  - then green "Online"
-- LIVE:
-  - Connecting yellow until trade+kline+account ok
-*/
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
 
@@ -468,8 +454,8 @@ function setMode(isLive){
     }
 
     setTimeout(() => {
-      refreshConnUI();          // arancio connecting
-      refreshLoadAllOnce();     // carica tutto
+      refreshConnUI();
+      refreshLoadAllOnce();
     }, REFRESH_RED_MS);
 
   } else {
@@ -1221,20 +1207,21 @@ const rewardPointLabelPlugin = {
 
     const ctx = ch.ctx;
     ctx.save();
-    ctx.font = "700 11px Inter, sans-serif";
-    ctx.fillStyle = (document.body.dataset.theme === "light") ? "rgba(15,23,42,0.85)" : "rgba(249,250,251,0.92)";
+    ctx.font = "800 11px Inter, sans-serif";
+    ctx.fillStyle = (document.body.dataset.theme === "light") ? "rgba(15,23,42,0.88)" : "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
 
     let drawn = 0;
-    const maxDraw = 18;
+    const maxDraw = 30; // ✅ più permissivo
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
       if (!el) continue;
       if (drawn >= maxDraw) break;
+
       const v = safe(ds.data[i]);
-      if (!v) continue;
-      ctx.fillText(`+${v.toFixed(4)} INJ`, el.x, el.y - 10);
+      // ✅ disegna label anche se minuscolo / quasi zero
+      ctx.fillText(`+${v.toFixed(6)} INJ`, el.x, el.y - 10);
       drawn++;
     }
     ctx.restore();
@@ -1418,7 +1405,7 @@ async function commitAddress(newAddr) {
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
 
-  // stake series
+  // stake series (persistente)
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1466,7 +1453,6 @@ window.addEventListener("offline", () => {
 (async function boot() {
   refreshConnUI();
 
-  // failsafe: mostra UI anche se qualcosa ritarda
   setTimeout(() => setUIReady(true), 2800);
 
   attachRewardTimelineHandlers();
@@ -1537,15 +1523,15 @@ function animate() {
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
-  // BARS gradients
-  const dUp   = "linear-gradient(90deg, rgba(34,197,94,.95), rgba(16,185,129,.78))";
-  const dDown = "linear-gradient(270deg, rgba(239,68,68,.95), rgba(248,113,113,.72))";
+  // ✅ INJ price bars: gradient più leggero (premium, non “sparato”)
+  const dUp   = "linear-gradient(90deg, rgba(34,197,94,.55), rgba(16,185,129,.32))";
+  const dDown = "linear-gradient(270deg, rgba(239,68,68,.55), rgba(248,113,113,.30))";
 
-  const wUp   = "linear-gradient(90deg, rgba(59,130,246,.95), rgba(99,102,241,.76))";
-  const wDown = "linear-gradient(270deg, rgba(239,68,68,.82), rgba(59,130,246,.45))";
+  const wUp   = "linear-gradient(90deg, rgba(59,130,246,.55), rgba(99,102,241,.30))";
+  const wDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(59,130,246,.26))";
 
-  const mUp   = "linear-gradient(90deg, rgba(249,115,22,.92), rgba(236,72,153,.70))";
-  const mDown = "linear-gradient(270deg, rgba(239,68,68,.82), rgba(236,72,153,.45))";
+  const mUp   = "linear-gradient(90deg, rgba(249,115,22,.50), rgba(236,72,153,.28))";
+  const mDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(236,72,153,.25))";
 
   renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, dUp, dDown);
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
