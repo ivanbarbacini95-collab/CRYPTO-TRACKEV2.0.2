@@ -230,7 +230,6 @@ drawerNav?.addEventListener("click", (e) => {
   if (!btn) return;
   [...drawerNav.querySelectorAll(".nav-item")].forEach(x => x.classList.remove("active"));
   btn.classList.add("active");
-  // future: routing by data-page
   closeDrawer();
 });
 
@@ -244,8 +243,6 @@ $("liveToggle")?.addEventListener("click", () => {
 
 /* =========================================================
    UI: SEARCH (expand/collapse minimal)
-   - click lens => expand + focus
-   - Enter or lens when expanded => commit address + collapse
 ========================================================= */
 let address = localStorage.getItem("inj_address") || "";
 
@@ -280,29 +277,22 @@ function commitAddress(next) {
 
   settleStart = Date.now();
 
-  // reset some state for new address
   lastRewardsSeenForWithdraw = null;
   lastStakeForType = null;
   lastRewardsForType = null;
 
-  // load persisted points for address
   loadStakePointsForAddress(address);
   loadRewardPointsForAddress(address);
 
-  // rebuild charts
   if (stakeChart) redrawStakeChart();
   if (rewardChart) rebuildRewardView(true);
 
-  // fetch once immediately
   bootstrapOnce();
-
-  // collapse UI
   collapseSearch();
 }
 
 if (addressInput) {
   addressInput.value = address || "";
-
   addressInput.addEventListener("focus", expandSearch, { passive: true });
 
   addressInput.addEventListener("keydown", (e) => {
@@ -318,17 +308,14 @@ if (addressInput) {
 if (searchBtn) {
   searchBtn.addEventListener("click", (e) => {
     e.preventDefault();
-    // if closed => open
     if (!searchWrap?.classList.contains("expanded")) {
       expandSearch();
       return;
     }
-    // if open => commit
     commitAddress(addressInput?.value);
   });
 }
 
-// click outside to collapse (only if expanded)
 document.addEventListener("click", (e) => {
   if (!searchWrap?.classList.contains("expanded")) return;
   const inside = searchWrap.contains(e.target);
@@ -947,13 +934,11 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  // withdrawal point when rewards drop
   if (lastRewardsSeenForWithdraw == null) lastRewardsSeenForWithdraw = rewardsInj;
   const diff = safe(lastRewardsSeenForWithdraw) - safe(rewardsInj);
   if (diff > REWARD_WITHDRAW_THRESHOLD) addRewardWithdrawalPoint(address, diff);
   lastRewardsSeenForWithdraw = rewardsInj;
 
-  // stake point on every change + inferred type
   const type = inferStakeType(stakeInj, rewardsInj);
   addStakePoint(address, stakeInj, type || "");
 
@@ -1016,6 +1001,29 @@ let hoverIndex = null;
 let pinnedIndex = null;
 let lastChartSign = "neutral";
 
+/* ✅ tooltip elements */
+const chartOverlay = $("chartOverlay");
+const chartTooltip = $("chartTooltip");
+const chartTimeEl = $("chartTime");
+const chartPriceEl = $("chartPrice");
+let hideTooltipTimer = null;
+
+function showChartTooltip() {
+  if (!chartTooltip || !chartOverlay) return;
+  if (hideTooltipTimer) { clearTimeout(hideTooltipTimer); hideTooltipTimer = null; }
+  chartOverlay.setAttribute("aria-hidden", "false");
+  chartTooltip.classList.add("show");
+}
+function hideChartTooltip(delayMs = 220) {
+  if (!chartTooltip || !chartOverlay) return;
+  if (hideTooltipTimer) clearTimeout(hideTooltipTimer);
+  hideTooltipTimer = setTimeout(() => {
+    chartTooltip.classList.remove("show");
+    chartOverlay.setAttribute("aria-hidden", "true");
+    hideTooltipTimer = null;
+  }, delayMs);
+}
+
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
   afterDraw(ch) {
@@ -1054,24 +1062,36 @@ function applyPriceChartColorBySign(sign) {
   priceChart.update("none");
 }
 
+/* ✅ update tooltip box (time + price) */
 function updatePriceOverlayFromPinned() {
-  const chartEl = $("chartPrice");
-  if (!chartEl || !priceChart) return;
+  if (!priceChart || !chartTimeEl || !chartPriceEl) return;
 
   if (pinnedIndex == null) {
-    chartEl.textContent = "--";
+    chartTimeEl.textContent = "--:--";
+    chartPriceEl.textContent = "--";
     return;
   }
+
   const ds = priceChart.data.datasets?.[0]?.data || [];
   const lbs = priceChart.data.labels || [];
-  if (!ds.length || !lbs.length) { chartEl.textContent = "--"; return; }
+  if (!ds.length || !lbs.length) {
+    chartTimeEl.textContent = "--:--";
+    chartPriceEl.textContent = "--";
+    return;
+  }
 
   const idx = clamp(Math.round(+pinnedIndex), 0, ds.length - 1);
   const price = safe(ds[idx]);
   const label = lbs[idx];
-  if (!Number.isFinite(price) || !label) { chartEl.textContent = "--"; return; }
 
-  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
+  if (!Number.isFinite(price) || !label) {
+    chartTimeEl.textContent = "--:--";
+    chartPriceEl.textContent = "--";
+    return;
+  }
+
+  chartTimeEl.textContent = String(label);
+  chartPriceEl.textContent = `$${price.toFixed(4)}`;
 }
 
 async function fetchKlines1mRange(startTime, endTime) {
@@ -1154,7 +1174,9 @@ function setupPriceChartInteractions() {
     hoverIndex = idx;
     pinnedIndex = idx;
 
+    showChartTooltip();
     updatePriceOverlayFromPinned();
+
     priceChart.update("none");
   };
 
@@ -1162,7 +1184,10 @@ function setupPriceChartInteractions() {
     hoverActive = false;
     hoverIndex = null;
     pinnedIndex = null;
+
     updatePriceOverlayFromPinned();
+    hideChartTooltip(220);
+
     priceChart.update("none");
   };
 
@@ -1211,6 +1236,9 @@ function updateChartFrom1mKline(k) {
     if (idx >= 0) {
       priceChart.data.datasets[0].data[idx] = close;
       priceChart.update("none");
+
+      /* se stai hoverando l’ultimo punto, aggiorna tooltip */
+      if (pinnedIndex != null) updatePriceOverlayFromPinned();
     }
     return;
   }
@@ -1224,6 +1252,8 @@ function updateChartFrom1mKline(k) {
   while (priceChart.data.datasets[0].data.length > DAY_MINUTES) priceChart.data.datasets[0].data.shift();
 
   priceChart.update("none");
+
+  if (pinnedIndex != null) updatePriceOverlayFromPinned();
 }
 
 async function ensureChartBootstrapped() {
@@ -1353,7 +1383,6 @@ function animate() {
     lastChartSign = sign;
     applyPriceChartColorBySign(sign);
 
-    // tint stake/reward charts (not grey)
     if (stakeChart) {
       const ds = stakeChart.data.datasets[0];
       if (sign === "up") { ds.borderColor = "#22c55e"; ds.backgroundColor = "rgba(34,197,94,.18)"; }
@@ -1482,7 +1511,6 @@ async function bootstrapOnce() {
   refreshConnUI();
   if (!hasInternet()) return;
 
-  // load persisted points for current address
   if (address) {
     loadStakePointsForAddress(address);
     loadRewardPointsForAddress(address);
