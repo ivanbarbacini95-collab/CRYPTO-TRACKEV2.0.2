@@ -1,7 +1,7 @@
 // /api/point.js
-const { put, list } = require("@vercel/blob");
+import { put, list } from "@vercel/blob";
 
-const MAX_BODY_BYTES = 180_000;
+const MAX_BODY_BYTES = 220_000;
 const MAX_POINTS = 2400;
 
 function json(res, code, obj) {
@@ -25,16 +25,17 @@ function clampArray(arr, max) {
 
 function sanitizePayload(p) {
   const out = {
-    v: 1,
+    v: 2,
     t: Date.now(),
     stake: { labels: [], data: [], moves: [], types: [] },
     wd: { labels: [], values: [], times: [] },
+    nw: { times: [], usd: [], inj: [] }, // ✅ net worth series
   };
 
-  if (p && p.stake) {
+  if (p?.stake) {
     out.stake.labels = clampArray(p.stake.labels, MAX_POINTS).map(String);
-    out.stake.data   = clampArray(p.stake.data,   MAX_POINTS).map((x) => Number(x));
-    out.stake.moves  = clampArray(p.stake.moves,  MAX_POINTS).map((x) => Number(x));
+    out.stake.data   = clampArray(p.stake.data,   MAX_POINTS).map(Number);
+    out.stake.moves  = clampArray(p.stake.moves,  MAX_POINTS).map(Number);
     out.stake.types  = clampArray(p.stake.types,  MAX_POINTS).map(String);
 
     const n = out.stake.data.length;
@@ -45,10 +46,10 @@ function sanitizePayload(p) {
     while (out.stake.types.length < n) out.stake.types.unshift("Stake update");
   }
 
-  if (p && p.wd) {
+  if (p?.wd) {
     out.wd.labels = clampArray(p.wd.labels, MAX_POINTS).map(String);
-    out.wd.values = clampArray(p.wd.values, MAX_POINTS).map((x) => Number(x));
-    out.wd.times  = clampArray(p.wd.times,  MAX_POINTS).map((x) => Number(x));
+    out.wd.values = clampArray(p.wd.values, MAX_POINTS).map(Number);
+    out.wd.times  = clampArray(p.wd.times,  MAX_POINTS).map(Number);
 
     const n = out.wd.values.length;
     out.wd.labels = out.wd.labels.slice(-n);
@@ -56,59 +57,33 @@ function sanitizePayload(p) {
     while (out.wd.times.length < n) out.wd.times.unshift(0);
   }
 
+  if (p?.nw) {
+    out.nw.times = clampArray(p.nw.times, MAX_POINTS).map(Number);
+    out.nw.usd   = clampArray(p.nw.usd,   MAX_POINTS).map(Number);
+    out.nw.inj   = clampArray(p.nw.inj,   MAX_POINTS).map(Number);
+
+    const n = out.nw.times.length;
+    out.nw.usd = out.nw.usd.slice(-n);
+    out.nw.inj = out.nw.inj.slice(-n);
+    while (out.nw.usd.length < n) out.nw.usd.unshift(0);
+    while (out.nw.inj.length < n) out.nw.inj.unshift(0);
+  }
+
   out.t = Date.now();
   return out;
 }
 
-function readBody(req, maxBytes) {
-  return new Promise((resolve) => {
-    let raw = "";
-    let ended = false;
+async function readLatestBlobText(prefix) {
+  const r = await list({ prefix, limit: 1 });
+  const item = r?.blobs?.[0];
+  if (!item?.url) return null;
 
-    const done = (val) => {
-      if (ended) return;
-      ended = true;
-      resolve(val);
-    };
-
-    req.on("data", (chunk) => {
-      raw += chunk;
-      if (raw.length > maxBytes) {
-        // interrompi subito e chiudi in modo "pulito"
-        raw = "";
-        try { req.destroy(); } catch {}
-        done(null);
-      }
-    });
-
-    req.on("end", () => done(raw || null));
-    req.on("close", () => done(raw || null));
-    req.on("error", () => done(null));
-  });
-}
-
-async function readLatestDataJson(prefix, pathname) {
-  // prendo un po' di risultati e scelgo il più recente per pathname
-  const r = await list({ prefix, limit: 50 });
-  const blobs = Array.isArray(r && r.blobs) ? r.blobs : [];
-  const same = blobs.filter((b) => b && b.pathname === pathname && b.url);
-
-  if (!same.length) return null;
-
-  // scegli il più recente (uploadedAt)
-  same.sort((a, b) => {
-    const ta = new Date(a.uploadedAt || 0).getTime();
-    const tb = new Date(b.uploadedAt || 0).getTime();
-    return tb - ta;
-  });
-
-  const url = same[0].url;
-  const resp = await fetch(url, { cache: "no-store" });
+  const resp = await fetch(item.url, { cache: "no-store" });
   if (!resp.ok) return null;
   return await resp.text();
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -119,28 +94,37 @@ module.exports = async function handler(req, res) {
       return res.end();
     }
 
-    const address = normalizeAddr(req.query && req.query.address);
+    const address = normalizeAddr(req.query?.address);
     if (!address) return json(res, 400, { ok: false, error: "Invalid address" });
 
     const prefix = `inj-points/${address}/`;
     const pathname = `${prefix}data.json`;
 
     if (req.method === "GET") {
-      const txt = await readLatestDataJson(prefix, pathname);
+      const txt = await readLatestBlobText(prefix);
       if (!txt) return json(res, 200, { ok: true, data: null });
-
       let data = null;
       try { data = JSON.parse(txt); } catch { data = null; }
       return json(res, 200, { ok: true, data });
     }
 
     if (req.method === "POST") {
-      const raw = await readBody(req, MAX_BODY_BYTES);
+      let raw = "";
+      await new Promise((resolve) => {
+        req.on("data", (chunk) => {
+          raw += chunk;
+          if (raw.length > MAX_BODY_BYTES) {
+            raw = "";
+            req.destroy();
+          }
+        });
+        req.on("end", resolve);
+      });
+
       if (!raw) return json(res, 400, { ok: false, error: "Empty/Too large body" });
 
       let parsed = null;
-      try { parsed = JSON.parse(raw); }
-      catch { return json(res, 400, { ok: false, error: "Invalid JSON" }); }
+      try { parsed = JSON.parse(raw); } catch { return json(res, 400, { ok: false, error: "Invalid JSON" }); }
 
       const clean = sanitizePayload(parsed);
 
@@ -150,7 +134,7 @@ module.exports = async function handler(req, res) {
         addRandomSuffix: false,
       });
 
-      return json(res, 200, { ok: true, url: (blob && blob.url) || null, t: clean.t });
+      return json(res, 200, { ok: true, url: blob?.url || null, t: clean.t });
     }
 
     return json(res, 405, { ok: false, error: "Method not allowed" });
@@ -158,4 +142,4 @@ module.exports = async function handler(req, res) {
     console.error(e);
     return json(res, 500, { ok: false, error: "Server error" });
   }
-};
+}
