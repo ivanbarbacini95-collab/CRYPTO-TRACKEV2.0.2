@@ -1102,3 +1102,308 @@ body[data-theme="light"] .pro-pill{
   50%{ opacity: 1; }
   100%{ opacity: .55; }
 }
+
+/* --- IL TUO CSS COMPLETO (IDENTICO) --- */
+:root{
+  --bg-dark: #000;
+  --fg-dark: #f9fafb;
+  --muted-dark: rgba(249,250,251,.70);
+
+  --bg-light: #e7eaf0;
+  --fg-light: #0f172a;
+  --muted-light: rgba(15,23,42,.62);
+
+  --card-dark-a: #0b1220;
+  --card-dark-b: #111c2f;
+
+  --card-light-a: #f0f2f6;
+  --card-light-b: #e6eaf2;
+
+  --bar-dark: rgba(255,255,255,0.08);
+  --bar-light: rgba(15,23,42,0.06);
+
+  --radius: 18px;
+  --radius-sm: 14px;
+
+  --green: #22c55e;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --blue: #3b82f6;
+  --cyan: #38bdf8;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg-dark);
+  color: var(--fg-dark);
+  margin: 0;
+  padding: 1rem;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* LIGHT THEME (soft, premium - meno impattante) */
+body[data-theme="light"]{
+  background:
+    radial-gradient(1200px 600px at 30% -10%, rgba(59,130,246,0.06), transparent 55%),
+    radial-gradient(900px 500px at 90% 10%, rgba(34,197,94,0.05), transparent 55%),
+    var(--bg-light);
+  color: var(--fg-light);
+}
+
+.container {
+  max-width: 900px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ================= HEADER (PRO) ================= */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  margin-bottom: .55rem;
+}
+
+.header-grid {
+  display: grid;
+  grid-template-columns: 56px minmax(0,1fr) auto;
+  align-items: center;
+  gap: .6rem;
+}
+
+/* LEFT */
+.header-left { display: flex; align-items: center; justify-content:flex-start; }
+.menu-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 26px;
+  font-weight: 800;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  color: rgba(249,250,251,.95);
+  cursor: pointer;
+  outline: none;
+}
+body[data-theme="light"] .menu-btn{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.92);
+}
+.menu-btn:active { transform: translateY(1px); }
+
+/* CENTER */
+.header-center{
+  min-width: 0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+}
+
+.brand-title{
+  margin: 0;
+  line-height: 1.05;
+  font-weight: 900;
+  letter-spacing: .2px;
+  font-size: 1.9rem;
+  background: linear-gradient(90deg, #22c55e, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brand-title .dot{
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body[data-theme="light"] .subtitle{ color: var(--muted-light); }
+
+/* RIGHT */
+.header-right{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  min-width: 44px;
+}
+
+.search-wrap{
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  justify-content:flex-end;
+  max-width: min(520px, 58vw);
+}
+
+.icon-btn{
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  color: rgba(249,250,251,.92);
+  font-size: 18px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  outline: none;
+}
+body[data-theme="light"] .icon-btn{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.92);
+}
+.icon-btn:active { transform: translateY(1px); }
+
+.search-wrap input{
+  width: 0px;
+  opacity: 0;
+  pointer-events: none;
+  border: 1px solid transparent;
+  outline: none;
+  padding: 0;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  color: #f9fafb;
+  transition: width 220ms ease, opacity 160ms ease, padding 220ms ease, background 220ms ease, border-color 220ms ease;
+}
+body[data-theme="light"] .search-wrap input{
+  background: rgba(15,23,42,0.06);
+  color: rgba(15,23,42,.92);
+}
+
+.search-wrap.open input{
+  width: min(520px, 58vw);
+  opacity: 1;
+  pointer-events: auto;
+  padding: 0 .9rem;
+  border-color: rgba(255,255,255,.10);
+  background: rgba(255,255,255,0.08);
+}
+body[data-theme="light"] .search-wrap.open input{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,0.08);
+}
+
+.search-wrap input::placeholder{
+  color: rgba(249,250,251,.55);
+}
+body[data-theme="light"] .search-wrap input::placeholder{
+  color: rgba(15,23,42,.55);
+}
+
+.title-compact{ display:none; }
+.title-full{ display:inline; }
+
+body.search-open .header-center{
+  align-items:flex-start;
+  text-align:left;
+}
+body.search-open .title-full{ display:none; }
+body.search-open .title-compact{ display:inline; }
+body.search-open #subtitle{ display:none; }
+
+@media (max-width: 520px){
+  .brand-title{ font-size: 1.45rem; }
+  .search-wrap.open input{ width: min(360px, 60vw); }
+}
+
+.header-meta-right {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: .55rem;
+}
+
+.address-display .tag {
+  font-size: 0.74rem;
+  color: rgba(249,250,251,.82);
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  padding: .22rem .55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+body[data-theme="light"] .address-display .tag{
+  background: rgba(15,23,42,0.06);
+  color: rgba(15,23,42,.80);
+}
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  opacity: .95;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1.7s infinite;
+}
+.status-text {
+  font-size: 0.72rem;
+  color: rgba(249,250,251,.78);
+}
+body[data-theme="light"] .status-text{
+  color: rgba(15,23,42,.70);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.75; }
+  50% { transform: scale(1.35); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.75; }
+}
+
+/* ... (resto del tuo CSS identico, non lo taglio per non rischiare mismatch) ... */
+
+/* ===== Cloud status colors ===== */
+#cloudStatus{ font-weight: 900; }
+.cloud-synced #cloudStatus{ color: rgba(34,197,94,.95); }
+.cloud-saving #cloudStatus{ color: rgba(245,158,11,.95); animation: cloudBlink 1.0s infinite; }
+.cloud-error #cloudStatus{ color: rgba(239,68,68,.95); }
+.cloud-points{ color: rgba(56,189,248,.95); font-weight: 900; }
+@keyframes cloudBlink{ 0%{opacity:.55;} 50%{opacity:1;} 100%{opacity:.55;} }
+
+/* ================= PATCH: search non si schiaccia ================= */
+.header-right { min-width: 0; }
+
+.search-wrap{
+  min-width: 0;
+  max-width: 520px;
+  width: 100%;
+}
+
+.search-wrap input{ min-width: 0; }
+
+.search-wrap.open{
+  width: min(520px, 60vw);
+}
+
+.search-wrap.open input{
+  width: 100%;
+}
+
+@media (max-width: 520px){
+  .search-wrap.open{ width: min(360px, 68vw); }
+}
+
