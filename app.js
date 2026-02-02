@@ -27,11 +27,6 @@ let refreshLoading = false;
 /* ✅ Status dot "mode loading" (switch / data loading) */
 let modeLoading = false;
 
-/* ================= CLOUD SYNC (Vercel API /api/point) ================= */
-const CLOUD_SYNC_ON = true;
-const CLOUD_SYNC_DEBOUNCE_MS = 1200;
-const CLOUD_TIMEOUT_MS = 5500;
-
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
@@ -54,7 +49,137 @@ function fmtSmart(v){
   return v.toFixed(6);
 }
 
-function hasInternet() { return navigator.onLine === true; }
+/* ================= SERVER POINTS SYNC (Vercel Blob via /api/point) =================
+   ✅ Salva OGNI punto (stake + wd) e ripristina cross-device
+*/
+let serverSyncBusy = false;
+let serverSyncQueued = false;
+let lastServerHash = "";
+let serverSyncEnabled = true; // se vuoi spegnerlo al volo: false
+
+function stableStringify(obj){
+  return JSON.stringify(obj);
+}
+
+function buildServerPayload(){
+  return {
+    stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
+    wd:    { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll }
+  };
+}
+
+function hashPayload(p){
+  const s = stableStringify(p);
+  return `${s.length}:${s.slice(0,80)}:${s.slice(-80)}`;
+}
+
+async function pullPointsFromServer(addr){
+  if (!serverSyncEnabled) return false;
+  if (!hasInternet()) return false;
+  const a = (addr || "").trim();
+  if (!a) return false;
+
+  try{
+    const res = await fetch(`/api/point?address=${encodeURIComponent(a)}`, { cache: "no-store" });
+    if (!res.ok) return false;
+    const j = await res.json();
+    const data = j?.data;
+    if (!data) return false;
+
+    // --- stake ---
+    if (data.stake && Array.isArray(data.stake.data)) {
+      stakeLabels = Array.isArray(data.stake.labels) ? data.stake.labels.map(String) : [];
+      stakeData   = data.stake.data.map(Number);
+      stakeMoves  = Array.isArray(data.stake.moves) ? data.stake.moves.map(Number) : [];
+      stakeTypes  = Array.isArray(data.stake.types) ? data.stake.types.map(String) : [];
+
+      const n = stakeData.length;
+      stakeLabels = stakeLabels.slice(-n);
+      stakeMoves  = stakeMoves.slice(-n);
+      stakeTypes  = stakeTypes.slice(-n);
+      while (stakeMoves.length < n) stakeMoves.unshift(0);
+      while (stakeTypes.length < n) stakeTypes.unshift("Stake update");
+
+      stakeBaselineCaptured = stakeData.length > 0;
+      lastStakeRecordedRounded = stakeData.length
+        ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6))
+        : null;
+
+      saveStakeSeries(); // anche local
+      drawStakeChart();
+    }
+
+    // --- wd ---
+    if (data.wd && Array.isArray(data.wd.values)) {
+      wdLabelsAll = Array.isArray(data.wd.labels) ? data.wd.labels.map(String) : [];
+      wdValuesAll = data.wd.values.map(Number);
+      wdTimesAll  = Array.isArray(data.wd.times) ? data.wd.times.map(Number) : [];
+
+      saveWdAll(); // anche local
+      rebuildWdView();
+      goRewardLive();
+    }
+
+    // aggiorna hash così non reposti subito identico
+    const h = hashPayload(buildServerPayload());
+    lastServerHash = h;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pushPointsToServer(addr){
+  if (!serverSyncEnabled) return false;
+  if (!hasInternet()) return false;
+  const a = (addr || "").trim();
+  if (!a) return false;
+
+  const payload = buildServerPayload();
+  const h = hashPayload(payload);
+  if (h === lastServerHash) return true; // niente da salvare
+
+  try{
+    const res = await fetch(`/api/point?address=${encodeURIComponent(a)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: stableStringify(payload)
+    });
+    if (!res.ok) return false;
+    const j = await res.json();
+    if (!j?.ok) return false;
+
+    lastServerHash = h;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* salva OGNI punto: esegue subito, ma gestisce coda se arriva un altro punto mentre sta salvando */
+function requestServerSave(){
+  if (!serverSyncEnabled) return;
+  if (!address) return;
+
+  if (serverSyncBusy){
+    serverSyncQueued = true;
+    return;
+  }
+
+  serverSyncBusy = true;
+  (async () => {
+    try{
+      await pushPointsToServer(address);
+    } finally {
+      serverSyncBusy = false;
+      if (serverSyncQueued){
+        serverSyncQueued = false;
+        requestServerSave(); // salva anche l'ultimo arrivato
+      }
+    }
+  })();
+}
 
 /* ================= GLOBAL ERROR GUARDS ================= */
 function setStatusError(msg){
@@ -113,13 +238,6 @@ function tryRegisterZoom(){
 }
 ZOOM_OK = tryRegisterZoom();
 
-/* ✅ Global point defaults (so points never vanish by “defaults”) */
-if (window.Chart) {
-  Chart.defaults.elements.point.radius = 3;
-  Chart.defaults.elements.point.hoverRadius = 7;
-  Chart.defaults.elements.point.hitRadius = 14;
-}
-
 /* ================= CONNECTION UI ================= */
 const statusDot  = $("statusDot");
 const statusText = $("statusText");
@@ -128,10 +246,12 @@ let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
 
+function hasInternet() { return navigator.onLine === true; }
+
 /* ✅ Determine if LIVE is truly "ready" */
 function liveReady(){
   const socketsOk = wsTradeOnline && wsKlineOnline;
-  const accountOk = !address || accountOnline;
+  const accountOk = !address || accountOnline; // if no wallet set, don't block green
   return socketsOk && accountOk;
 }
 
@@ -139,6 +259,7 @@ function liveReady(){
    - No internet => red
    - Loading (switching / fetching) => orange
    - Ready => green
+   - (No yellow at all)
 */
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
@@ -166,8 +287,6 @@ function refreshConnUI() {
 }
 
 /* ================= UI READY FAILSAFE ================= */
-const tfReady = { d: false, w: false, m: false };
-
 function setUIReady(force=false){
   const root = $("appRoot");
   if (!root) return;
@@ -183,7 +302,7 @@ async function fetchJSON(url) {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
-  } catch {
+  } catch (e) {
     return null;
   }
 }
@@ -284,25 +403,6 @@ const menuBtn = $("menuBtn");
 let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = address || "";
 
-/* ✅ dynamic search width to prevent overlap on desktop */
-function computeSearchWidth(){
-  const root = document.documentElement;
-  const w = window.innerWidth || 900;
-
-  // Keep it conservative, never overlap title:
-  // - small screens: CSS already uses min(64vw, 260px)
-  // - desktop: clamp to a safe size
-  let sw = 320;
-  if (w >= 1200) sw = 380;
-  else if (w >= 980) sw = 340;
-  else if (w >= 720) sw = 300;
-  else sw = 260;
-
-  root.style.setProperty("--search-w", `${sw}px`);
-}
-computeSearchWidth();
-window.addEventListener("resize", computeSearchWidth, { passive: true });
-
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
@@ -313,13 +413,11 @@ setAddressDisplay(address);
 function openSearch() {
   if (!searchWrap) return;
   searchWrap.classList.add("open");
-  document.body.classList.add("search-open"); // ✅ mobile mini title + hide subtitle
   setTimeout(() => addressInput?.focus(), 20);
 }
 function closeSearch() {
   if (!searchWrap) return;
   searchWrap.classList.remove("open");
-  document.body.classList.remove("search-open");
   addressInput?.blur();
 }
 
@@ -336,11 +434,11 @@ if (addressInput) {
   addressInput.addEventListener("focus", openSearch, { passive: true });
   addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
 
-  addressInput.addEventListener("keydown", async (e) => {
+  addressInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      await commitAddress(pendingAddress);
-      closeSearch(); // ✅ after search: hide input, keep lens only
+      commitAddress(pendingAddress);
+      closeSearch();
     } else if (e.key === "Escape") {
       e.preventDefault();
       addressInput.value = address || "";
@@ -530,6 +628,7 @@ const candle = {
   w: { t: 0, open: 0, high: 0, low: 0 },
   m: { t: 0, open: 0, high: 0, low: 0 },
 };
+const tfReady = { d: false, w: false, m: false };
 
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
@@ -683,7 +782,7 @@ async function loadAccount(isRefresh=false) {
   }
 
   accountOnline = true;
-  modeLoading = false;
+  modeLoading = false; // ✅ once account arrives, allow green
   refreshConnUI();
 
   const bal = b.balances?.find(x => x.denom === "inj");
@@ -889,7 +988,7 @@ function initChartToday() {
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
-        pointRadius: 0, // price chart stays clean
+        pointRadius: 0,
         tension: 0.3
       }]
     },
@@ -1020,7 +1119,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKE CHART (persist + cloud) ================= */
+/* ================= STAKE CHART (persist) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -1042,7 +1141,6 @@ function saveStakeSeries() {
       labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
     }));
   } catch {}
-  scheduleCloudSave(); // ✅
 }
 function loadStakeSeries() {
   const key = stakeStoreKey(address);
@@ -1087,14 +1185,7 @@ function resetStakeSeriesFromNow() {
   stakeBaselineCaptured = false;
   saveStakeSeries();
   drawStakeChart();
-}
-
-/* ✅ point radius dynamic => always visible (desktop too) */
-function pointsRadiusByCount(n){
-  if (n > 450) return 2.0;
-  if (n > 250) return 2.3;
-  if (n > 120) return 2.7;
-  return 3.2;
+  requestServerSave(); // ✅ cloud
 }
 
 function initStakeChart() {
@@ -1111,14 +1202,11 @@ function initStakeChart() {
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
         tension: 0.25,
-
-        pointRadius: (ctx) => pointsRadiusByCount((ctx?.chart?.data?.datasets?.[0]?.data || []).length),
-        pointHoverRadius: 7,
-        pointHitRadius: 14,
-
-        pointBackgroundColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "#111c2f" : "#111c2f",
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointBackgroundColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "#ef4444" : "#22c55e",
         pointBorderColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "rgba(239,68,68,.95)" : "rgba(34,197,94,.90)",
-        pointBorderWidth: 2
+        pointBorderWidth: 1
       }]
     },
     options: {
@@ -1171,6 +1259,7 @@ function maybeAddStakePoint(currentStake) {
     stakeBaselineCaptured = true;
     saveStakeSeries();
     drawStakeChart();
+    requestServerSave(); // ✅ cloud
     return;
   }
 
@@ -1187,9 +1276,10 @@ function maybeAddStakePoint(currentStake) {
 
   saveStakeSeries();
   drawStakeChart();
+  requestServerSave(); // ✅ cloud
 }
 
-/* ================= REWARD WITHDRAWALS (persist + cloud) ================= */
+/* ================= REWARD WITHDRAWALS (persist) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
@@ -1214,7 +1304,6 @@ function saveWdAll() {
       labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
   } catch {}
-  scheduleCloudSave(); // ✅
 }
 function loadWdAll() {
   const key = wdStoreKey(address);
@@ -1254,7 +1343,6 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* label plugin */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1272,9 +1360,7 @@ const rewardPointLabelPlugin = {
     if (!Number.isFinite(max)) max = n - 1;
 
     const visibleCount = Math.max(0, Math.floor(max - min + 1));
-
-    // ✅ if too many visible, don't draw labels (points still visible!)
-    if (visibleCount > 28) return;
+    if (visibleCount > 30) return;
 
     const ctx = ch.ctx;
     ctx.save();
@@ -1283,7 +1369,7 @@ const rewardPointLabelPlugin = {
     ctx.textAlign = "center";
 
     let drawn = 0;
-    const maxDraw = 28;
+    const maxDraw = 30;
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
@@ -1314,16 +1400,11 @@ function initRewardWdChart() {
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         tension: 0.25,
-
-        /* ✅ points always visible (desktop + mobile) */
-        pointRadius: (ctx) => pointsRadiusByCount((ctx?.chart?.data?.datasets?.[0]?.data || []).length),
-        pointHoverRadius: 7,
-        pointHitRadius: 14,
-
-        /* ✅ contrast ring */
-        pointBackgroundColor: "#111c2f",
-        pointBorderColor: "rgba(59,130,246,.95)",
-        pointBorderWidth: 2
+        pointRadius: 4,        // ✅ sempre visibili desktop+mobile
+        pointHoverRadius: 6,
+        pointBackgroundColor: "#3b82f6",
+        pointBorderColor: "rgba(249,250,251,.6)",
+        pointBorderWidth: 1
       }]
     },
     options: {
@@ -1437,6 +1518,7 @@ function maybeRecordRewardWithdrawal(newRewards) {
     saveWdAll();
     rebuildWdView();
     goRewardLive();
+    requestServerSave(); // ✅ cloud (ogni punto)
   }
   wdLastRewardsSeen = r;
 }
@@ -1464,142 +1546,6 @@ function refreshChartsTheme(){
   } catch {}
 }
 
-/* ================= CLOUD SYNC (helpers) ================= */
-function withTimeout(promise, ms=CLOUD_TIMEOUT_MS) {
-  return Promise.race([
-    promise,
-    new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))
-  ]);
-}
-
-async function cloudGet(addr) {
-  if (!CLOUD_SYNC_ON || !addr || !hasInternet()) return null;
-  try {
-    const url = `/api/point?address=${encodeURIComponent(addr)}`;
-    const res = await withTimeout(fetch(url, { cache: "no-store" }));
-    if (!res.ok) return null;
-    const j = await res.json();
-    return j?.ok ? (j.data || null) : null;
-  } catch {
-    return null;
-  }
-}
-
-async function cloudPut(addr, payload) {
-  if (!CLOUD_SYNC_ON || !addr || !hasInternet()) return false;
-  try {
-    const res = await withTimeout(fetch(`/api/point?address=${encodeURIComponent(addr)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    }));
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-function buildCloudPayload() {
-  return {
-    v: 1,
-    t: Date.now(),
-    stake: {
-      labels: stakeLabels,
-      data: stakeData,
-      moves: stakeMoves,
-      types: stakeTypes
-    },
-    wd: {
-      labels: wdLabelsAll,
-      values: wdValuesAll,
-      times: wdTimesAll
-    }
-  };
-}
-
-function pickBestSeries(localObj, cloudObj) {
-  const L = localObj || {};
-  const C = cloudObj || {};
-  const lt = safe(L.t), ct = safe(C.t);
-
-  const lStakeN = (L?.stake?.data || []).length;
-  const cStakeN = (C?.stake?.data || []).length;
-  const lWdN    = (L?.wd?.values || []).length;
-  const cWdN    = (C?.wd?.values || []).length;
-
-  const stakeUseCloud = (cStakeN > lStakeN + 2) || (cStakeN === lStakeN && ct > lt);
-  const wdUseCloud    = (cWdN > lWdN + 2) || (cWdN === lWdN && ct > lt);
-
-  const out = {
-    v: 1,
-    t: Math.max(lt, ct, Date.now()),
-    stake: stakeUseCloud ? (C.stake || {}) : (L.stake || {}),
-    wd:    wdUseCloud    ? (C.wd    || {}) : (L.wd    || {})
-  };
-
-  const sd = Array.isArray(out.stake.data) ? out.stake.data : [];
-  const sl = Array.isArray(out.stake.labels) ? out.stake.labels : [];
-  const sm = Array.isArray(out.stake.moves) ? out.stake.moves : [];
-  const st = Array.isArray(out.stake.types) ? out.stake.types : [];
-  const sn = sd.length;
-
-  out.stake.data = sd;
-  out.stake.labels = sl.slice(-sn);
-  out.stake.moves  = sm.slice(-sn);
-  out.stake.types  = st.slice(-sn);
-  while (out.stake.moves.length < sn) out.stake.moves.unshift(0);
-  while (out.stake.types.length < sn) out.stake.types.unshift("Stake update");
-
-  const wv = Array.isArray(out.wd.values) ? out.wd.values : [];
-  const wl = Array.isArray(out.wd.labels) ? out.wd.labels : [];
-  const wt = Array.isArray(out.wd.times) ? out.wd.times : [];
-  const wn = wv.length;
-
-  out.wd.values = wv;
-  out.wd.labels = wl.slice(-wn);
-  out.wd.times  = wt.slice(-wn);
-  while (out.wd.times.length < wn) out.wd.times.unshift(0);
-
-  return out;
-}
-
-let cloudSaveTimer = null;
-function scheduleCloudSave() {
-  if (!CLOUD_SYNC_ON || !address) return;
-  if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
-  cloudSaveTimer = setTimeout(async () => {
-    cloudSaveTimer = null;
-    const payload = buildCloudPayload();
-    await cloudPut(address, payload);
-  }, CLOUD_SYNC_DEBOUNCE_MS);
-}
-
-async function mergeCloudIntoLocal(addr) {
-  if (!CLOUD_SYNC_ON || !addr || !hasInternet()) return;
-
-  const localSnap = buildCloudPayload();
-  const cloudSnap = await cloudGet(addr);
-  if (!cloudSnap) return;
-
-  const merged = pickBestSeries(localSnap, cloudSnap);
-
-  stakeLabels = merged.stake.labels || [];
-  stakeData   = merged.stake.data   || [];
-  stakeMoves  = merged.stake.moves  || [];
-  stakeTypes  = merged.stake.types  || [];
-
-  wdLabelsAll = merged.wd.labels || [];
-  wdValuesAll = merged.wd.values || [];
-  wdTimesAll  = merged.wd.times  || [];
-
-  // persist + redraw
-  saveStakeSeries();
-  rebuildWdView();
-  drawStakeChart();
-  drawRewardWdChart();
-  goRewardLive();
-}
-
 /* ================= ADDRESS COMMIT ================= */
 async function commitAddress(newAddr) {
   const a = (newAddr || "").trim();
@@ -1611,6 +1557,10 @@ async function commitAddress(newAddr) {
 
   setAddressDisplay(address);
   settleStart = Date.now();
+
+  // 🔽 1) prova a caricare dal server (cross-device)
+  // se non c'è nulla, resti sui dati local
+  await pullPointsFromServer(address);
 
   // reset displayed
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
@@ -1631,9 +1581,6 @@ async function commitAddress(newAddr) {
   loadWdAll();
   rebuildWdView();
   goRewardLive();
-
-  // ✅ merge cloud for this address (cross-device)
-  await mergeCloudIntoLocal(address);
 
   // status: loading during address commit fetch
   modeLoading = true;
@@ -1683,6 +1630,11 @@ window.addEventListener("offline", () => {
   if (addressInput) addressInput.value = pendingAddress;
   setAddressDisplay(address);
 
+  // 🔽 Se ho già un address salvato, provo a caricare i punti da server
+  if (address) {
+    await pullPointsFromServer(address);
+  }
+
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
@@ -1704,9 +1656,6 @@ window.addEventListener("offline", () => {
     goRewardLive();
   }
 
-  // ✅ merge cloud (cross-device) at boot
-  if (address) await mergeCloudIntoLocal(address);
-
   // loading base data
   modeLoading = true;
   refreshConnUI();
@@ -1719,6 +1668,8 @@ window.addEventListener("offline", () => {
     startKlineWS();
     if (address) await loadAccount();
     startAllTimers();
+    // modeLoading will drop once liveReady() becomes true
+    // (refreshConnUI handles it automatically)
   } else {
     stopAllTimers();
     stopAllSockets();
@@ -1749,11 +1700,13 @@ function animate() {
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
-  // price bars gradients
+  // ✅ INJ price bars: gradient più leggero (premium, non “sparato”)
   const dUp   = "linear-gradient(90deg, rgba(34,197,94,.55), rgba(16,185,129,.32))";
   const dDown = "linear-gradient(270deg, rgba(239,68,68,.55), rgba(248,113,113,.30))";
+
   const wUp   = "linear-gradient(90deg, rgba(59,130,246,.55), rgba(99,102,241,.30))";
   const wDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(59,130,246,.26))";
+
   const mUp   = "linear-gradient(90deg, rgba(249,115,22,.50), rgba(236,72,153,.28))";
   const mDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(236,72,153,.25))";
 
@@ -1842,7 +1795,7 @@ function animate() {
     rewardBar.style.backgroundPosition = `${(100 - rp)}% 0`;
   }
   if (rewardLine) rewardLine.style.left = rp + "%";
-  setText("rewardPercent", rp.toFixed(1) + "%");
+  setText("rewardPercent", rp.toFixed(1) + "%"); // ✅ centrale (CSS)
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
@@ -1850,7 +1803,7 @@ function animate() {
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
-  // keep status in sync
+  // ✅ keep status in sync (so it turns green as soon as ready)
   refreshConnUI();
 
   requestAnimationFrame(animate);
