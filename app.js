@@ -48,14 +48,52 @@ const MODE_KEY = "inj_mode"; // live | refresh
 let theme = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
+/* forward refs for charts */
+let chart = null;
+let stakeChart = null;
+let rewardChart = null;
+
 function applyTheme(t){
   theme = (t === "light") ? "light" : "dark";
   document.body.dataset.theme = theme;
   localStorage.setItem(THEME_KEY, theme);
+
   const themeIcon = $("themeIcon");
   if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
+
+  refreshChartsTheme();
 }
 applyTheme(theme);
+
+function axisGridColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.14)" : "rgba(249,250,251,.10)";
+}
+function axisTickColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.65)" : "rgba(249,250,251,.60)";
+}
+
+function refreshChartsTheme(){
+  // price chart
+  if (chart) {
+    chart.options.scales.y.ticks.color = "#9ca3af";
+    chart.update("none");
+  }
+
+  // stake chart
+  if (stakeChart) {
+    stakeChart.options.scales.y.grid.color = axisGridColor();
+    stakeChart.options.scales.y.ticks.color = "#9ca3af";
+    stakeChart.update("none");
+  }
+
+  // reward chart
+  if (rewardChart) {
+    rewardChart.options.scales.x.grid.color = axisGridColor();
+    rewardChart.options.scales.y.grid.color = axisGridColor();
+    rewardChart.options.scales.y.ticks.color = axisTickColor();
+    rewardChart.update("none");
+  }
+}
 
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
@@ -88,17 +126,13 @@ function refreshConnUI() {
 }
 
 /* ================= UI READY FAILSAFE ================= */
-let uiReadyForced = false;
 function setUIReady(force=false){
   const root = $("appRoot");
   if (!root) return;
   if (root.classList.contains("ready")) return;
-
   if (!force && !tfReady.d) return;
-
   root.classList.remove("loading");
   root.classList.add("ready");
-  uiReadyForced = force;
 }
 
 /* ================= HEADER SEARCH UI ================= */
@@ -194,21 +228,62 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDrawer();
 });
 
-/* menu items (per ora solo UI) */
+/* menu items */
 function setActivePage(pageKey){
-  const items = drawerNav?.querySelectorAll(".nav-item") || [];
+  const items = drawer?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
 }
-drawerNav?.addEventListener("click", (e) => {
-  const btn = e.target?.closest(".nav-item");
-  if (!btn) return;
-  setActivePage(btn.dataset.page || "dashboard");
-  closeDrawer();
-});
 
 /* theme toggle */
 themeToggle?.addEventListener("click", () => {
   applyTheme(theme === "dark" ? "light" : "dark");
+}, { passive:true });
+
+/* ================= COMING SOON overlay ================= */
+const comingSoon = $("comingSoon");
+const comingTitle = $("comingTitle");
+const comingSub = $("comingSub");
+const comingClose = $("comingClose");
+
+function pageLabel(key){
+  if (key === "home") return "HOME";
+  if (key === "market") return "MARKET";
+  if (key === "event") return "EVENT";
+  if (key === "settings") return "SETTINGS";
+  return "PAGE";
+}
+
+function openComingSoon(pageKey){
+  if (!comingSoon) return;
+  if (comingTitle) comingTitle.textContent = `COMING SOON 🚀`;
+  if (comingSub) comingSub.textContent = `${pageLabel(pageKey)} is coming soon.`;
+  comingSoon.classList.add("show");
+  comingSoon.setAttribute("aria-hidden", "false");
+}
+function closeComingSoon(){
+  if (!comingSoon) return;
+  comingSoon.classList.remove("show");
+  comingSoon.setAttribute("aria-hidden", "true");
+}
+
+comingClose?.addEventListener("click", closeComingSoon, { passive:true });
+comingSoon?.addEventListener("click", (e) => { if (e.target === comingSoon) closeComingSoon(); }, { passive:true });
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeComingSoon();
+});
+
+/* ✅ handler unico: intercetta click su qualunque .nav-item (anche SETTINGS) */
+drawer?.addEventListener("click", (e) => {
+  const btn = e.target?.closest(".nav-item");
+  if (!btn) return;
+
+  const page = btn.dataset.page || "dashboard";
+  setActivePage(page);
+  closeDrawer();
+
+  if (page !== "dashboard") openComingSoon(page);
+  else closeComingSoon();
 }, { passive:true });
 
 /* ================= STATE ================= */
@@ -588,7 +663,6 @@ async function loadCandleSnapshot() {
 }
 
 /* ================= PRICE CHART (1D) ================= */
-let chart = null;
 let chartLabels = [];
 let chartData = [];
 let lastChartMinuteStart = 0;
@@ -888,8 +962,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKED CHART (persist + FULL HISTORY + PAN) ================= */
-let stakeChart = null;
+/* ================= STAKED CHART (persist + ALL POINTS + PAN/ZOOM) ================= */
 let stakeLabels = [];
 let stakeData = [];
 let stakeMoves = [];
@@ -897,8 +970,8 @@ let stakeTypes = [];
 let lastStakeRecorded = null;
 let stakeBaselineCaptured = false;
 
-let stakeUserInteracting = false;   // se l'utente pan/zoom, non forzo più la vista live
-const STAKE_VIEW_WINDOW = 80;       // quanti punti “recenti” mostrare in live
+let stakeUserInteracting = false;
+const STAKE_VIEW_WINDOW = 90;
 
 function stakeStoreKey(addr) {
   const a = (addr || "").trim();
@@ -962,10 +1035,6 @@ function resetStakeSeriesFromNow() {
   drawStakeChart(true);
 }
 
-function stakeAxisColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.12)" : "rgba(249,250,251,.10)";
-}
-
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas) return;
@@ -981,7 +1050,7 @@ function initStakeChart() {
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
         tension: 0.25,
-        pointRadius: 3,         // ✅ sempre punto visibile
+        pointRadius: 3,
         pointHoverRadius: 6,
         pointBackgroundColor: (ctx) => {
           const m = stakeMoves[ctx.dataIndex] || 0;
@@ -995,6 +1064,7 @@ function initStakeChart() {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      layout: { padding: { left: 6, right: 6, top: 6, bottom: 0 } }, // ✅ pad da 6
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1015,38 +1085,33 @@ function initStakeChart() {
             enabled: true,
             mode: "x",
             threshold: 2,
-            onPanStart: () => { stakeUserInteracting = true; },
+            onPanStart: () => { stakeUserInteracting = true; }
           },
           zoom: {
             wheel: { enabled: true },
             pinch: { enabled: true },
             mode: "x",
-            onZoomStart: () => { stakeUserInteracting = true; },
+            onZoomStart: () => { stakeUserInteracting = true; }
           }
         }
       },
       scales: {
         x: { display: false },
         y: {
-          ticks: {
-            color: "#9ca3af",
-            callback: (v) => fmtSmart(v),
-          },
-          grid: {
-            color: stakeAxisColor(),
-            drawTicks: false,
-          }
+          ticks: { color: "#9ca3af", callback: (v) => fmtSmart(v) },
+          grid: { color: axisGridColor(), drawTicks: false }
         }
       }
     }
   });
 
-  // doppio click = torna live
   canvas.addEventListener("dblclick", () => {
     stakeUserInteracting = false;
     if (stakeChart?.resetZoom) stakeChart.resetZoom();
     applyStakeLiveWindow();
   }, { passive: true });
+
+  refreshChartsTheme();
 }
 
 function applyStakeLiveWindow() {
@@ -1075,7 +1140,7 @@ function drawStakeChart(forceLiveWindow=false) {
   stakeChart?.update("none");
 }
 
-/* ✅ punto per OGNI singolo movimento (anche micro-compound) */
+/* ✅ punto per OGNI singolo movimento */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -1095,8 +1160,6 @@ function maybeAddStakePoint(currentStake) {
   if (lastStakeRecorded == null) { lastStakeRecorded = s; return; }
 
   const delta = s - lastStakeRecorded;
-
-  // soglia microscopica solo per evitare rumore floating
   const TH = 1e-9;
   if (Math.abs(delta) <= TH) return;
 
@@ -1112,8 +1175,6 @@ function maybeAddStakePoint(currentStake) {
 }
 
 /* ================= REWARD WITHDRAWALS (persist + filter + live + timeline) ================= */
-let rewardChart = null;
-
 /* master arrays (saved) */
 let wdLabelsAll = [];
 let wdValuesAll = [];
@@ -1186,7 +1247,7 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* ✅ label plugin: valori dentro grafico, clamp X per NON sovrapporsi ai tick asse Y */
+/* ✅ label plugin: valori dentro grafico e MAI sopra la colonna asse Y */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1220,7 +1281,7 @@ const rewardPointLabelPlugin = {
     const maxDraw = 18;
 
     const pad = 10;
-    const leftBound = area.left + 22;   // spazio tick interni
+    const leftBound = area.left + 22;
     const rightBound = area.right - 12;
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
@@ -1241,10 +1302,6 @@ const rewardPointLabelPlugin = {
     ctx.restore();
   }
 };
-
-function rewardAxisColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.14)" : "rgba(249,250,251,.10)";
-}
 
 function initRewardWdChart() {
   const canvas = $("rewardChart");
@@ -1272,9 +1329,7 @@ function initRewardWdChart() {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: {
-        padding: { left: 6, right: 8, top: 6, bottom: 0 }
-      },
+      layout: { padding: { left: 6, right: 6, top: 6, bottom: 0 } }, // ✅ pad da 6
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1293,22 +1348,24 @@ function initRewardWdChart() {
       scales: {
         x: {
           ticks: { color: "rgba(156,163,175,.85)", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
-          grid: { color: rewardAxisColor(), drawTicks: false }
+          grid: { color: axisGridColor(), drawTicks: false }
         },
         y: {
           position: "left",
           ticks: {
-            color: (document.body.dataset.theme === "light") ? "rgba(17,24,39,.65)" : "rgba(249,250,251,.60)",
+            color: axisTickColor(),
             callback: (v) => fmtSmart(v),
-            mirror: true,   // ✅ tick dentro grafico
+            mirror: true,
             padding: 6
           },
-          grid: { color: rewardAxisColor(), drawTicks: false }
+          grid: { color: axisGridColor(), drawTicks: false }
         }
       }
     },
     plugins: [rewardPointLabelPlugin]
   });
+
+  refreshChartsTheme();
 }
 
 function drawRewardWdChart() {
@@ -1396,8 +1453,7 @@ function maybeRecordRewardWithdrawal(newRewards) {
 
   const diff = wdLastRewardsSeen - r;
   if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    const ts = Date.now();
-    wdTimesAll.push(ts);
+    wdTimesAll.push(Date.now());
     wdLabelsAll.push(nowLabel());
     wdValuesAll.push(diff);
 
