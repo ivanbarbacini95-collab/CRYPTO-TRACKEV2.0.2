@@ -808,28 +808,84 @@ body[data-theme="light"] .pro-pill{
 .pro-dot{ opacity:.6; }
 .pro-meta{ opacity:.85; }
 
-/* ================= HEADER: title always centered, no overlaps ================= */
+/* ================= HEADER: center title never shrinks, search overlays ================= */
 
-/* Layout robusto: sinistra e destra fissi, centro sempre centrato */
+/* 3 colonne: sinistra e destra con spazio fisso, centro sempre stabile */
 .header-grid{
   display: grid;
-  grid-template-columns: 56px 1fr 56px; /* spazio riservato a menu e lente */
+  grid-template-columns: 56px 1fr 56px;
   align-items: center;
   gap: .6rem;
 }
 
-/* centro sempre centrato, indipendente dalla search */
+/* titolo sempre al centro reale */
 .header-center{
   text-align: center;
   justify-self: center;
-  max-width: 100%;
+  min-width: 0; /* evita overflow strani */
 }
 
-/* search sempre a destra, MA non può invadere il centro */
+/* destra: solo la lente “occupa spazio” */
 .header-right{
   justify-self: end;
+  position: relative;
   display: flex;
   justify-content: flex-end;
+  width: 56px;               /* colonna destra fissa */
 }
 
-/* wrapper search: niente “spinte”
+/* search wrap: serve come anchor overlay */
+.search-wrap{
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 56px;               /* non si allarga mai */
+  height: 44px;
+}
+
+/* input: overlay, quindi NON stringe il titolo */
+.search-wrap input{
+  position: absolute;
+  right: 52px;               /* si apre a sinistra della lente */
+  top: 50%;
+  transform: translateY(-50%) scaleX(0);
+  transform-origin: right center;
+
+  width: 300px;
+  height: 38px;
+  border-radius: 12px;
+  border: none;
+  outline: none;
+  padding: 0 .9rem;
+
+  opacity: 0;
+  pointer-events: none;
+
+  background: rgba(255,255,255,0.08);
+  color: rgba(249,250,251,.95);
+  transition: transform 220ms ease, opacity 160ms ease, background 220ms ease;
+}
+
+body[data-theme="light"] .search-wrap input{
+  background: rgba(15,23,42,0.08);
+  color: rgba(15,23,42,.92);
+}
+
+/* open: appare senza cambiare layout */
+.search-wrap.open input{
+  transform: translateY(-50%) scaleX(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* mobile: input un po’ più corto */
+@media (max-width: 520px){
+  .search-wrap input{ width: 220px; right: 48px; }
+}
+
+/* la lente resta sempre cliccabile sopra */
+.icon-btn{
+  position: relative;
+  z-index: 2;
+}
