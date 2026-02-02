@@ -14,10 +14,8 @@
 </head>
 <body>
 
-  <!-- BACKDROP (blur + overlay) -->
   <div class="backdrop" id="backdrop" aria-hidden="true"></div>
 
-  <!-- DRAWER MENU -->
   <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-top">
       <div class="drawer-title">Menu</div>
@@ -52,7 +50,6 @@
     </div>
   </aside>
 
-  <!-- COMING SOON OVERLAY -->
   <div class="coming-soon" id="comingSoon" aria-hidden="true">
     <div class="coming-card">
       <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
@@ -63,16 +60,13 @@
 
   <div class="container loading" id="appRoot">
 
-    <!-- HEADER -->
     <div class="header">
       <div class="header-grid">
 
-        <!-- LEFT: MENU -->
         <div class="header-left">
           <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
         </div>
 
-        <!-- CENTER: TITLE -->
         <div class="header-center">
           <h1 class="brand-title">
             <span class="title-full">Injective <span class="dot">•</span> Portfolio</span>
@@ -81,7 +75,6 @@
           <div class="subtitle" id="subtitle">Realtime staking & rewards dashboard</div>
         </div>
 
-        <!-- RIGHT: SEARCH -->
         <div class="header-right">
           <div class="search-wrap" id="searchWrap">
             <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
@@ -90,7 +83,6 @@
         </div>
       </div>
 
-      <!-- META: wallet + status -->
       <div class="header-meta-right">
         <div id="addressDisplay" class="address-display"></div>
 
@@ -108,7 +100,6 @@
         <div class="label">INJ Price</div>
         <div class="value-row"><span id="price">0.0000</span></div>
 
-        <!-- 1D -->
         <div class="sub-row perf">
           <span class="arrow" id="arrow24h">►</span>
           <span class="pct" id="pct24h">0.00%</span>
@@ -125,7 +116,6 @@
           <span id="priceMax" class="right">--</span>
         </div>
 
-        <!-- 1W -->
         <div class="sub-row perf">
           <span class="arrow" id="arrowWeek">►</span>
           <span class="pct" id="pctWeek">0.00%</span>
@@ -142,7 +132,6 @@
           <span id="weekMax" class="right">--</span>
         </div>
 
-        <!-- 1M -->
         <div class="sub-row perf">
           <span class="arrow" id="arrowMonth">►</span>
           <span class="pct" id="pctMonth">0.00%</span>
@@ -160,6 +149,37 @@
         </div>
       </div>
 
+      <!-- NET WORTH (NEW) -->
+      <div class="card networth-card" id="netWorthCard">
+        <div class="networth-bg">
+          <canvas id="netWorthChart"></canvas>
+        </div>
+
+        <div class="networth-content">
+          <div class="networth-top">
+            <div class="label">Net Worth</div>
+
+            <div class="tf-switch" id="nwTfSwitch">
+              <button class="tf-btn active" data-tf="1d" type="button">1D</button>
+              <button class="tf-btn" data-tf="1w" type="button">1W</button>
+              <button class="tf-btn" data-tf="1m" type="button">1M</button>
+              <button class="tf-btn" data-tf="1y" type="button">1Y</button>
+            </div>
+          </div>
+
+          <div class="networth-pnl" id="netWorthPnl">PnL: —</div>
+
+          <div class="networth-main">
+            <span class="networth-usd" id="netWorthUsd">$0.00</span>
+          </div>
+
+          <div class="networth-foot">
+            <span class="networth-note" id="netWorthNote">History: 0 pts</span>
+            <span class="networth-inj" id="netWorthInj">0.0000 INJ</span>
+          </div>
+        </div>
+      </div>
+
       <!-- AVAILABLE -->
       <div class="card">
         <div class="label">Available</div>
@@ -174,7 +194,6 @@
         <div class="sub-row" id="stakeUsd">≈ $0.00</div>
 
         <div class="stake-bar-container bar-container stake-container">
-          <span class="bar-label">STAKED</span>
           <div id="stakeBar" class="bar-fill stake-fill"></div>
           <div id="stakeLine" class="bar-line"></div>
           <span id="stakePercent" class="stake-percent">0%</span>
@@ -197,7 +216,6 @@
         <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
 
         <div class="reward-bar-container bar-container reward-container">
-          <span class="bar-label">REWARD</span>
           <div id="rewardBar" class="bar-fill reward-fill"></div>
           <div id="rewardLine" class="bar-line"></div>
           <span id="rewardPercent" class="reward-percent">0%</span>
@@ -254,7 +272,6 @@
 
     <div id="updated" class="last-update">Last update: --:--</div>
 
-    <!-- PRO FOOTER -->
     <div class="pro-footer" id="proFooter">
       <span class="pro-pill">INJ Portfolio</span>
       <span class="pro-dot">•</span>
