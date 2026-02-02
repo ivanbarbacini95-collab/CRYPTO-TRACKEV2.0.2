@@ -17,7 +17,8 @@ body[data-theme="light"] .card{
 body[data-theme="light"] .subtitle,
 body[data-theme="light"] .sub-row,
 body[data-theme="light"] .bar-values,
-body[data-theme="light"] .last-update{
+body[data-theme="light"] .last-update,
+body[data-theme="light"] .pro-footer{
   color: rgba(17,24,39,.65);
 }
 body[data-theme="light"] .bar-container{
@@ -48,6 +49,7 @@ body[data-theme="light"] .toggle-btn{
   display: flex;
   flex-direction: column;
   gap: .45rem;
+  padding-bottom: .35rem; /* ✅ più respiro sopra le card */
 }
 
 .header-grid {
@@ -203,6 +205,7 @@ body[data-theme="light"] .status-text{
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  margin-top: .35rem; /* ✅ card più in basso */
 }
 
 .card {
@@ -272,6 +275,7 @@ body[data-theme="light"] .status-text{
   background: rgba(249, 250, 251, 0.16);
   box-shadow: 0 0 12px rgba(249, 250, 251, 0.08);
   pointer-events: none;
+  z-index: 2;
 }
 
 .bar-line {
@@ -280,22 +284,25 @@ body[data-theme="light"] .status-text{
   height: 100%;
   background: #facc15;
   transition: left 0.25s ease;
+  z-index: 3;
 }
 
-/* timeframe label */
-.bar-label {
-  position: absolute;
-  left: 50%;
-  top: -16px;
-  transform: translateX(-50%);
-  font-size: 0.72rem;
-  font-weight: 800;
-  color: rgba(249, 250, 251, 0.70);
-  pointer-events: none;
+/* ✅ timeframe label DENTRO la barra, centrata e leggibile */
+.bar-label{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform: translate(-50%, -50%);
+  font-size:.78rem;
+  font-weight: 900;
+  letter-spacing:.06em;
+  color: rgba(249,250,251,0.82);
   text-shadow: 0 1px 10px rgba(0,0,0,0.65);
+  pointer-events:none;
+  z-index: 5;
 }
 body[data-theme="light"] .bar-label{
-  color: rgba(17,24,39,.65);
+  color: rgba(17,24,39,0.72);
   text-shadow: none;
 }
 
@@ -333,9 +340,10 @@ body[data-theme="light"] .bar-label{
 
 /* reward withdrawals chart */
 .reward-chart-wrap {
-  height: 170px; /* ⬅ più spazio per valori/tick interni */
+  height: 140px;
   margin-top: 0.8rem;
   position: relative;
+  padding: 6px; /* ✅ pad da 6 */
 }
 #rewardChart {
   width: 100% !important;
@@ -442,11 +450,11 @@ body[data-theme="light"] .reward-timeline-meta{
 
 .stake-card .bar-label { display: none; }
 
-/* ⬇ grafico più grande e leggibile */
 .stake-chart-wrap {
-  height: 190px;
+  height: 160px;
   margin-top: 0.7rem;
   position: relative;
+  padding: 6px; /* ✅ pad da 6 */
 }
 #stakeChart {
   width: 100% !important;
@@ -491,6 +499,14 @@ body[data-theme="light"] .chart-overlay{
   font-size: 0.8rem;
   text-align: center;
   color: #9ca3af;
+}
+
+.pro-footer{
+  margin-top: .35rem;
+  font-size: .72rem;
+  text-align: center;
+  color: rgba(249,250,251,.55);
+  line-height: 1.35;
 }
 
 /* ================= LOADING ================= */
@@ -659,6 +675,13 @@ body[data-theme="light"] .nav-item.active{
 .drawer-foot{
   margin-top: auto;
   padding: 10px 8px 0 8px;
+  display:flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav-settings{
+  width: 100%;
 }
 
 .drawer-hint{
@@ -682,7 +705,8 @@ body.drawer-open .drawer{
 /* ✅ blur SOLO dei contenuti (menu sempre nitido) */
 body.drawer-open .header,
 body.drawer-open .cards-wrapper,
-body.drawer-open .last-update{
+body.drawer-open .last-update,
+body.drawer-open .pro-footer{
   filter: blur(4px);
   transform: scale(0.995);
   transition: filter 180ms ease, transform 180ms ease;
@@ -693,3 +717,85 @@ body.drawer-open .backdrop{
   filter: none !important;
   transform: none !important;
 }
+
+/* ================= COMING SOON overlay ================= */
+.coming-soon{
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+body[data-theme="light"] .coming-soon{
+  background: rgba(17,24,39,.22);
+}
+
+.coming-soon.show{
+  display: flex;
+}
+
+.coming-card{
+  width: min(520px, 92vw);
+  border-radius: 18px;
+  padding: 18px 16px 14px 16px;
+  background: linear-gradient(135deg, rgba(17,24,39,.96), rgba(30,41,59,.94));
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 30px 90px rgba(0,0,0,.55);
+  text-align: center;
+}
+
+body[data-theme="light"] .coming-card{
+  background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(238,242,255,.92));
+  border: 1px solid rgba(17,24,39,.10);
+  box-shadow: 0 30px 90px rgba(0,0,0,.18);
+}
+
+.coming-title{
+  font-size: 1.15rem;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  color: rgba(249,250,251,.95);
+}
+
+body[data-theme="light"] .coming-title{
+  color: rgba(17,24,39,.92);
+}
+
+.rocket{
+  display: inline-block;
+  transform: translateY(1px);
+}
+
+.coming-sub{
+  font-size: .9rem;
+  color: rgba(249,250,251,.70);
+  margin-bottom: 12px;
+}
+body[data-theme="light"] .coming-sub{
+  color: rgba(17,24,39,.62);
+}
+
+.coming-btn{
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.92);
+  font-weight: 900;
+  cursor: pointer;
+}
+body[data-theme="light"] .coming-btn{
+  border: 1px solid rgba(17,24,39,.14);
+  background: rgba(17,24,39,.06);
+  color: rgba(17,24,39,.86);
+}
+.coming-btn:active{ transform: translateY(1px); }
