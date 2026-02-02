@@ -462,8 +462,9 @@ body[data-theme="light"] .bar-values{ color: var(--muted-light); }
 }
 
 /* ================= CHARTS ================= */
-.stake-chart-wrap { height: 155px; margin-top: 0.85rem; position: relative; }
-.reward-chart-wrap{ height: 180px; margin-top: 0.85rem; position: relative; }
+/* ✅ MODIFICA: grafici più spaziosi */
+.stake-chart-wrap { height: 210px; margin-top: 1.05rem; position: relative; }  /* prima 155px */
+.reward-chart-wrap{ height: 245px; margin-top: 1.05rem; position: relative; }  /* prima 180px */
 
 #stakeChart, #rewardChart, #priceChart, #netWorthChart{
   width: 100% !important;
@@ -471,7 +472,8 @@ body[data-theme="light"] .bar-values{ color: var(--muted-light); }
 }
 
 /* 1D chart card */
-.chart-card{ height: 300px; position: relative; }
+/* ✅ MODIFICA: grafico 1D più alto */
+.chart-card{ height: 380px; position: relative; } /* prima 300px */
 .chart-overlay{
   position: absolute;
   top: 12px;
@@ -641,8 +643,9 @@ body[data-theme="light"] .networth-pnl{ color: var(--muted-light); }
 }
 
 /* chart must be visible behind, so give it a real height */
+/* ✅ MODIFICA: net worth chart più alto */
 #netWorthChart{
-  height: 240px !important;
+  height: 290px !important; /* prima 240px */
 }
 
 /* TF row under chart */
@@ -769,7 +772,7 @@ body[data-theme="light"] .nw-row-right{ color: rgba(15,23,42,.72); }
 @media (max-width: 520px){
   .networth-usd{ font-size: 1.75rem; }
   .networth-bottom{ margin-top: 170px; }
-  #netWorthChart{ height: 260px !important; }
+  #netWorthChart{ height: 310px !important; } /* era 260, ora più spazioso */
 }
 
 /* ================= LOADING shimmer ================= */
