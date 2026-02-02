@@ -12,14 +12,12 @@ const ONE_MIN_MS = 60_000;
 const STAKE_TARGET_MAX = 1000;
 
 /* staked persistence */
-const STAKE_SERIES_MAX = 240;
-const STAKE_LOCAL_VER = 1;
+const STAKE_LOCAL_VER = 2;
 /* richiesta: reset da ora (parte da 0) */
 const RESET_STAKE_FROM_NOW_ON_BOOT = true;
 
 /* reward withdrawals persistence */
-const REWARD_WD_SERIES_MAX = 600;
-const REWARD_WD_LOCAL_VER = 1;
+const REWARD_WD_LOCAL_VER = 2;
 /* detect withdrawal: se rewards scendono oltre soglia */
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
@@ -32,6 +30,17 @@ function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
+
+function fmtSmart(v){
+  v = safe(v);
+  const av = Math.abs(v);
+  if (av >= 1000) return v.toFixed(0);
+  if (av >= 100) return v.toFixed(1);
+  if (av >= 10) return v.toFixed(2);
+  if (av >= 1) return v.toFixed(3);
+  if (av >= 0.1) return v.toFixed(4);
+  return v.toFixed(6);
+}
 
 /* ================= THEME / MODE (storage) ================= */
 const THEME_KEY = "inj_theme";
@@ -317,16 +326,13 @@ function setMode(isLive){
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
   if (!liveMode) {
-    // STOP EVERYTHING
     stopAllTimers();
     stopAllSockets();
     wsTradeOnline = false;
     wsKlineOnline = false;
-    // accountOnline rimane l'ultimo stato; se vuoi "connecting" quando refresh = true:
     accountOnline = false;
     refreshConnUI();
   } else {
-    // START EVERYTHING
     startAllTimers();
     startTradeWS();
     startKlineWS();
@@ -450,7 +456,7 @@ function startKlineWS() {
 
   wsKline = new WebSocket(url);
 
-  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); clearKlineRetry(); };
+  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); };
   wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
   wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
 
@@ -873,7 +879,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKED CHART (persist) ================= */
+/* ================= STAKED CHART (persist + FULL HISTORY + PAN) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -882,36 +888,51 @@ let stakeTypes = [];
 let lastStakeRecorded = null;
 let stakeBaselineCaptured = false;
 
+let stakeUserInteracting = false;   // se l'utente pan/zoom, non forzo più la vista live
+const STAKE_VIEW_WINDOW = 80;       // quanti punti “recenti” mostrare in live
+
 function stakeStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
 }
 
-function trimStakeSeries() {
-  if (stakeLabels.length > STAKE_SERIES_MAX) stakeLabels = stakeLabels.slice(-STAKE_SERIES_MAX);
-  if (stakeData.length > STAKE_SERIES_MAX) stakeData = stakeData.slice(-STAKE_SERIES_MAX);
-  if (stakeMoves.length > STAKE_SERIES_MAX) stakeMoves = stakeMoves.slice(-STAKE_SERIES_MAX);
-  if (stakeTypes.length > STAKE_SERIES_MAX) stakeTypes = stakeTypes.slice(-STAKE_SERIES_MAX);
-
-  const n = stakeData.length;
-  if (stakeLabels.length > n) stakeLabels = stakeLabels.slice(0, n);
-  if (stakeMoves.length > n) stakeMoves = stakeMoves.slice(0, n);
-  if (stakeTypes.length > n) stakeTypes = stakeTypes.slice(0, n);
-
-  while (stakeMoves.length < n) stakeMoves.push(0);
-  while (stakeTypes.length < n) stakeTypes.push("Stake update");
-}
-
 function saveStakeSeries() {
   const key = stakeStoreKey(address);
   if (!key) return;
-  trimStakeSeries();
   try {
     localStorage.setItem(key, JSON.stringify({
       v: STAKE_LOCAL_VER, t: Date.now(),
       labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
     }));
   } catch {}
+}
+
+function loadStakeSeries() {
+  const key = stakeStoreKey(address);
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
+
+    stakeLabels = Array.isArray(obj.labels) ? obj.labels : [];
+    stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
+    stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
+    stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
+
+    const n = stakeData.length;
+    if (stakeLabels.length !== n) stakeLabels = stakeLabels.slice(0, n);
+    if (stakeMoves.length !== n)  stakeMoves  = stakeMoves.slice(0, n);
+    if (stakeTypes.length !== n)  stakeTypes  = stakeTypes.slice(0, n);
+
+    lastStakeRecorded = (n ? safe(stakeData[n - 1]) : null);
+    stakeBaselineCaptured = n > 0;
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function clearStakeSeriesStorage() {
@@ -925,10 +946,15 @@ function resetStakeSeriesFromNow() {
   stakeData = [0];
   stakeMoves = [0];
   stakeTypes = ["Reset start"];
-  lastStakeRecorded = null;
-  stakeBaselineCaptured = false;
+  lastStakeRecorded = 0;
+  stakeBaselineCaptured = true;
+  stakeUserInteracting = false;
   saveStakeSeries();
-  drawStakeChart();
+  drawStakeChart(true);
+}
+
+function stakeAxisColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.55)" : "rgba(249,250,251,.35)";
 }
 
 function initStakeChart() {
@@ -942,20 +968,18 @@ function initStakeChart() {
       datasets: [{
         data: stakeData,
         borderColor: "#22c55e",
+        borderWidth: 2,
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
-        tension: 0.3,
-        pointRadius: (ctx) => (stakeMoves[ctx.dataIndex] || 0) === 0 ? 0 : 3,
-        pointHoverRadius: (ctx) => (stakeMoves[ctx.dataIndex] || 0) === 0 ? 0 : 5,
+        tension: 0.25,
+        pointRadius: 3,         // ✅ sempre visibili
+        pointHoverRadius: 6,
         pointBackgroundColor: (ctx) => {
           const m = stakeMoves[ctx.dataIndex] || 0;
-          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
+          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(249,250,251,.25)");
         },
-        pointBorderColor: (ctx) => {
-          const m = stakeMoves[ctx.dataIndex] || 0;
-          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "rgba(0,0,0,0)");
-        },
-        pointBorderWidth: 1
+        pointBorderColor: "rgba(0,0,0,.0)",
+        pointBorderWidth: 0
       }]
     },
     options: {
@@ -976,23 +1000,73 @@ function initStakeChart() {
               return `${t} • ${v.toFixed(6)} INJ`;
             }
           }
+        },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: "x",
+            threshold: 2,
+            onPanStart: () => { stakeUserInteracting = true; },
+          },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x",
+            onZoomStart: () => { stakeUserInteracting = true; },
+          }
         }
       },
-      scales: { x: { display: false }, y: { ticks: { color: "#9ca3af" } } }
+      scales: {
+        x: { display: false },
+        y: {
+          ticks: {
+            color: "#9ca3af",
+            callback: (v) => fmtSmart(v),
+          },
+          grid: {
+            color: stakeAxisColor(),
+            drawTicks: false,
+          }
+        }
+      }
     }
   });
+
+  // doppio click = torna live
+  canvas.addEventListener("dblclick", () => {
+    stakeUserInteracting = false;
+    if (stakeChart?.resetZoom) stakeChart.resetZoom();
+    applyStakeLiveWindow();
+  }, { passive: true });
 }
 
-function drawStakeChart() {
+function applyStakeLiveWindow() {
+  if (!stakeChart) return;
+  if (stakeUserInteracting) return;
+
+  const n = stakeData.length;
+  if (n <= STAKE_VIEW_WINDOW) {
+    stakeChart.options.scales.x.min = undefined;
+    stakeChart.options.scales.x.max = undefined;
+  } else {
+    stakeChart.options.scales.x.min = Math.max(0, n - STAKE_VIEW_WINDOW);
+    stakeChart.options.scales.x.max = n - 1;
+  }
+}
+
+function drawStakeChart(forceLiveWindow=false) {
   if (!stakeChart && window.Chart) initStakeChart();
   else if (stakeChart) {
     stakeChart.data.labels = stakeLabels;
     stakeChart.data.datasets[0].data = stakeData;
-    stakeChart.update("none");
   }
+
+  if (forceLiveWindow) stakeUserInteracting = false;
+  applyStakeLiveWindow();
+  stakeChart?.update("none");
 }
 
-/* crea punto solo quando stake aumenta o diminuisce sensibilmente */
+/* ✅ crea punto su OGNI movimento (anche micro compound) */
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -1002,18 +1076,19 @@ function maybeAddStakePoint(currentStake) {
     stakeData.push(s);
     stakeMoves.push(1);
     stakeTypes.push("Baseline (current)");
-    trimStakeSeries();
     lastStakeRecorded = s;
     stakeBaselineCaptured = true;
     saveStakeSeries();
-    drawStakeChart();
+    drawStakeChart(true);
     return;
   }
 
-  const TH = 0.0005;
   if (lastStakeRecorded == null) { lastStakeRecorded = s; return; }
 
   const delta = s - lastStakeRecorded;
+
+  // soglia microscopica solo per evitare rumore floating
+  const TH = 1e-9;
   if (Math.abs(delta) <= TH) return;
 
   lastStakeRecorded = s;
@@ -1023,9 +1098,8 @@ function maybeAddStakePoint(currentStake) {
   stakeMoves.push(delta > 0 ? 1 : -1);
   stakeTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
 
-  trimStakeSeries();
   saveStakeSeries();
-  drawStakeChart();
+  drawStakeChart(false);
 }
 
 /* ================= REWARD WITHDRAWALS (persist + filter + live + timeline) ================= */
@@ -1049,21 +1123,9 @@ function wdStoreKey(addr) {
   return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
 }
 
-function trimWdAll() {
-  if (wdLabelsAll.length > REWARD_WD_SERIES_MAX) {
-    wdLabelsAll = wdLabelsAll.slice(-REWARD_WD_SERIES_MAX);
-    wdValuesAll = wdValuesAll.slice(-REWARD_WD_SERIES_MAX);
-    wdTimesAll  = wdTimesAll.slice(-REWARD_WD_SERIES_MAX);
-  }
-  const n = wdValuesAll.length;
-  if (wdLabelsAll.length !== n) wdLabelsAll = wdLabelsAll.slice(0, n);
-  if (wdTimesAll.length !== n)  wdTimesAll  = wdTimesAll.slice(0, n);
-}
-
 function saveWdAll() {
   const key = wdStoreKey(address);
   if (!key) return;
-  trimWdAll();
   try {
     localStorage.setItem(key, JSON.stringify({
       v: REWARD_WD_LOCAL_VER,
@@ -1090,7 +1152,6 @@ function loadWdAll() {
 
     if (wdLabelsAll.length !== wdValuesAll.length) return false;
 
-    trimWdAll();
     rebuildWdView();
     return true;
   } catch {
@@ -1116,7 +1177,7 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* label plugin: mostra +0.00 sopra i punti solo quando zoomato */
+/* ✅ label plugin: valori dentro grafico, clamp X per NON sovrapporsi ai tick asse Y */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1135,17 +1196,24 @@ const rewardPointLabelPlugin = {
     if (!Number.isFinite(min)) min = 0;
     if (!Number.isFinite(max)) max = n - 1;
 
+    // quando troppi punti visibili, non disegno label
     const visibleCount = Math.max(0, Math.floor(max - min + 1));
-    if (visibleCount > 30) return;
+    if (visibleCount > 26) return;
 
     const ctx = ch.ctx;
+    const area = ch.chartArea;
+
     ctx.save();
-    ctx.font = "700 11px Inter, sans-serif";
+    ctx.font = "800 11px Inter, sans-serif";
     ctx.fillStyle = (document.body.dataset.theme === "light") ? "rgba(17,24,39,0.85)" : "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
 
     let drawn = 0;
     const maxDraw = 18;
+
+    const pad = 10;
+    const leftBound = area.left + 22;   // ⬅ lascia spazio ai tick interni
+    const rightBound = area.right - 12;
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
@@ -1155,13 +1223,21 @@ const rewardPointLabelPlugin = {
       const v = safe(ds.data[i]);
       if (!v) continue;
 
-      ctx.fillText(`+${v.toFixed(4)} INJ`, el.x, el.y - 10);
+      // clamp x dentro chartArea per non “toccare” la colonna verticale/ticks
+      const x = clamp(el.x, leftBound, rightBound);
+      const y = Math.max(area.top + pad, el.y - 10);
+
+      ctx.fillText(`+${v.toFixed(4)} INJ`, x, y);
       drawn++;
     }
 
     ctx.restore();
   }
 };
+
+function rewardAxisColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.14)" : "rgba(249,250,251,.10)";
+}
 
 function initRewardWdChart() {
   const canvas = $("rewardChart");
@@ -1174,6 +1250,7 @@ function initRewardWdChart() {
       datasets: [{
         data: wdValues,
         borderColor: "#3b82f6",
+        borderWidth: 2,
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         tension: 0.25,
@@ -1188,6 +1265,9 @@ function initRewardWdChart() {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      layout: {
+        padding: { left: 6, right: 8, top: 6, bottom: 0 }
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1204,8 +1284,21 @@ function initRewardWdChart() {
         }
       },
       scales: {
-        x: { ticks: { color: "rgba(156,163,175,.85)", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 } },
-        y: { ticks: { color: "#9ca3af" } }
+        x: {
+          ticks: { color: "rgba(156,163,175,.85)", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+          grid: { color: rewardAxisColor(), drawTicks: false }
+        },
+        y: {
+          position: "left",
+          ticks: {
+            color: (document.body.dataset.theme === "light") ? "rgba(17,24,39,.65)" : "rgba(249,250,251,.60)",
+            callback: (v) => fmtSmart(v),
+            // ✅ tick “dentro”
+            mirror: true,
+            padding: 6
+          },
+          grid: { color: rewardAxisColor(), drawTicks: false }
+        }
       }
     },
     plugins: [rewardPointLabelPlugin]
@@ -1302,7 +1395,6 @@ function maybeRecordRewardWithdrawal(newRewards) {
     wdLabelsAll.push(nowLabel());
     wdValuesAll.push(diff);
 
-    trimWdAll();
     saveWdAll();
     rebuildWdView();
     goRewardLive();
@@ -1331,6 +1423,9 @@ async function commitAddress(newAddr) {
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
+  } else {
+    loadStakeSeries();
+    drawStakeChart(true);
   }
 
   // reward withdrawals load per wallet
@@ -1377,12 +1472,13 @@ window.addEventListener("offline", () => {
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // reset staked from now on boot (per wallet)
+  // staked history per wallet
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
   } else {
-    drawStakeChart();
+    loadStakeSeries();
+    drawStakeChart(true);
   }
 
   // load reward withdrawals history
