@@ -27,6 +27,11 @@ let refreshLoading = false;
 /* ✅ Status dot "mode loading" (switch / data loading) */
 let modeLoading = false;
 
+/* ================= CLOUD SYNC (Vercel API /api/point) ================= */
+const CLOUD_SYNC_ON = true;
+const CLOUD_SYNC_DEBOUNCE_MS = 1200;
+const CLOUD_TIMEOUT_MS = 5500;
+
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
@@ -48,6 +53,8 @@ function fmtSmart(v){
   if (av >= 0.1) return v.toFixed(4);
   return v.toFixed(6);
 }
+
+function hasInternet() { return navigator.onLine === true; }
 
 /* ================= GLOBAL ERROR GUARDS ================= */
 function setStatusError(msg){
@@ -106,6 +113,13 @@ function tryRegisterZoom(){
 }
 ZOOM_OK = tryRegisterZoom();
 
+/* ✅ Global point defaults (so points never vanish by “defaults”) */
+if (window.Chart) {
+  Chart.defaults.elements.point.radius = 3;
+  Chart.defaults.elements.point.hoverRadius = 7;
+  Chart.defaults.elements.point.hitRadius = 14;
+}
+
 /* ================= CONNECTION UI ================= */
 const statusDot  = $("statusDot");
 const statusText = $("statusText");
@@ -114,12 +128,10 @@ let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
 
-function hasInternet() { return navigator.onLine === true; }
-
 /* ✅ Determine if LIVE is truly "ready" */
 function liveReady(){
   const socketsOk = wsTradeOnline && wsKlineOnline;
-  const accountOk = !address || accountOnline; // if no wallet set, don't block green
+  const accountOk = !address || accountOnline;
   return socketsOk && accountOk;
 }
 
@@ -127,7 +139,6 @@ function liveReady(){
    - No internet => red
    - Loading (switching / fetching) => orange
    - Ready => green
-   - (No yellow at all)
 */
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
@@ -155,6 +166,8 @@ function refreshConnUI() {
 }
 
 /* ================= UI READY FAILSAFE ================= */
+const tfReady = { d: false, w: false, m: false };
+
 function setUIReady(force=false){
   const root = $("appRoot");
   if (!root) return;
@@ -170,7 +183,7 @@ async function fetchJSON(url) {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -271,6 +284,25 @@ const menuBtn = $("menuBtn");
 let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = address || "";
 
+/* ✅ dynamic search width to prevent overlap on desktop */
+function computeSearchWidth(){
+  const root = document.documentElement;
+  const w = window.innerWidth || 900;
+
+  // Keep it conservative, never overlap title:
+  // - small screens: CSS already uses min(64vw, 260px)
+  // - desktop: clamp to a safe size
+  let sw = 320;
+  if (w >= 1200) sw = 380;
+  else if (w >= 980) sw = 340;
+  else if (w >= 720) sw = 300;
+  else sw = 260;
+
+  root.style.setProperty("--search-w", `${sw}px`);
+}
+computeSearchWidth();
+window.addEventListener("resize", computeSearchWidth, { passive: true });
+
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
@@ -278,44 +310,10 @@ function setAddressDisplay(addr) {
 }
 setAddressDisplay(address);
 
-/* ✅ desktop: calcola width input così NON invaderà mai il titolo */
-function computeDesktopSearchWidth(){
-  if (!searchWrap || !addressInput || !searchBtn) return;
-
-  const grid = document.querySelector(".header-grid");
-  const center = document.querySelector(".header-center");
-  if (!grid || !center) return;
-
-  const rCenter = center.getBoundingClientRect();
-  const rBtn = searchBtn.getBoundingClientRect();
-
-  const safety = 14;
-  const leftLimit = rCenter.right + safety;
-  const rightLimit = rBtn.left - safety;
-
-  const available = Math.max(0, rightLimit - leftLimit);
-
-  const minW = 160;
-  const maxW = 360;
-  const w = Math.max(minW, Math.min(maxW, available));
-
-  if (window.innerWidth > 520) {
-    searchWrap.style.setProperty("--search-w", `${w}px`);
-  }
-}
-function refreshSearchWidthIfOpen(){
-  if (!searchWrap) return;
-  if (searchWrap.classList.contains("open")) computeDesktopSearchWidth();
-}
-
 function openSearch() {
   if (!searchWrap) return;
   searchWrap.classList.add("open");
-  document.body.classList.add("search-open");
-
-  // ✅ evita sovrapposizione sul titolo (desktop)
-  computeDesktopSearchWidth();
-
+  document.body.classList.add("search-open"); // ✅ mobile mini title + hide subtitle
   setTimeout(() => addressInput?.focus(), 20);
 }
 function closeSearch() {
@@ -338,11 +336,11 @@ if (addressInput) {
   addressInput.addEventListener("focus", openSearch, { passive: true });
   addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
 
-  addressInput.addEventListener("keydown", (e) => {
+  addressInput.addEventListener("keydown", async (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      commitAddress(pendingAddress);
-      closeSearch(); // ✅ torna solo la lente + titolo pieno
+      await commitAddress(pendingAddress);
+      closeSearch(); // ✅ after search: hide input, keep lens only
     } else if (e.key === "Escape") {
       e.preventDefault();
       addressInput.value = address || "";
@@ -352,15 +350,11 @@ if (addressInput) {
   });
 }
 
-/* chiudi se clicchi fuori */
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
   closeSearch();
 });
-
-/* ✅ se cambia dimensione finestra, ricalcola la width */
-window.addEventListener("resize", refreshSearchWidthIfOpen, { passive: true });
 
 /* ================= DRAWER MENU ================= */
 const backdrop = $("backdrop");
@@ -536,7 +530,6 @@ const candle = {
   w: { t: 0, open: 0, high: 0, low: 0 },
   m: { t: 0, open: 0, high: 0, low: 0 },
 };
-const tfReady = { d: false, w: false, m: false };
 
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
@@ -690,7 +683,7 @@ async function loadAccount(isRefresh=false) {
   }
 
   accountOnline = true;
-  modeLoading = false; // ✅ once account arrives, allow green
+  modeLoading = false;
   refreshConnUI();
 
   const bal = b.balances?.find(x => x.denom === "inj");
@@ -896,7 +889,7 @@ function initChartToday() {
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
-        pointRadius: 0,
+        pointRadius: 0, // price chart stays clean
         tension: 0.3
       }]
     },
@@ -1027,7 +1020,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKE CHART (persist) ================= */
+/* ================= STAKE CHART (persist + cloud) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -1049,6 +1042,7 @@ function saveStakeSeries() {
       labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
     }));
   } catch {}
+  scheduleCloudSave(); // ✅
 }
 function loadStakeSeries() {
   const key = stakeStoreKey(address);
@@ -1095,6 +1089,14 @@ function resetStakeSeriesFromNow() {
   drawStakeChart();
 }
 
+/* ✅ point radius dynamic => always visible (desktop too) */
+function pointsRadiusByCount(n){
+  if (n > 450) return 2.0;
+  if (n > 250) return 2.3;
+  if (n > 120) return 2.7;
+  return 3.2;
+}
+
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas || !window.Chart) return;
@@ -1109,11 +1111,14 @@ function initStakeChart() {
         backgroundColor: "rgba(34,197,94,.18)",
         fill: true,
         tension: 0.25,
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        pointBackgroundColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "#ef4444" : "#22c55e",
+
+        pointRadius: (ctx) => pointsRadiusByCount((ctx?.chart?.data?.datasets?.[0]?.data || []).length),
+        pointHoverRadius: 7,
+        pointHitRadius: 14,
+
+        pointBackgroundColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "#111c2f" : "#111c2f",
         pointBorderColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "rgba(239,68,68,.95)" : "rgba(34,197,94,.90)",
-        pointBorderWidth: 1
+        pointBorderWidth: 2
       }]
     },
     options: {
@@ -1184,7 +1189,7 @@ function maybeAddStakePoint(currentStake) {
   drawStakeChart();
 }
 
-/* ================= REWARD WITHDRAWALS (persist) ================= */
+/* ================= REWARD WITHDRAWALS (persist + cloud) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
@@ -1209,6 +1214,7 @@ function saveWdAll() {
       labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
   } catch {}
+  scheduleCloudSave(); // ✅
 }
 function loadWdAll() {
   const key = wdStoreKey(address);
@@ -1248,6 +1254,7 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
+/* label plugin */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1265,7 +1272,9 @@ const rewardPointLabelPlugin = {
     if (!Number.isFinite(max)) max = n - 1;
 
     const visibleCount = Math.max(0, Math.floor(max - min + 1));
-    if (visibleCount > 30) return;
+
+    // ✅ if too many visible, don't draw labels (points still visible!)
+    if (visibleCount > 28) return;
 
     const ctx = ch.ctx;
     ctx.save();
@@ -1274,7 +1283,7 @@ const rewardPointLabelPlugin = {
     ctx.textAlign = "center";
 
     let drawn = 0;
-    const maxDraw = 30;
+    const maxDraw = 28;
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
@@ -1305,11 +1314,16 @@ function initRewardWdChart() {
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         tension: 0.25,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: "#3b82f6",
-        pointBorderColor: "rgba(249,250,251,.6)",
-        pointBorderWidth: 1
+
+        /* ✅ points always visible (desktop + mobile) */
+        pointRadius: (ctx) => pointsRadiusByCount((ctx?.chart?.data?.datasets?.[0]?.data || []).length),
+        pointHoverRadius: 7,
+        pointHitRadius: 14,
+
+        /* ✅ contrast ring */
+        pointBackgroundColor: "#111c2f",
+        pointBorderColor: "rgba(59,130,246,.95)",
+        pointBorderWidth: 2
       }]
     },
     options: {
@@ -1450,6 +1464,142 @@ function refreshChartsTheme(){
   } catch {}
 }
 
+/* ================= CLOUD SYNC (helpers) ================= */
+function withTimeout(promise, ms=CLOUD_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))
+  ]);
+}
+
+async function cloudGet(addr) {
+  if (!CLOUD_SYNC_ON || !addr || !hasInternet()) return null;
+  try {
+    const url = `/api/point?address=${encodeURIComponent(addr)}`;
+    const res = await withTimeout(fetch(url, { cache: "no-store" }));
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j?.ok ? (j.data || null) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function cloudPut(addr, payload) {
+  if (!CLOUD_SYNC_ON || !addr || !hasInternet()) return false;
+  try {
+    const res = await withTimeout(fetch(`/api/point?address=${encodeURIComponent(addr)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }));
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function buildCloudPayload() {
+  return {
+    v: 1,
+    t: Date.now(),
+    stake: {
+      labels: stakeLabels,
+      data: stakeData,
+      moves: stakeMoves,
+      types: stakeTypes
+    },
+    wd: {
+      labels: wdLabelsAll,
+      values: wdValuesAll,
+      times: wdTimesAll
+    }
+  };
+}
+
+function pickBestSeries(localObj, cloudObj) {
+  const L = localObj || {};
+  const C = cloudObj || {};
+  const lt = safe(L.t), ct = safe(C.t);
+
+  const lStakeN = (L?.stake?.data || []).length;
+  const cStakeN = (C?.stake?.data || []).length;
+  const lWdN    = (L?.wd?.values || []).length;
+  const cWdN    = (C?.wd?.values || []).length;
+
+  const stakeUseCloud = (cStakeN > lStakeN + 2) || (cStakeN === lStakeN && ct > lt);
+  const wdUseCloud    = (cWdN > lWdN + 2) || (cWdN === lWdN && ct > lt);
+
+  const out = {
+    v: 1,
+    t: Math.max(lt, ct, Date.now()),
+    stake: stakeUseCloud ? (C.stake || {}) : (L.stake || {}),
+    wd:    wdUseCloud    ? (C.wd    || {}) : (L.wd    || {})
+  };
+
+  const sd = Array.isArray(out.stake.data) ? out.stake.data : [];
+  const sl = Array.isArray(out.stake.labels) ? out.stake.labels : [];
+  const sm = Array.isArray(out.stake.moves) ? out.stake.moves : [];
+  const st = Array.isArray(out.stake.types) ? out.stake.types : [];
+  const sn = sd.length;
+
+  out.stake.data = sd;
+  out.stake.labels = sl.slice(-sn);
+  out.stake.moves  = sm.slice(-sn);
+  out.stake.types  = st.slice(-sn);
+  while (out.stake.moves.length < sn) out.stake.moves.unshift(0);
+  while (out.stake.types.length < sn) out.stake.types.unshift("Stake update");
+
+  const wv = Array.isArray(out.wd.values) ? out.wd.values : [];
+  const wl = Array.isArray(out.wd.labels) ? out.wd.labels : [];
+  const wt = Array.isArray(out.wd.times) ? out.wd.times : [];
+  const wn = wv.length;
+
+  out.wd.values = wv;
+  out.wd.labels = wl.slice(-wn);
+  out.wd.times  = wt.slice(-wn);
+  while (out.wd.times.length < wn) out.wd.times.unshift(0);
+
+  return out;
+}
+
+let cloudSaveTimer = null;
+function scheduleCloudSave() {
+  if (!CLOUD_SYNC_ON || !address) return;
+  if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(async () => {
+    cloudSaveTimer = null;
+    const payload = buildCloudPayload();
+    await cloudPut(address, payload);
+  }, CLOUD_SYNC_DEBOUNCE_MS);
+}
+
+async function mergeCloudIntoLocal(addr) {
+  if (!CLOUD_SYNC_ON || !addr || !hasInternet()) return;
+
+  const localSnap = buildCloudPayload();
+  const cloudSnap = await cloudGet(addr);
+  if (!cloudSnap) return;
+
+  const merged = pickBestSeries(localSnap, cloudSnap);
+
+  stakeLabels = merged.stake.labels || [];
+  stakeData   = merged.stake.data   || [];
+  stakeMoves  = merged.stake.moves  || [];
+  stakeTypes  = merged.stake.types  || [];
+
+  wdLabelsAll = merged.wd.labels || [];
+  wdValuesAll = merged.wd.values || [];
+  wdTimesAll  = merged.wd.times  || [];
+
+  // persist + redraw
+  saveStakeSeries();
+  rebuildWdView();
+  drawStakeChart();
+  drawRewardWdChart();
+  goRewardLive();
+}
+
 /* ================= ADDRESS COMMIT ================= */
 async function commitAddress(newAddr) {
   const a = (newAddr || "").trim();
@@ -1481,6 +1631,9 @@ async function commitAddress(newAddr) {
   loadWdAll();
   rebuildWdView();
   goRewardLive();
+
+  // ✅ merge cloud for this address (cross-device)
+  await mergeCloudIntoLocal(address);
 
   // status: loading during address commit fetch
   modeLoading = true;
@@ -1551,6 +1704,9 @@ window.addEventListener("offline", () => {
     goRewardLive();
   }
 
+  // ✅ merge cloud (cross-device) at boot
+  if (address) await mergeCloudIntoLocal(address);
+
   // loading base data
   modeLoading = true;
   refreshConnUI();
@@ -1593,13 +1749,11 @@ function animate() {
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
-  // ✅ INJ price bars: gradient più leggero (premium, non “sparato”)
+  // price bars gradients
   const dUp   = "linear-gradient(90deg, rgba(34,197,94,.55), rgba(16,185,129,.32))";
   const dDown = "linear-gradient(270deg, rgba(239,68,68,.55), rgba(248,113,113,.30))";
-
   const wUp   = "linear-gradient(90deg, rgba(59,130,246,.55), rgba(99,102,241,.30))";
   const wDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(59,130,246,.26))";
-
   const mUp   = "linear-gradient(90deg, rgba(249,115,22,.50), rgba(236,72,153,.28))";
   const mDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(236,72,153,.25))";
 
@@ -1696,7 +1850,7 @@ function animate() {
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
-  // ✅ keep status in sync (so it turns green as soon as ready)
+  // keep status in sync
   refreshConnUI();
 
   requestAnimationFrame(animate);
