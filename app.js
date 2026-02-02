@@ -27,6 +27,9 @@ let refreshLoading = false;
 /* ✅ Status dot "mode loading" (switch / data loading) */
 let modeLoading = false;
 
+/* ✅ NEW: force RED for a short period while switching modes */
+let forceRedUntil = 0;
+
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
@@ -123,17 +126,29 @@ function liveReady(){
   return socketsOk && accountOk;
 }
 
+/* ✅ helper: stage RED for ms while switching mode */
+function stageSwitchRed(ms){
+  forceRedUntil = Date.now() + Math.max(0, ms || 0);
+}
+
 /* ✅ Status dot logic:
    - No internet => red
-   - Loading (switching / fetching) => orange
+   - Switching mode (short) => red
+   - Loading (fetching / ws not ready / account not ready) => orange
    - Ready => green
-   - (No yellow at all)
 */
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
 
   if (!hasInternet()) {
     statusText.textContent = "Offline";
+    statusDot.style.background = "#ef4444";
+    return;
+  }
+
+  // ✅ red phase on mode switching
+  if (Date.now() < forceRedUntil) {
+    statusText.textContent = "Switching...";
     statusDot.style.background = "#ef4444";
     return;
   }
@@ -451,6 +466,8 @@ function setMode(isLive){
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
+  // ✅ stage: RED for a moment, then orange loading
+  stageSwitchRed(REFRESH_RED_MS);
   modeLoading = true;
   refreshConnUI();
 
@@ -465,7 +482,7 @@ function setMode(isLive){
     refreshLoading = false;
 
     setTimeout(() => {
-      refreshConnUI();
+      refreshConnUI();          // will go orange after red phase
       refreshLoadAllOnce();
     }, REFRESH_RED_MS);
 
@@ -532,6 +549,7 @@ function startTradeWS() {
 
   wsTrade.onopen = () => {
     wsTradeOnline = true;
+    // ✅ if wallet is set, stay loading until account arrives, otherwise can go green once sockets ready
     modeLoading = address ? !accountOnline : false;
     refreshConnUI();
     clearTradeRetry();
@@ -1473,6 +1491,7 @@ window.addEventListener("offline", () => {
   refreshLoaded = false;
   refreshLoading = false;
   modeLoading = false;
+  forceRedUntil = 0;
   refreshConnUI();
 }, { passive: true });
 
@@ -1523,8 +1542,6 @@ window.addEventListener("offline", () => {
     startKlineWS();
     if (address) await loadAccount();
     startAllTimers();
-    // modeLoading will drop once liveReady() becomes true
-    // (refreshConnUI handles it automatically)
   } else {
     stopAllTimers();
     stopAllSockets();
@@ -1658,7 +1675,7 @@ function animate() {
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
-  // ✅ keep status in sync (so it turns green as soon as ready)
+  // ✅ keep status in sync
   refreshConnUI();
 
   requestAnimationFrame(animate);
