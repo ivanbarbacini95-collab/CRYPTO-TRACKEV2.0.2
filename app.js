@@ -1324,14 +1324,16 @@ const rewardPointLabelPlugin = {
   afterDatasetsDraw(ch) {
     const ds = ch.data.datasets?.[0];
     if (!ds) return;
+
     const meta = ch.getDatasetMeta(0);
     const dataEls = meta?.data || [];
     if (!dataEls.length) return;
 
     const xScale = ch.scales?.x;
+    const n = ds.data.length;
+
     let min = xScale?.min;
     let max = xScale?.max;
-    const n = ds.data.length;
     if (!Number.isFinite(min)) min = 0;
     if (!Number.isFinite(max)) max = n - 1;
 
@@ -1341,8 +1343,15 @@ const rewardPointLabelPlugin = {
     const ctx = ch.ctx;
     ctx.save();
     ctx.font = "800 11px Inter, sans-serif";
-    ctx.fillStyle = (document.body.dataset.theme === "light") ? "rgba(15,23,42,0.88)" : "rgba(249,250,251,0.92)";
+    ctx.fillStyle = (document.body.dataset.theme === "light")
+      ? "rgba(15,23,42,0.88)"
+      : "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+
+    // area utile (dove non si deve uscire)
+    const leftBound  = ch.chartArea.left + 6;
+    const rightBound = ch.chartArea.right - 6;
 
     let drawn = 0;
     const maxDraw = 60;
@@ -1353,7 +1362,18 @@ const rewardPointLabelPlugin = {
       if (drawn >= maxDraw) break;
 
       const v = safe(ds.data[i]);
-      ctx.fillText(`+${v.toFixed(6)} INJ`, el.x, el.y - 10);
+      const text = `+${v.toFixed(6)} INJ`;
+
+      // ✅ clamp X per non tagliare testo a sinistra/destra
+      const halfW = ctx.measureText(text).width / 2;
+      let x = el.x;
+      x = Math.max(leftBound + halfW, Math.min(rightBound - halfW, x));
+
+      // y un filo sopra il punto, ma senza uscire dal top
+      let y = el.y - 10;
+      y = Math.max(ch.chartArea.top + 12, y);
+
+      ctx.fillText(text, x, y);
       drawn++;
     }
     ctx.restore();
