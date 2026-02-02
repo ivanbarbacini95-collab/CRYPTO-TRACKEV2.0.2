@@ -16,12 +16,13 @@
 
 <div class="container loading" id="appRoot">
 
+  <!-- HEADER -->
   <div class="header">
     <div class="header-grid">
 
       <!-- LEFT: MENU -->
       <div class="header-left">
-        <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
+        <button class="menu-btn" id="menuBtn" type="button" aria-label="Menu">≡</button>
       </div>
 
       <!-- CENTER: TITLE -->
@@ -33,10 +34,11 @@
       <!-- RIGHT: SEARCH -->
       <div class="header-right">
         <div class="search-wrap" id="searchWrap">
-          <input id="addressInput" placeholder="inj..." autocomplete="off" />
-          <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
+          <input id="addressInput" placeholder="Enter INJ address (inj...)" autocomplete="off" inputmode="text" />
+          <button class="icon-btn" id="searchBtn" type="button" aria-label="Search">🔍</button>
         </div>
       </div>
+
     </div>
 
     <!-- META: wallet + status -->
@@ -44,40 +46,40 @@
       <div id="addressDisplay" class="address-display"></div>
 
       <div class="connection-status" id="connectionStatus">
-        <span class="status-dot" id="statusDot"></span>
+        <span class="status-dot" id="statusDot" aria-hidden="true"></span>
         <span class="status-text" id="statusText">Offline</span>
       </div>
     </div>
   </div>
 
-  <!-- BACKDROP (blur + overlay) -->
+  <!-- BACKDROP -->
   <div class="backdrop" id="backdrop" aria-hidden="true"></div>
 
-  <!-- DRAWER MENU -->
+  <!-- DRAWER -->
   <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-top">
       <div class="drawer-title">Menu</div>
 
       <div class="drawer-toggles">
-        <button class="toggle-btn" id="themeToggle" aria-label="Tema">
+        <button class="toggle-btn" id="themeToggle" type="button" aria-label="Theme">
           <span id="themeIcon">🌙</span>
         </button>
 
-        <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
+        <button class="toggle-btn" id="liveToggle" type="button" aria-label="Live or Refresh">
           <span id="liveIcon">📡</span>
         </button>
       </div>
     </div>
 
-    <nav class="drawer-nav" id="drawerNav">
-      <button class="nav-item" data-page="home">HOME</button>
-      <button class="nav-item" data-page="market">MARKET</button>
-      <button class="nav-item active" data-page="dashboard">MY DASHBOARD</button>
-      <button class="nav-item" data-page="event">EVENT</button>
+    <nav class="drawer-nav" id="drawerNav" aria-label="Navigation">
+      <button class="nav-item" type="button" data-page="home">HOME</button>
+      <button class="nav-item" type="button" data-page="market">MARKET</button>
+      <button class="nav-item active" type="button" data-page="dashboard">MY DASHBOARD</button>
+      <button class="nav-item" type="button" data-page="event">EVENT</button>
 
-      <!-- settings pinned bottom (ui) -->
       <div class="nav-spacer"></div>
-      <button class="nav-item settings-item" data-page="settings">
+
+      <button class="nav-item settings-item" type="button" data-page="settings">
         SETTINGS
         <span class="nav-version">v2.0.2</span>
       </button>
@@ -88,7 +90,7 @@
     </div>
   </aside>
 
-  <!-- COMING SOON OVERLAY -->
+  <!-- COMING SOON -->
   <div class="coming-soon" id="comingSoon" aria-hidden="true">
     <div class="coming-card">
       <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
@@ -97,6 +99,7 @@
     </div>
   </div>
 
+  <!-- CARDS -->
   <div class="cards-wrapper">
 
     <!-- PRICE CARD -->
@@ -109,7 +112,7 @@
         <span class="arrow" id="arrow24h">►</span>
         <span class="pct" id="pct24h">0.00%</span>
       </div>
-      <div class="price-bar-container bar-container">
+      <div class="bar-container price-bar-container">
         <span class="bar-label">1D</span>
         <div id="priceBar" class="bar-fill"></div>
         <div class="open-marker" aria-hidden="true"></div>
@@ -126,7 +129,7 @@
         <span class="arrow" id="arrowWeek">►</span>
         <span class="pct" id="pctWeek">0.00%</span>
       </div>
-      <div class="week-bar-container bar-container">
+      <div class="bar-container week-bar-container">
         <span class="bar-label">1W</span>
         <div id="weekBar" class="bar-fill"></div>
         <div class="open-marker" aria-hidden="true"></div>
@@ -143,7 +146,7 @@
         <span class="arrow" id="arrowMonth">►</span>
         <span class="pct" id="pctMonth">0.00%</span>
       </div>
-      <div class="month-bar-container bar-container">
+      <div class="bar-container month-bar-container">
         <span class="bar-label">1M</span>
         <div id="monthBar" class="bar-fill"></div>
         <div class="open-marker" aria-hidden="true"></div>
@@ -169,11 +172,11 @@
       <div class="value-row"><span id="stake">0.0000</span></div>
       <div class="sub-row" id="stakeUsd">≈ $0.00</div>
 
-      <div class="stake-bar-container bar-container stake-container">
+      <div class="bar-container stake-container">
         <span class="bar-label">STAKED</span>
         <div id="stakeBar" class="bar-fill stake-fill"></div>
         <div id="stakeLine" class="bar-line"></div>
-        <span id="stakePercent" class="stake-percent">0%</span>
+        <span id="stakePercent" class="bar-percent">0%</span>
       </div>
 
       <div class="bar-values stake-values">
@@ -192,11 +195,11 @@
       <div class="value-row"><span id="rewards">0.0000000</span></div>
       <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
 
-      <div class="reward-bar-container bar-container reward-container">
+      <div class="bar-container reward-container">
         <span class="bar-label">REWARD</span>
         <div id="rewardBar" class="bar-fill reward-fill"></div>
         <div id="rewardLine" class="bar-line"></div>
-        <span id="rewardPercent" class="reward-percent">0%</span>
+        <span id="rewardPercent" class="bar-percent">0%</span>
       </div>
 
       <div class="bar-values reward-values">
@@ -238,11 +241,9 @@
     <!-- 1D PRICE CHART -->
     <div class="card chart-card">
       <div class="label">1D Price Chart</div>
-
       <div class="chart-overlay" id="chartOverlay">
         <span id="chartPrice">--</span>
       </div>
-
       <canvas id="priceChart"></canvas>
     </div>
 
@@ -250,7 +251,7 @@
 
   <div id="updated" class="last-update">Last update: --:--</div>
 
-  <!-- PRO INFO footer -->
+  <!-- FOOTER -->
   <div class="pro-footer" id="proFooter">
     <span class="pro-pill">INJ Portfolio</span>
     <span class="pro-dot">•</span>
@@ -260,6 +261,5 @@
   </div>
 
 </div>
-
 </body>
 </html>
