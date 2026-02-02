@@ -7,7 +7,6 @@
 
   <link rel="stylesheet" href="style.css">
 
-  <!-- Chart.js + Zoom plugin -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
 
@@ -17,16 +16,12 @@
 
 <div class="container loading" id="appRoot">
 
-  <!-- HEADER -->
   <div class="header">
     <div class="header-grid">
+
       <!-- LEFT: MENU -->
       <div class="header-left">
-        <button class="menu-btn" id="menuBtn" aria-label="Menu">
-          <span class="hamburger" aria-hidden="true">
-            <span></span><span></span><span></span>
-          </span>
-        </button>
+        <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
       </div>
 
       <!-- CENTER: TITLE -->
@@ -37,14 +32,14 @@
 
       <!-- RIGHT: SEARCH -->
       <div class="header-right">
-        <div class="search-wrap" id="searchWrap" aria-label="Ricerca indirizzo">
-          <span class="search-glow" aria-hidden="true"></span>
-          <input id="addressInput" placeholder="Cerca wallet inj..." autocomplete="off" />
+        <div class="search-wrap" id="searchWrap">
+          <input id="addressInput" placeholder="inj..." autocomplete="off" />
           <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
         </div>
       </div>
     </div>
 
+    <!-- META: wallet + status -->
     <div class="header-meta-right">
       <div id="addressDisplay" class="address-display"></div>
 
@@ -55,16 +50,13 @@
     </div>
   </div>
 
-  <!-- BACKDROP -->
+  <!-- BACKDROP (blur + overlay) -->
   <div class="backdrop" id="backdrop" aria-hidden="true"></div>
 
-  <!-- DRAWER MENU (voci visibili SOLO qui) -->
+  <!-- DRAWER MENU -->
   <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-top">
-      <div>
-        <div class="drawer-title">Menu</div>
-        <div class="drawer-sub">Navigazione</div>
-      </div>
+      <div class="drawer-title">Menu</div>
 
       <div class="drawer-toggles">
         <button class="toggle-btn" id="themeToggle" aria-label="Tema">
@@ -78,11 +70,11 @@
     </div>
 
     <nav class="drawer-nav" id="drawerNav">
-      <button class="nav-item" data-page="home">Home</button>
-      <button class="nav-item" data-page="market">Market</button>
-      <button class="nav-item active" data-page="dashboard">My Dashboard</button>
-      <button class="nav-item" data-page="event">Event</button>
-      <button class="nav-item" data-page="settings">Impostazioni</button>
+      <button class="nav-item" data-page="home">HOME</button>
+      <button class="nav-item" data-page="market">MARKET</button>
+      <button class="nav-item active" data-page="dashboard">MY DASHBOARD</button>
+      <button class="nav-item" data-page="event">EVENT</button>
+      <button class="nav-item" data-page="settings">IMPOSTAZIONI</button>
     </nav>
 
     <div class="drawer-foot">
@@ -90,8 +82,7 @@
     </div>
   </aside>
 
-  <!-- MAIN (solo dashboard, sempre) -->
-  <main class="cards-wrapper">
+  <div class="cards-wrapper">
 
     <!-- PRICE CARD -->
     <div class="card price-card">
@@ -103,7 +94,7 @@
         <span class="arrow" id="arrow24h">►</span>
         <span class="pct" id="pct24h">0.00%</span>
       </div>
-      <div class="bar-container">
+      <div class="price-bar-container bar-container">
         <span class="bar-label">1D</span>
         <div id="priceBar" class="bar-fill"></div>
         <div class="open-marker" aria-hidden="true"></div>
@@ -120,7 +111,7 @@
         <span class="arrow" id="arrowWeek">►</span>
         <span class="pct" id="pctWeek">0.00%</span>
       </div>
-      <div class="bar-container">
+      <div class="week-bar-container bar-container">
         <span class="bar-label">1W</span>
         <div id="weekBar" class="bar-fill"></div>
         <div class="open-marker" aria-hidden="true"></div>
@@ -137,7 +128,7 @@
         <span class="arrow" id="arrowMonth">►</span>
         <span class="pct" id="pctMonth">0.00%</span>
       </div>
-      <div class="bar-container">
+      <div class="month-bar-container bar-container">
         <span class="bar-label">1M</span>
         <div id="monthBar" class="bar-fill"></div>
         <div class="open-marker" aria-hidden="true"></div>
@@ -163,15 +154,16 @@
       <div class="value-row"><span id="stake">0.0000</span></div>
       <div class="sub-row" id="stakeUsd">≈ $0.00</div>
 
-      <div class="bar-container stake-container">
+      <div class="stake-bar-container bar-container stake-container">
+        <span class="bar-label">STAKED</span>
         <div id="stakeBar" class="bar-fill stake-fill"></div>
         <div id="stakeLine" class="bar-line"></div>
         <span id="stakePercent" class="stake-percent">0%</span>
       </div>
 
-      <div class="bar-values">
-        <span class="left">0</span>
-        <span class="right">1000</span>
+      <div class="bar-values stake-values">
+        <span id="stakeMin" class="left">0</span>
+        <span id="stakeMax" class="right">1000</span>
       </div>
 
       <div class="stake-chart-wrap">
@@ -185,21 +177,24 @@
       <div class="value-row"><span id="rewards">0.0000000</span></div>
       <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
 
-      <div class="bar-container reward-container">
+      <div class="reward-bar-container bar-container reward-container">
+        <span class="bar-label">REWARD</span>
         <div id="rewardBar" class="bar-fill reward-fill"></div>
         <div id="rewardLine" class="bar-line"></div>
         <span id="rewardPercent" class="reward-percent">0%</span>
       </div>
 
-      <div class="bar-values">
-        <span class="left">0</span>
+      <div class="bar-values reward-values">
+        <span id="rewardMin" class="left">0</span>
         <span id="rewardMax" class="right">0.1</span>
       </div>
 
+      <!-- Reward withdrawals chart -->
       <div class="reward-chart-wrap">
         <canvas id="rewardChart"></canvas>
       </div>
 
+      <!-- Tools -->
       <div class="reward-tools">
         <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
 
@@ -215,6 +210,7 @@
         </div>
       </div>
 
+      <!-- Timeline -->
       <div class="reward-timeline">
         <input id="rewardTimeline" type="range" min="0" max="0" value="0" />
         <div class="reward-timeline-meta" id="rewardTimelineMeta">—</div>
@@ -230,13 +226,15 @@
     <!-- 1D PRICE CHART -->
     <div class="card chart-card">
       <div class="label">1D Price Chart</div>
-      <div class="chart-overlay">
+
+      <div class="chart-overlay" id="chartOverlay">
         <span id="chartPrice">--</span>
       </div>
+
       <canvas id="priceChart"></canvas>
     </div>
 
-  </main>
+  </div>
 
   <div id="updated" class="last-update">Last update: --:--</div>
 </div>
