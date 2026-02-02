@@ -1407,7 +1407,7 @@ function initRewardWdChart() {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: { padding: { left: 18, right: 18, top: 6, bottom: 4 } },
+     layout: { padding: { left: 18, right: 18, top: 6, bottom: 4 } },
       plugins: {
         legend: { display: false },
         tooltip: {
