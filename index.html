@@ -189,12 +189,10 @@
         <span id="rewardMax" class="right">0.1</span>
       </div>
 
-      <!-- Reward withdrawals chart -->
       <div class="reward-chart-wrap">
         <canvas id="rewardChart"></canvas>
       </div>
 
-      <!-- Tools -->
       <div class="reward-tools">
         <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
 
@@ -210,7 +208,6 @@
         </div>
       </div>
 
-      <!-- Timeline -->
       <div class="reward-timeline">
         <input id="rewardTimeline" type="range" min="0" max="0" value="0" />
         <div class="reward-timeline-meta" id="rewardTimelineMeta">—</div>
@@ -227,8 +224,12 @@
     <div class="card chart-card">
       <div class="label">1D Price Chart</div>
 
-      <div class="chart-overlay" id="chartOverlay">
-        <span id="chartPrice">--</span>
+      <!-- ✅ overlay pro (sparisce quando non interagisci) -->
+      <div class="chart-overlay" id="chartOverlay" aria-hidden="true">
+        <div class="chart-tooltip" id="chartTooltip">
+          <div class="chart-tooltip-time" id="chartTime">--:--</div>
+          <div class="chart-tooltip-price" id="chartPrice">--</div>
+        </div>
       </div>
 
       <canvas id="priceChart"></canvas>
