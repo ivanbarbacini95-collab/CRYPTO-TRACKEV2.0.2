@@ -24,6 +24,9 @@ const REFRESH_RED_MS = 220;
 let refreshLoaded = false;
 let refreshLoading = false;
 
+/* ✅ Status dot "mode loading" (switch / data loading) */
+let modeLoading = false;
+
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
@@ -113,6 +116,19 @@ let accountOnline = false;
 
 function hasInternet() { return navigator.onLine === true; }
 
+/* ✅ Determine if LIVE is truly "ready" */
+function liveReady(){
+  const socketsOk = wsTradeOnline && wsKlineOnline;
+  const accountOk = !address || accountOnline; // if no wallet set, don't block green
+  return socketsOk && accountOk;
+}
+
+/* ✅ Status dot logic:
+   - No internet => red
+   - Loading (switching / fetching) => orange
+   - Ready => green
+   - (No yellow at all)
+*/
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
 
@@ -122,26 +138,20 @@ function refreshConnUI() {
     return;
   }
 
-  if (!liveMode) {
-    if (!refreshLoaded) {
-      statusText.textContent = "Connecting...";
-      statusDot.style.background = "#f59e0b";
-    } else {
-      statusText.textContent = "Online";
-      statusDot.style.background = "#22c55e";
-    }
-    return;
-  }
+  const loadingNow =
+    modeLoading ||
+    refreshLoading ||
+    (!liveMode && !refreshLoaded) ||
+    (liveMode && !liveReady());
 
-  const allOk = wsTradeOnline && wsKlineOnline && accountOnline;
-  if (!allOk) {
-    statusText.textContent = "Connecting...";
-    statusDot.style.background = "#facc15";
+  if (loadingNow) {
+    statusText.textContent = "Loading...";
+    statusDot.style.background = "#f59e0b"; // orange
     return;
   }
 
   statusText.textContent = "Online";
-  statusDot.style.background = "#22c55e";
+  statusDot.style.background = "#22c55e"; // green
 }
 
 /* ================= UI READY FAILSAFE ================= */
@@ -417,6 +427,7 @@ async function refreshLoadAllOnce(){
 
   refreshLoading = true;
   refreshLoaded = false;
+  modeLoading = true;
   refreshConnUI();
 
   try{
@@ -424,6 +435,8 @@ async function refreshLoadAllOnce(){
     await loadChartToday(true);
     if (address) await loadAccount(true);
     refreshLoaded = true;
+    modeLoading = false;
+    refreshConnUI();
     setUIReady(true);
   } finally {
     refreshLoading = false;
@@ -438,6 +451,9 @@ function setMode(isLive){
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
+  modeLoading = true;
+  refreshConnUI();
+
   if (!liveMode) {
     stopAllTimers();
     stopAllSockets();
@@ -447,11 +463,6 @@ function setMode(isLive){
 
     refreshLoaded = false;
     refreshLoading = false;
-
-    if (statusText && statusDot) {
-      statusText.textContent = "Offline";
-      statusDot.style.background = "#ef4444";
-    }
 
     setTimeout(() => {
       refreshConnUI();
@@ -519,7 +530,12 @@ function startTradeWS() {
 
   wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
 
-  wsTrade.onopen = () => { wsTradeOnline = true; refreshConnUI(); clearTradeRetry(); };
+  wsTrade.onopen = () => {
+    wsTradeOnline = true;
+    modeLoading = address ? !accountOnline : false;
+    refreshConnUI();
+    clearTradeRetry();
+  };
   wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); scheduleTradeRetry(); };
   wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
 
@@ -579,7 +595,12 @@ function startKlineWS() {
 
   wsKline = new WebSocket(url);
 
-  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); clearKlineRetry(); };
+  wsKline.onopen = () => {
+    wsKlineOnline = true;
+    modeLoading = address ? !accountOnline : false;
+    refreshConnUI();
+    clearKlineRetry();
+  };
   wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
   wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
 
@@ -629,6 +650,7 @@ async function loadAccount(isRefresh=false) {
   }
 
   accountOnline = true;
+  modeLoading = false; // ✅ once account arrives, allow green
   refreshConnUI();
 
   const bal = b.balances?.find(x => x.denom === "inj");
@@ -1212,7 +1234,7 @@ const rewardPointLabelPlugin = {
     ctx.textAlign = "center";
 
     let drawn = 0;
-    const maxDraw = 30; // ✅ più permissivo
+    const maxDraw = 30;
 
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
@@ -1220,7 +1242,6 @@ const rewardPointLabelPlugin = {
       if (drawn >= maxDraw) break;
 
       const v = safe(ds.data[i]);
-      // ✅ disegna label anche se minuscolo / quasi zero
       ctx.fillText(`+${v.toFixed(6)} INJ`, el.x, el.y - 10);
       drawn++;
     }
@@ -1421,6 +1442,10 @@ async function commitAddress(newAddr) {
   rebuildWdView();
   goRewardLive();
 
+  // status: loading during address commit fetch
+  modeLoading = true;
+  refreshConnUI();
+
   if (liveMode) await loadAccount();
   else {
     refreshLoaded = false;
@@ -1446,6 +1471,8 @@ window.addEventListener("offline", () => {
   wsKlineOnline = false;
   accountOnline = false;
   refreshLoaded = false;
+  refreshLoading = false;
+  modeLoading = false;
   refreshConnUI();
 }, { passive: true });
 
@@ -1484,7 +1511,10 @@ window.addEventListener("offline", () => {
     goRewardLive();
   }
 
-  // load base data
+  // loading base data
+  modeLoading = true;
+  refreshConnUI();
+
   await loadCandleSnapshot(liveMode ? false : true);
   await loadChartToday(liveMode ? false : true);
 
@@ -1493,6 +1523,8 @@ window.addEventListener("offline", () => {
     startKlineWS();
     if (address) await loadAccount();
     startAllTimers();
+    // modeLoading will drop once liveReady() becomes true
+    // (refreshConnUI handles it automatically)
   } else {
     stopAllTimers();
     stopAllSockets();
@@ -1625,6 +1657,9 @@ function animate() {
   // APR + time
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
+
+  // ✅ keep status in sync (so it turns green as soon as ready)
+  refreshConnUI();
 
   requestAnimationFrame(animate);
 }
