@@ -13,13 +13,16 @@ const STAKE_TARGET_MAX = 1000;
 
 /* staked persistence */
 const STAKE_LOCAL_VER = 2;
-/* richiesta: reset da ora (parte da 0) */
 const RESET_STAKE_FROM_NOW_ON_BOOT = true;
 
 /* reward withdrawals persistence */
 const REWARD_WD_LOCAL_VER = 2;
-/* detect withdrawal: se rewards scendono oltre soglia */
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
+
+/* refresh mode staging */
+const REFRESH_RED_MS = 220;
+let refreshLoaded = false;
+let refreshLoading = false;
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -30,6 +33,7 @@ function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
+function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
 
 function fmtSmart(v){
   v = safe(v);
@@ -42,24 +46,57 @@ function fmtSmart(v){
   return v.toFixed(6);
 }
 
-function setText(id, txt){
-  const el = $(id);
-  if (el) el.textContent = txt;
-}
-function setHTML(id, html){
-  const el = $(id);
-  if (el) el.innerHTML = html;
-}
-
 /* ================= THEME / MODE (storage) ================= */
 const THEME_KEY = "inj_theme";
 const MODE_KEY = "inj_mode"; // live | refresh
 let theme = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
+function axisGridColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
+}
+function axisTickColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
+}
+
+let chart = null;
+let stakeChart = null;
+let rewardChart = null;
+
+function refreshChartsTheme(){
+  if (stakeChart) {
+    stakeChart.options.scales.y.grid.color = axisGridColor();
+    stakeChart.options.scales.y.ticks.color = axisTickColor();
+    stakeChart.update("none");
+  }
+  if (rewardChart) {
+    rewardChart.options.scales.x.grid.color = axisGridColor();
+    rewardChart.options.scales.y.grid.color = axisGridColor();
+    rewardChart.options.scales.y.ticks.color = axisTickColor();
+    rewardChart.options.scales.x.ticks.color = axisTickColor();
+    rewardChart.update("none");
+  }
+  if (chart) {
+    chart.options.scales.y.grid.color = axisGridColor();
+    chart.options.scales.y.ticks.color = axisTickColor();
+    chart.update("none");
+  }
+}
+
+function applyTheme(t){
+  theme = (t === "light") ? "light" : "dark";
+  document.body.dataset.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  const themeIcon = $("themeIcon");
+  if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
+  refreshChartsTheme();
+}
+applyTheme(theme);
+
 /* ================= CONNECTION UI ================= */
 const statusDot = $("statusDot");
 const statusText = $("statusText");
+
 let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
@@ -69,8 +106,11 @@ function hasInternet() { return navigator.onLine === true; }
 /*
 ✅ REGOLE STATUS:
 - Senza internet => OFFLINE rosso
-- Con internet + modalità REFRESH => ONLINE (connessione ok) ma pallino ARANCIO (no realtime)
-- LIVE => Connecting giallo finché feed/account non pronti, poi verde
+- REFRESH:
+    - appena switch: rosso breve
+    - poi arancio "Connecting..." finché non ha caricato tutto
+    - poi verde "Online"
+- LIVE: Connecting giallo finché feed/account non pronti, poi verde
 */
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
@@ -82,8 +122,13 @@ function refreshConnUI() {
   }
 
   if (!liveMode) {
-    statusText.textContent = "Online";
-    statusDot.style.background = "#f59e0b"; // arancio
+    if (!refreshLoaded) {
+      statusText.textContent = "Connecting...";
+      statusDot.style.background = "#f59e0b"; // arancio
+    } else {
+      statusText.textContent = "Online";
+      statusDot.style.background = "#22c55e"; // verde
+    }
     return;
   }
 
@@ -172,6 +217,7 @@ document.addEventListener("click", (e) => {
 /* ================= DRAWER MENU ================= */
 const backdrop = $("backdrop");
 const drawer = $("drawer");
+const drawerNav = $("drawerNav");
 const themeToggle = $("themeToggle");
 const liveToggle = $("liveToggle");
 const liveIcon = $("liveIcon");
@@ -239,60 +285,20 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeComingSoon();
 });
 
+/* menu items */
 function setActivePage(pageKey){
-  const items = drawer?.querySelectorAll(".nav-item") || [];
+  const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
 }
-
-drawer?.addEventListener("click", (e) => {
+drawerNav?.addEventListener("click", (e) => {
   const btn = e.target?.closest(".nav-item");
   if (!btn) return;
-
   const page = btn.dataset.page || "dashboard";
   setActivePage(page);
   closeDrawer();
-
   if (page !== "dashboard") openComingSoon(page);
   else closeComingSoon();
 }, { passive:true });
-
-/* ================= THEME APPLY ================= */
-function axisGridColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.14)" : "rgba(249,250,251,.10)";
-}
-function axisTickColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(17,24,39,.65)" : "rgba(249,250,251,.60)";
-}
-
-let chart = null;       // price 1D chart
-let stakeChart = null;  // stake chart
-let rewardChart = null; // withdrawals chart
-
-function refreshChartsTheme(){
-  // price chart uses custom colors by sign; no need to re-theme axes (x hidden)
-  if (stakeChart) {
-    stakeChart.options.scales.y.grid.color = axisGridColor();
-    stakeChart.options.scales.y.ticks.color = axisTickColor();
-    stakeChart.update("none");
-  }
-  if (rewardChart) {
-    rewardChart.options.scales.x.grid.color = axisGridColor();
-    rewardChart.options.scales.y.grid.color = axisGridColor();
-    rewardChart.options.scales.y.ticks.color = axisTickColor();
-    rewardChart.options.scales.x.ticks.color = axisTickColor();
-    rewardChart.update("none");
-  }
-}
-
-function applyTheme(t){
-  theme = (t === "light") ? "light" : "dark";
-  document.body.dataset.theme = theme;
-  localStorage.setItem(THEME_KEY, theme);
-  const themeIcon = $("themeIcon");
-  if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
-  refreshChartsTheme();
-}
-applyTheme(theme);
 
 /* ================= STATE ================= */
 let targetPrice = 0;
@@ -346,7 +352,7 @@ function colorNumber(el, n, o, d) {
   const ns = n.toFixed(d), os = o.toFixed(d);
   if (ns === os) { el.textContent = ns; return; }
   el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : (document.body.dataset.theme === "light" ? "#111827" : "#f9fafb");
+    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
 }
@@ -379,7 +385,7 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
     line.style.left = "50%";
     bar.style.left = "50%";
     bar.style.width = "0%";
-    bar.style.background = "rgba(255,255,255,0.08)";
+    bar.style.background = "rgba(255,255,255,0.10)";
     return;
   }
 
@@ -403,41 +409,11 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   }
 }
 
-/* ================= HEAT COLOR (Rewards bar) ================= */
-function heatColor(p) {
-  const t = clamp(p, 0, 100) / 100;
-  return `rgb(${14 + (239 - 14) * t},${165 - 165 * t},${233 - 233 * t})`;
-}
-
 /* ================= LIVE / REFRESH MODE ================= */
 let accountPollTimer = null;
 let restSyncTimer = null;
 let chartSyncTimer = null;
 let ensureChartTimer = null;
-
-function setMode(isLive){
-  liveMode = !!isLive;
-  localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
-
-  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
-  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-
-  if (!liveMode) {
-    stopAllTimers();
-    stopAllSockets();
-    wsTradeOnline = false;
-    wsKlineOnline = false;
-    accountOnline = false;
-    refreshConnUI();
-  } else {
-    startAllTimers();
-    startTradeWS();
-    startKlineWS();
-    loadAccount();
-    loadCandleSnapshot();
-    loadChartToday();
-  }
-}
 
 function stopAllTimers(){
   if (accountPollTimer) { clearInterval(accountPollTimer); accountPollTimer = null; }
@@ -452,6 +428,68 @@ function startAllTimers(){
   restSyncTimer = setInterval(loadCandleSnapshot, REST_SYNC_MS);
   chartSyncTimer = setInterval(loadChartToday, CHART_SYNC_MS);
   ensureChartTimer = setInterval(ensureChartBootstrapped, 1500);
+}
+
+async function refreshLoadAllOnce(){
+  if (refreshLoading) return;
+  if (!hasInternet()) { refreshLoaded = false; refreshConnUI(); return; }
+
+  refreshLoading = true;
+  refreshLoaded = false;
+  refreshConnUI();
+
+  try{
+    await loadCandleSnapshot(true);
+    await loadChartToday(true);
+    if (address) await loadAccount(true);
+    refreshLoaded = true;
+    setUIReady(true);
+  } finally {
+    refreshLoading = false;
+    refreshConnUI();
+  }
+}
+
+function setMode(isLive){
+  liveMode = !!isLive;
+  localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
+
+  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
+  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
+
+  if (!liveMode) {
+    // STOP LIVE
+    stopAllTimers();
+    stopAllSockets();
+    wsTradeOnline = false;
+    wsKlineOnline = false;
+    accountOnline = false;
+
+    // richiesta: rosso -> arancio -> verde (se internet e tutto caricato)
+    refreshLoaded = false;
+    refreshLoading = false;
+    if (statusText && statusDot) {
+      statusText.textContent = "Offline";
+      statusDot.style.background = "#ef4444";
+    }
+    setTimeout(() => {
+      refreshConnUI();
+      refreshLoadAllOnce();
+    }, REFRESH_RED_MS);
+
+  } else {
+    // START LIVE
+    refreshLoaded = false;
+    refreshLoading = false;
+
+    startAllTimers();
+    startTradeWS();
+    startKlineWS();
+    loadAccount();
+    loadCandleSnapshot();
+    loadChartToday();
+    refreshConnUI();
+  }
 }
 
 liveToggle?.addEventListener("click", () => {
@@ -597,8 +635,8 @@ function startKlineWS() {
 }
 
 /* ================= ACCOUNT (Injective LCD) ================= */
-async function loadAccount() {
-  if (!liveMode) return;
+async function loadAccount(isRefresh=false) {
+  if (!isRefresh && !liveMode) return;
   if (!address || !hasInternet()) {
     accountOnline = false;
     refreshConnUI();
@@ -632,11 +670,13 @@ async function loadAccount() {
 
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
+
+  setUIReady(true);
 }
 
 /* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
-async function loadCandleSnapshot() {
-  if (!liveMode) return;
+async function loadCandleSnapshot(isRefresh=false) {
+  if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
 
   const [d, w, m] = await Promise.all([
@@ -667,7 +707,7 @@ async function loadCandleSnapshot() {
     if (candle.m.open && candle.m.high && candle.m.low) tfReady.m = true;
   }
 
-  setUIReady(false);
+  setUIReady(true);
 }
 
 /* ================= PRICE CHART (1D) ================= */
@@ -847,8 +887,8 @@ function initChartToday() {
   setupChartInteractions();
 }
 
-async function loadChartToday() {
-  if (!liveMode) return;
+async function loadChartToday(isRefresh=false) {
+  if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
   if (!tfReady.d || !candle.d.t) return;
 
@@ -871,7 +911,7 @@ async function loadChartToday() {
   }
 
   chartBootstrappedToday = true;
-  setUIReady(false);
+  setUIReady(true);
 }
 
 function setupChartInteractions() {
@@ -971,17 +1011,16 @@ function updateChartFrom1mKline(k) {
   chart.data.labels.push(fmtHHMM(openTime));
   chart.data.datasets[0].data.push(close);
 
-  // prezzo chart: tiene max 1 giornata
   while (chart.data.labels.length > DAY_MINUTES) chart.data.labels.shift();
   while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
 
   chart.update("none");
 }
 
-/* ================= STAKED CHART (persist, NO DELETE, POINT PER MOVIMENTO) ================= */
+/* ================= STAKED CHART (persist, punto per movimento, 6 decimali) ================= */
 let stakeLabels = [];
 let stakeData = [];
-let stakeMoves = []; // +1 / -1 / 0
+let stakeMoves = [];
 let stakeTypes = [];
 let lastStakeRecordedRounded = null;
 let stakeBaselineCaptured = false;
@@ -1017,9 +1056,9 @@ function loadStakeSeries() {
     stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
 
     const n = stakeData.length;
-    if (stakeLabels.length !== n) stakeLabels = stakeLabels.slice(0, n);
-    if (stakeMoves.length !== n)  stakeMoves  = stakeMoves.slice(0, n);
-    if (stakeTypes.length !== n)  stakeTypes  = stakeTypes.slice(0, n);
+    stakeLabels = stakeLabels.slice(0, n);
+    stakeMoves  = stakeMoves.slice(0, n);
+    stakeTypes  = stakeTypes.slice(0, n);
 
     while (stakeMoves.length < n) stakeMoves.push(0);
     while (stakeTypes.length < n) stakeTypes.push("Stake update");
@@ -1067,11 +1106,11 @@ function initStakeChart() {
         pointHoverRadius: 6,
         pointBackgroundColor: (ctx) => {
           const m = stakeMoves[ctx.dataIndex] || 0;
-          return m > 0 ? "#22c55e" : (m < 0 ? "#ef4444" : "#22c55e");
+          return m < 0 ? "#ef4444" : "#22c55e";
         },
         pointBorderColor: (ctx) => {
           const m = stakeMoves[ctx.dataIndex] || 0;
-          return m > 0 ? "rgba(34,197,94,.95)" : (m < 0 ? "rgba(239,68,68,.95)" : "rgba(34,197,94,.65)");
+          return m < 0 ? "rgba(239,68,68,.95)" : "rgba(34,197,94,.90)";
         },
         pointBorderWidth: 1
       }]
@@ -1120,10 +1159,6 @@ function drawStakeChart() {
   }
 }
 
-/*
-✅ Punto PER OGNI movimento:
-- confronto arrotondato a 6 decimali (pad 6), così registri ogni variazione reale ma eviti “rumore”
-*/
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -1161,19 +1196,17 @@ function maybeAddStakePoint(currentStake) {
   drawStakeChart();
 }
 
-/* ================= REWARD WITHDRAWALS (persist + filter + live + timeline, NO DELETE) ================= */
-/* master arrays (saved) */
+/* ================= REWARD WITHDRAWALS (persist + filter + live + timeline) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
 
-/* view arrays (filtered) */
 let wdLabels = [];
 let wdValues = [];
 let wdTimes  = [];
 
 let wdLastRewardsSeen = null;
-let wdMinFilter = 0; // INJ
+let wdMinFilter = 0;
 
 function wdStoreKey(addr) {
   const a = (addr || "").trim();
@@ -1233,7 +1266,6 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* label plugin: mostra +0.00 sopra i punti solo quando zoomato */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1258,13 +1290,12 @@ const rewardPointLabelPlugin = {
     const ctx = ch.ctx;
     ctx.save();
     ctx.font = "700 11px Inter, sans-serif";
-    ctx.fillStyle = (document.body.dataset.theme === "light") ? "rgba(17,24,39,0.85)" : "rgba(249,250,251,0.92)";
+    ctx.fillStyle = (document.body.dataset.theme === "light") ? "rgba(15,23,42,0.85)" : "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
 
     let drawn = 0;
     const maxDraw = 18;
 
-    // ✅ non sovrapporre troppo: disegna massimo N etichette
     for (let i = Math.max(0, Math.floor(min)); i <= Math.min(n - 1, Math.ceil(max)); i++) {
       const el = dataEls[i];
       if (!el) continue;
@@ -1331,7 +1362,7 @@ function initRewardWdChart() {
           position: "right",
           ticks: {
             color: axisTickColor(),
-            mirror: true,          // ✅ numeri DENTRO il grafico
+            mirror: true,
             padding: 6,
             callback: (val) => fmtSmart(val)
           },
@@ -1394,20 +1425,17 @@ function attachRewardTimelineHandlers() {
   if (!slider) return;
   slider.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
 }
-
 function goRewardLive() {
   const slider = $("rewardTimeline");
   if (slider) slider.value = String(Math.max(0, wdValues.length - 1));
   if (rewardChart?.resetZoom) rewardChart.resetZoom();
   syncRewardTimelineUI(true);
 }
-
 function attachRewardLiveHandler() {
   const btn = $("rewardLiveBtn");
   if (!btn) return;
   btn.addEventListener("click", () => goRewardLive(), { passive: true });
 }
-
 function attachRewardFilterHandler() {
   const sel = $("rewardFilter");
   if (!sel) return;
@@ -1453,11 +1481,9 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
-  // reset UI values
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
 
-  // staked series per wallet
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1466,7 +1492,6 @@ async function commitAddress(newAddr) {
     drawStakeChart();
   }
 
-  // reward withdrawals per wallet
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
   loadWdAll();
@@ -1474,30 +1499,20 @@ async function commitAddress(newAddr) {
   goRewardLive();
 
   if (liveMode) await loadAccount();
+  else {
+    // in refresh: ricarica tutto per il nuovo wallet
+    refreshLoaded = false;
+    refreshConnUI();
+    await refreshLoadAllOnce();
+  }
 }
-
-/* ================= ONLINE / OFFLINE listeners ================= */
-window.addEventListener("online", () => {
-  refreshConnUI();
-  if (!liveMode) return;
-  try { startTradeWS(); } catch {}
-  try { startKlineWS(); } catch {}
-  try { loadAccount(); } catch {}
-}, { passive: true });
-
-window.addEventListener("offline", () => {
-  wsTradeOnline = false;
-  wsKlineOnline = false;
-  accountOnline = false;
-  refreshConnUI();
-}, { passive: true });
 
 /* ================= BOOT ================= */
 (async function boot() {
   refreshConnUI();
 
-  // ✅ failsafe: se per qualsiasi motivo non arriva tfReady.d, dopo 3s mostro comunque tutte le card
-  setTimeout(() => setUIReady(true), 3000);
+  // failsafe UI visible
+  setTimeout(() => setUIReady(true), 2800);
 
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
@@ -1509,11 +1524,9 @@ window.addEventListener("offline", () => {
 
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
-  // init mode ui
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // staked load/reset
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1522,14 +1535,12 @@ window.addEventListener("offline", () => {
     drawStakeChart();
   }
 
-  // load reward withdrawals history
   if (address) {
     loadWdAll();
     rebuildWdView();
     goRewardLive();
   }
 
-  // LIVE start
   if (liveMode) {
     await loadCandleSnapshot();
     await loadChartToday();
@@ -1541,13 +1552,15 @@ window.addEventListener("offline", () => {
     stopAllTimers();
     stopAllSockets();
     accountOnline = false;
+    refreshLoaded = false;
     refreshConnUI();
-    // comunque rendi visibile UI
-    setUIReady(true);
+    await refreshLoadAllOnce();
   }
 })();
 
 /* ================= LOOP ================= */
+let lastChartSign = "neutral";
+
 function animate() {
   /* PRICE */
   const op = displayed.price;
@@ -1569,13 +1582,15 @@ function animate() {
     applyChartColorBySign(sign);
   }
 
-  /* BARS gradients */
-  const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
-  const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
-  const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
-  const wDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(59,130,246,.55))";
-  const mUp   = "linear-gradient(to right, rgba(249,115,22,.92), rgba(236,72,153,.78))";
-  const mDown = "linear-gradient(to left,  rgba(239,68,68,.90), rgba(236,72,153,.55))";
+  /* BARS gradients (più morbidi/premium) */
+  const dUp   = "linear-gradient(90deg, rgba(34,197,94,.95), rgba(16,185,129,.78))";
+  const dDown = "linear-gradient(270deg, rgba(239,68,68,.95), rgba(248,113,113,.72))";
+
+  const wUp   = "linear-gradient(90deg, rgba(59,130,246,.95), rgba(99,102,241,.76))";
+  const wDown = "linear-gradient(270deg, rgba(239,68,68,.82), rgba(59,130,246,.45))";
+
+  const mUp   = "linear-gradient(90deg, rgba(249,115,22,.92), rgba(236,72,153,.70))";
+  const mDown = "linear-gradient(270deg, rgba(239,68,68,.82), rgba(236,72,153,.45))";
 
   renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, dUp, dDown);
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
@@ -1588,10 +1603,9 @@ function animate() {
 
   if (tfReady.d) {
     const low = safe(candle.d.low), high = safe(candle.d.high);
-    if ($("priceMin"))  $("priceMin").textContent  = low.toFixed(3);
-    if ($("priceOpen")) $("priceOpen").textContent = safe(candle.d.open).toFixed(3);
-    if ($("priceMax"))  $("priceMax").textContent  = high.toFixed(3);
-
+    setText("priceMin", low.toFixed(3));
+    setText("priceOpen", safe(candle.d.open).toFixed(3));
+    setText("priceMax", high.toFixed(3));
     if (lastExtremes.d.low !== null && low !== lastExtremes.d.low) flash(pMinEl);
     if (lastExtremes.d.high !== null && high !== lastExtremes.d.high) flash(pMaxEl);
     lastExtremes.d.low = low; lastExtremes.d.high = high;
@@ -1601,10 +1615,9 @@ function animate() {
 
   if (tfReady.w) {
     const low = safe(candle.w.low), high = safe(candle.w.high);
-    if ($("weekMin"))  $("weekMin").textContent   = low.toFixed(3);
-    if ($("weekOpen")) $("weekOpen").textContent  = safe(candle.w.open).toFixed(3);
-    if ($("weekMax"))  $("weekMax").textContent   = high.toFixed(3);
-
+    setText("weekMin", low.toFixed(3));
+    setText("weekOpen", safe(candle.w.open).toFixed(3));
+    setText("weekMax", high.toFixed(3));
     if (lastExtremes.w.low !== null && low !== lastExtremes.w.low) flash(wMinEl);
     if (lastExtremes.w.high !== null && high !== lastExtremes.w.high) flash(wMaxEl);
     lastExtremes.w.low = low; lastExtremes.w.high = high;
@@ -1614,10 +1627,9 @@ function animate() {
 
   if (tfReady.m) {
     const low = safe(candle.m.low), high = safe(candle.m.high);
-    if ($("monthMin"))  $("monthMin").textContent  = low.toFixed(3);
-    if ($("monthOpen")) $("monthOpen").textContent = safe(candle.m.open).toFixed(3);
-    if ($("monthMax"))  $("monthMax").textContent  = high.toFixed(3);
-
+    setText("monthMin", low.toFixed(3));
+    setText("monthOpen", safe(candle.m.open).toFixed(3));
+    setText("monthMax", high.toFixed(3));
     if (lastExtremes.m.low !== null && low !== lastExtremes.m.low) flash(mMinEl);
     if (lastExtremes.m.high !== null && high !== lastExtremes.m.high) flash(mMaxEl);
     lastExtremes.m.low = low; lastExtremes.m.high = high;
@@ -1629,18 +1641,26 @@ function animate() {
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
-  if ($("availableUsd")) $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
+  const aUsd = $("availableUsd");
+  if (aUsd) aUsd.textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
 
   /* STAKE */
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-  if ($("stakeUsd")) $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
+  const sUsd = $("stakeUsd");
+  if (sUsd) sUsd.textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
 
   const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
-  if ($("stakeBar")) $("stakeBar").style.width = stakePct + "%";
-  if ($("stakeLine")) $("stakeLine").style.left = stakePct + "%";
-  if ($("stakePercent")) $("stakePercent").textContent = stakePct.toFixed(1) + "%";
+  const stakeBar = $("stakeBar");
+  const stakeLine = $("stakeLine");
+  const stakePercent = $("stakePercent");
+  if (stakeBar) {
+    stakeBar.style.width = stakePct + "%";
+    stakeBar.style.backgroundPosition = `${(100 - stakePct) * 0.6}% 0`;
+  }
+  if (stakeLine) stakeLine.style.left = stakePct + "%";
+  if (stakePercent) stakePercent.textContent = stakePct.toFixed(1) + "%";
   setText("stakeMin", "0");
   setText("stakeMax", String(STAKE_TARGET_MAX));
 
@@ -1648,16 +1668,20 @@ function animate() {
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
-  if ($("rewardsUsd")) $("rewardsUsd").textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
+  const rUsd = $("rewardsUsd");
+  if (rUsd) rUsd.textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
 
   const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
 
-  if ($("rewardBar")) {
-    $("rewardBar").style.width = rp + "%";
-    $("rewardBar").style.background = heatColor(rp);
+  const rewardBar = $("rewardBar");
+  const rewardLine = $("rewardLine");
+  if (rewardBar) {
+    rewardBar.style.width = rp + "%";
+    // ✅ heat gradient “scorre” (più caldo quando rp sale)
+    rewardBar.style.backgroundPosition = `${(100 - rp)}% 0`;
   }
-  if ($("rewardLine")) $("rewardLine").style.left = rp + "%";
+  if (rewardLine) rewardLine.style.left = rp + "%";
   setText("rewardPercent", rp.toFixed(1) + "%");
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
@@ -1669,3 +1693,24 @@ function animate() {
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ================= APPLY CHART COLOR BY SIGN ================= */
+function applyChartColorBySign(sign) {
+  if (!chart) return;
+  const ds = chart.data.datasets?.[0];
+  if (!ds) return;
+
+  if (sign === "up") {
+    ds.borderColor = "#22c55e";
+    ds.backgroundColor = "rgba(34,197,94,.20)";
+  } else if (sign === "down") {
+    ds.borderColor = "#ef4444";
+    ds.backgroundColor = "rgba(239,68,68,.18)";
+  } else {
+    ds.borderColor = "#3b82f6";
+    ds.backgroundColor = "rgba(59,130,246,.14)";
+  }
+  chart.update("none");
+}
+
+/* ================= WS RETRY helpers remain above (already) ================= */
