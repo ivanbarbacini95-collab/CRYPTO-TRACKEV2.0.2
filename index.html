@@ -7,6 +7,7 @@
 
   <link rel="stylesheet" href="style.css">
 
+  <!-- Chart.js + Zoom plugin -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
 
@@ -16,7 +17,7 @@
 
 <div class="container loading" id="appRoot">
 
-  <!-- HEADER (always sharp) -->
+  <!-- HEADER -->
   <div class="header">
     <div class="header-grid">
       <!-- LEFT: MENU -->
@@ -44,7 +45,6 @@
       </div>
     </div>
 
-    <!-- META: wallet + status -->
     <div class="header-meta-right">
       <div id="addressDisplay" class="address-display"></div>
 
@@ -58,7 +58,7 @@
   <!-- BACKDROP -->
   <div class="backdrop" id="backdrop" aria-hidden="true"></div>
 
-  <!-- DRAWER MENU -->
+  <!-- DRAWER MENU (voci visibili SOLO qui) -->
   <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-top">
       <div>
@@ -90,191 +90,155 @@
     </div>
   </aside>
 
-  <!-- PAGES -->
-  <main class="pages">
+  <!-- MAIN (solo dashboard, sempre) -->
+  <main class="cards-wrapper">
 
-    <section class="page wip" id="page-home" aria-hidden="true">
-      <div class="wip-card">
-        <div class="wip-title">Home</div>
-        <div class="wip-sub">Work in progress</div>
+    <!-- PRICE CARD -->
+    <div class="card price-card">
+      <div class="label">INJ Price</div>
+      <div class="value-row"><span id="price">0.0000</span></div>
+
+      <!-- 1D -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrow24h">►</span>
+        <span class="pct" id="pct24h">0.00%</span>
       </div>
-    </section>
-
-    <section class="page wip" id="page-market" aria-hidden="true">
-      <div class="wip-card">
-        <div class="wip-title">Market</div>
-        <div class="wip-sub">Work in progress</div>
+      <div class="bar-container">
+        <span class="bar-label">1D</span>
+        <div id="priceBar" class="bar-fill"></div>
+        <div class="open-marker" aria-hidden="true"></div>
+        <div id="priceLine" class="bar-line"></div>
       </div>
-    </section>
-
-    <section class="page active" id="page-dashboard" aria-hidden="false">
-      <div class="cards-wrapper">
-
-        <!-- PRICE CARD -->
-        <div class="card price-card">
-          <div class="label">INJ Price</div>
-          <div class="value-row"><span id="price">0.0000</span></div>
-
-          <!-- 1D -->
-          <div class="sub-row perf">
-            <span class="arrow" id="arrow24h">►</span>
-            <span class="pct" id="pct24h">0.00%</span>
-          </div>
-          <div class="price-bar-container bar-container">
-            <span class="bar-label">1D</span>
-            <div id="priceBar" class="bar-fill"></div>
-            <div class="open-marker" aria-hidden="true"></div>
-            <div id="priceLine" class="bar-line"></div>
-          </div>
-          <div class="bar-values">
-            <span id="priceMin" class="left">--</span>
-            <span id="priceOpen" class="center">--</span>
-            <span id="priceMax" class="right">--</span>
-          </div>
-
-          <!-- 1W -->
-          <div class="sub-row perf">
-            <span class="arrow" id="arrowWeek">►</span>
-            <span class="pct" id="pctWeek">0.00%</span>
-          </div>
-          <div class="week-bar-container bar-container">
-            <span class="bar-label">1W</span>
-            <div id="weekBar" class="bar-fill"></div>
-            <div class="open-marker" aria-hidden="true"></div>
-            <div id="weekLine" class="bar-line"></div>
-          </div>
-          <div class="bar-values">
-            <span id="weekMin" class="left">--</span>
-            <span id="weekOpen" class="center">--</span>
-            <span id="weekMax" class="right">--</span>
-          </div>
-
-          <!-- 1M -->
-          <div class="sub-row perf">
-            <span class="arrow" id="arrowMonth">►</span>
-            <span class="pct" id="pctMonth">0.00%</span>
-          </div>
-          <div class="month-bar-container bar-container">
-            <span class="bar-label">1M</span>
-            <div id="monthBar" class="bar-fill"></div>
-            <div class="open-marker" aria-hidden="true"></div>
-            <div id="monthLine" class="bar-line"></div>
-          </div>
-          <div class="bar-values">
-            <span id="monthMin" class="left">--</span>
-            <span id="monthOpen" class="center">--</span>
-            <span id="monthMax" class="right">--</span>
-          </div>
-        </div>
-
-        <!-- AVAILABLE -->
-        <div class="card">
-          <div class="label">Available</div>
-          <div class="value-row"><span id="available">0.000000</span></div>
-          <div class="sub-row" id="availableUsd">≈ $0.00</div>
-        </div>
-
-        <!-- STAKED -->
-        <div class="card stake-card">
-          <div class="label">Staked</div>
-          <div class="value-row"><span id="stake">0.0000</span></div>
-          <div class="sub-row" id="stakeUsd">≈ $0.00</div>
-
-          <div class="stake-bar-container bar-container stake-container">
-            <span class="bar-label">STAKED</span>
-            <div id="stakeBar" class="bar-fill stake-fill"></div>
-            <div id="stakeLine" class="bar-line"></div>
-            <span id="stakePercent" class="stake-percent">0%</span>
-          </div>
-
-          <div class="bar-values stake-values">
-            <span id="stakeMin" class="left">0</span>
-            <span id="stakeMax" class="right">1000</span>
-          </div>
-
-          <div class="stake-chart-wrap">
-            <canvas id="stakeChart"></canvas>
-          </div>
-        </div>
-
-        <!-- REWARDS -->
-        <div class="card reward-card">
-          <div class="label">Rewards</div>
-          <div class="value-row"><span id="rewards">0.0000000</span></div>
-          <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
-
-          <div class="reward-bar-container bar-container reward-container">
-            <span class="bar-label">REWARD</span>
-            <div id="rewardBar" class="bar-fill reward-fill"></div>
-            <div id="rewardLine" class="bar-line"></div>
-            <span id="rewardPercent" class="reward-percent">0%</span>
-          </div>
-
-          <div class="bar-values reward-values">
-            <span id="rewardMin" class="left">0</span>
-            <span id="rewardMax" class="right">0.1</span>
-          </div>
-
-          <div class="reward-chart-wrap">
-            <canvas id="rewardChart"></canvas>
-          </div>
-
-          <div class="reward-tools">
-            <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
-
-            <div class="mini-select-wrap">
-              <span class="mini-select-label">Filtro</span>
-              <select id="rewardFilter" class="mini-select">
-                <option value="0">Tutti</option>
-                <option value="0.0005">≥ 0.0005</option>
-                <option value="0.001">≥ 0.001</option>
-                <option value="0.002">≥ 0.002</option>
-                <option value="0.005">≥ 0.005</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="reward-timeline">
-            <input id="rewardTimeline" type="range" min="0" max="0" value="0" />
-            <div class="reward-timeline-meta" id="rewardTimelineMeta">—</div>
-          </div>
-        </div>
-
-        <!-- APR -->
-        <div class="card">
-          <div class="label">APR</div>
-          <div class="value-row"><span id="apr">0%</span></div>
-        </div>
-
-        <!-- 1D PRICE CHART -->
-        <div class="card chart-card">
-          <div class="label">1D Price Chart</div>
-          <div class="chart-overlay" id="chartOverlay">
-            <span id="chartPrice">--</span>
-          </div>
-          <canvas id="priceChart"></canvas>
-        </div>
-
+      <div class="bar-values">
+        <span id="priceMin" class="left">--</span>
+        <span id="priceOpen" class="center">--</span>
+        <span id="priceMax" class="right">--</span>
       </div>
 
-      <div id="updated" class="last-update">Last update: --:--</div>
-    </section>
-
-    <section class="page wip" id="page-event" aria-hidden="true">
-      <div class="wip-card">
-        <div class="wip-title">Event</div>
-        <div class="wip-sub">Work in progress</div>
+      <!-- 1W -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrowWeek">►</span>
+        <span class="pct" id="pctWeek">0.00%</span>
       </div>
-    </section>
-
-    <section class="page wip" id="page-settings" aria-hidden="true">
-      <div class="wip-card">
-        <div class="wip-title">Impostazioni</div>
-        <div class="wip-sub">Work in progress</div>
+      <div class="bar-container">
+        <span class="bar-label">1W</span>
+        <div id="weekBar" class="bar-fill"></div>
+        <div class="open-marker" aria-hidden="true"></div>
+        <div id="weekLine" class="bar-line"></div>
       </div>
-    </section>
+      <div class="bar-values">
+        <span id="weekMin" class="left">--</span>
+        <span id="weekOpen" class="center">--</span>
+        <span id="weekMax" class="right">--</span>
+      </div>
+
+      <!-- 1M -->
+      <div class="sub-row perf">
+        <span class="arrow" id="arrowMonth">►</span>
+        <span class="pct" id="pctMonth">0.00%</span>
+      </div>
+      <div class="bar-container">
+        <span class="bar-label">1M</span>
+        <div id="monthBar" class="bar-fill"></div>
+        <div class="open-marker" aria-hidden="true"></div>
+        <div id="monthLine" class="bar-line"></div>
+      </div>
+      <div class="bar-values">
+        <span id="monthMin" class="left">--</span>
+        <span id="monthOpen" class="center">--</span>
+        <span id="monthMax" class="right">--</span>
+      </div>
+    </div>
+
+    <!-- AVAILABLE -->
+    <div class="card">
+      <div class="label">Available</div>
+      <div class="value-row"><span id="available">0.000000</span></div>
+      <div class="sub-row" id="availableUsd">≈ $0.00</div>
+    </div>
+
+    <!-- STAKED -->
+    <div class="card stake-card">
+      <div class="label">Staked</div>
+      <div class="value-row"><span id="stake">0.0000</span></div>
+      <div class="sub-row" id="stakeUsd">≈ $0.00</div>
+
+      <div class="bar-container stake-container">
+        <div id="stakeBar" class="bar-fill stake-fill"></div>
+        <div id="stakeLine" class="bar-line"></div>
+        <span id="stakePercent" class="stake-percent">0%</span>
+      </div>
+
+      <div class="bar-values">
+        <span class="left">0</span>
+        <span class="right">1000</span>
+      </div>
+
+      <div class="stake-chart-wrap">
+        <canvas id="stakeChart"></canvas>
+      </div>
+    </div>
+
+    <!-- REWARDS -->
+    <div class="card reward-card">
+      <div class="label">Rewards</div>
+      <div class="value-row"><span id="rewards">0.0000000</span></div>
+      <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
+
+      <div class="bar-container reward-container">
+        <div id="rewardBar" class="bar-fill reward-fill"></div>
+        <div id="rewardLine" class="bar-line"></div>
+        <span id="rewardPercent" class="reward-percent">0%</span>
+      </div>
+
+      <div class="bar-values">
+        <span class="left">0</span>
+        <span id="rewardMax" class="right">0.1</span>
+      </div>
+
+      <div class="reward-chart-wrap">
+        <canvas id="rewardChart"></canvas>
+      </div>
+
+      <div class="reward-tools">
+        <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
+
+        <div class="mini-select-wrap">
+          <span class="mini-select-label">Filtro</span>
+          <select id="rewardFilter" class="mini-select">
+            <option value="0">Tutti</option>
+            <option value="0.0005">≥ 0.0005</option>
+            <option value="0.001">≥ 0.001</option>
+            <option value="0.002">≥ 0.002</option>
+            <option value="0.005">≥ 0.005</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="reward-timeline">
+        <input id="rewardTimeline" type="range" min="0" max="0" value="0" />
+        <div class="reward-timeline-meta" id="rewardTimelineMeta">—</div>
+      </div>
+    </div>
+
+    <!-- APR -->
+    <div class="card">
+      <div class="label">APR</div>
+      <div class="value-row"><span id="apr">0%</span></div>
+    </div>
+
+    <!-- 1D PRICE CHART -->
+    <div class="card chart-card">
+      <div class="label">1D Price Chart</div>
+      <div class="chart-overlay">
+        <span id="chartPrice">--</span>
+      </div>
+      <canvas id="priceChart"></canvas>
+    </div>
 
   </main>
+
+  <div id="updated" class="last-update">Last update: --:--</div>
 </div>
 
 </body>
