@@ -333,7 +333,7 @@ body[data-theme="light"] .bar-label{
 
 /* reward withdrawals chart */
 .reward-chart-wrap {
-  height: 140px;
+  height: 170px; /* ⬅ più spazio per valori/tick interni */
   margin-top: 0.8rem;
   position: relative;
 }
@@ -442,8 +442,9 @@ body[data-theme="light"] .reward-timeline-meta{
 
 .stake-card .bar-label { display: none; }
 
+/* ⬇ grafico più grande e leggibile */
 .stake-chart-wrap {
-  height: 150px;
+  height: 190px;
   margin-top: 0.7rem;
   position: relative;
 }
