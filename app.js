@@ -13,7 +13,6 @@ const STAKE_TARGET_MAX = 1000;
 
 /* persistence */
 const STAKE_LOCAL_VER = 2;
-/* ✅ non resettare più ad ogni refresh: mantieni punti anche se ricarichi pagina */
 const RESET_STAKE_FROM_NOW_ON_BOOT = false;
 
 const REWARD_WD_LOCAL_VER = 2;
@@ -24,11 +23,8 @@ const REFRESH_RED_MS = 220;
 let refreshLoaded = false;
 let refreshLoading = false;
 
-/* ✅ Status dot "mode loading" (switch / data loading) */
+/* Status dot "mode loading" */
 let modeLoading = false;
-
-/* ✅ NEW: force RED for a short period while switching modes */
-let forceRedUntil = 0;
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -59,12 +55,10 @@ function setStatusError(msg){
   if (statusText) statusText.textContent = msg || "Error";
   if (statusDot) statusDot.style.background = "#ef4444";
 }
-
 window.addEventListener("error", (e) => {
   setStatusError("JS Error");
   console.error("JS Error:", e?.error || e);
 });
-
 window.addEventListener("unhandledrejection", (e) => {
   setStatusError("Promise Error");
   console.error("Promise Error:", e?.reason || e);
@@ -119,36 +113,19 @@ let accountOnline = false;
 
 function hasInternet() { return navigator.onLine === true; }
 
-/* ✅ Determine if LIVE is truly "ready" */
+/* LIVE is ready */
 function liveReady(){
   const socketsOk = wsTradeOnline && wsKlineOnline;
-  const accountOk = !address || accountOnline; // if no wallet set, don't block green
+  const accountOk = !address || accountOnline;
   return socketsOk && accountOk;
 }
 
-/* ✅ helper: stage RED for ms while switching mode */
-function stageSwitchRed(ms){
-  forceRedUntil = Date.now() + Math.max(0, ms || 0);
-}
-
-/* ✅ Status dot logic:
-   - No internet => red
-   - Switching mode (short) => red
-   - Loading (fetching / ws not ready / account not ready) => orange
-   - Ready => green
-*/
+/* Dot logic: red offline, orange loading, green online */
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
 
   if (!hasInternet()) {
     statusText.textContent = "Offline";
-    statusDot.style.background = "#ef4444";
-    return;
-  }
-
-  // ✅ red phase on mode switching
-  if (Date.now() < forceRedUntil) {
-    statusText.textContent = "Switching...";
     statusDot.style.background = "#ef4444";
     return;
   }
@@ -161,12 +138,12 @@ function refreshConnUI() {
 
   if (loadingNow) {
     statusText.textContent = "Loading...";
-    statusDot.style.background = "#f59e0b"; // orange
+    statusDot.style.background = "#f59e0b";
     return;
   }
 
   statusText.textContent = "Online";
-  statusDot.style.background = "#22c55e"; // green
+  statusDot.style.background = "#22c55e";
 }
 
 /* ================= UI READY FAILSAFE ================= */
@@ -296,11 +273,13 @@ setAddressDisplay(address);
 function openSearch() {
   if (!searchWrap) return;
   searchWrap.classList.add("open");
+  document.body.classList.add("search-open"); // ✅ mobile: title -> I • P
   setTimeout(() => addressInput?.focus(), 20);
 }
 function closeSearch() {
   if (!searchWrap) return;
   searchWrap.classList.remove("open");
+  document.body.classList.remove("search-open"); // ✅ back to normal
   addressInput?.blur();
 }
 
@@ -321,7 +300,7 @@ if (addressInput) {
     if (e.key === "Enter") {
       e.preventDefault();
       commitAddress(pendingAddress);
-      closeSearch();
+      closeSearch(); // ✅ after search: back to normal
     } else if (e.key === "Escape") {
       e.preventDefault();
       addressInput.value = address || "";
@@ -364,10 +343,7 @@ function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
 
 menuBtn?.addEventListener("click", toggleDrawer, { passive:true });
 backdrop?.addEventListener("click", closeDrawer, { passive:true });
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDrawer();
-});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
 themeToggle?.addEventListener("click", () => {
   applyTheme(theme === "dark" ? "light" : "dark");
@@ -459,6 +435,14 @@ async function refreshLoadAllOnce(){
   }
 }
 
+function stopAllSockets(){
+  try { wsTrade?.close(); } catch {}
+  try { wsKline?.close(); } catch {}
+  wsTrade = null; wsKline = null;
+  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
+  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
+}
+
 function setMode(isLive){
   liveMode = !!isLive;
   localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
@@ -466,8 +450,6 @@ function setMode(isLive){
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // ✅ stage: RED for a moment, then orange loading
-  stageSwitchRed(REFRESH_RED_MS);
   modeLoading = true;
   refreshConnUI();
 
@@ -482,7 +464,7 @@ function setMode(isLive){
     refreshLoading = false;
 
     setTimeout(() => {
-      refreshConnUI();          // will go orange after red phase
+      refreshConnUI();
       refreshLoadAllOnce();
     }, REFRESH_RED_MS);
 
@@ -521,17 +503,7 @@ let wsKline = null;
 let tradeRetryTimer = null;
 let klineRetryTimer = null;
 
-function stopAllSockets(){
-  try { wsTrade?.close(); } catch {}
-  try { wsKline?.close(); } catch {}
-  wsTrade = null; wsKline = null;
-  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
-  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
-}
-
-function clearTradeRetry() {
-  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
-}
+function clearTradeRetry() { if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; } }
 function scheduleTradeRetry() {
   clearTradeRetry();
   tradeRetryTimer = setTimeout(() => { if (liveMode) startTradeWS(); }, 1200);
@@ -549,7 +521,6 @@ function startTradeWS() {
 
   wsTrade.onopen = () => {
     wsTradeOnline = true;
-    // ✅ if wallet is set, stay loading until account arrives, otherwise can go green once sockets ready
     modeLoading = address ? !accountOnline : false;
     refreshConnUI();
     clearTradeRetry();
@@ -571,9 +542,7 @@ function startTradeWS() {
   };
 }
 
-function clearKlineRetry() {
-  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
-}
+function clearKlineRetry() { if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; } }
 function scheduleKlineRetry() {
   clearKlineRetry();
   klineRetryTimer = setTimeout(() => { if (liveMode) startKlineWS(); }, 1200);
@@ -668,7 +637,7 @@ async function loadAccount(isRefresh=false) {
   }
 
   accountOnline = true;
-  modeLoading = false; // ✅ once account arrives, allow green
+  modeLoading = false;
   refreshConnUI();
 
   const bal = b.balances?.find(x => x.denom === "inj");
@@ -1440,11 +1409,9 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
-  // reset displayed
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
 
-  // stake series (persistente)
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1453,14 +1420,12 @@ async function commitAddress(newAddr) {
     drawStakeChart();
   }
 
-  // rewards series
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
   loadWdAll();
   rebuildWdView();
   goRewardLive();
 
-  // status: loading during address commit fetch
   modeLoading = true;
   refreshConnUI();
 
@@ -1472,7 +1437,7 @@ async function commitAddress(newAddr) {
   }
 }
 
-/* ================= ONLINE / OFFLINE listeners ================= */
+/* ================= ONLINE / OFFLINE ================= */
 window.addEventListener("online", () => {
   refreshConnUI();
   if (liveMode) {
@@ -1491,14 +1456,12 @@ window.addEventListener("offline", () => {
   refreshLoaded = false;
   refreshLoading = false;
   modeLoading = false;
-  forceRedUntil = 0;
   refreshConnUI();
 }, { passive: true });
 
 /* ================= BOOT ================= */
 (async function boot() {
   refreshConnUI();
-
   setTimeout(() => setUIReady(true), 2800);
 
   attachRewardTimelineHandlers();
@@ -1514,7 +1477,6 @@ window.addEventListener("offline", () => {
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // stake history
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1523,14 +1485,12 @@ window.addEventListener("offline", () => {
     drawStakeChart();
   }
 
-  // reward history
   if (address) {
     loadWdAll();
     rebuildWdView();
     goRewardLive();
   }
 
-  // loading base data
   modeLoading = true;
   refreshConnUI();
 
@@ -1554,12 +1514,10 @@ window.addEventListener("offline", () => {
 
 /* ================= LOOP ================= */
 function animate() {
-  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -1568,11 +1526,9 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
-  // ✅ INJ price bars: gradient più leggero (premium, non “sparato”)
   const dUp   = "linear-gradient(90deg, rgba(34,197,94,.55), rgba(16,185,129,.32))";
   const dDown = "linear-gradient(270deg, rgba(239,68,68,.55), rgba(248,113,113,.30))";
 
@@ -1586,7 +1542,6 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -1627,13 +1582,11 @@ function animate() {
     setText("monthMin", "--"); setText("monthOpen", "--"); setText("monthMax", "--");
   }
 
-  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
   setText("availableUsd", `≈ $${(displayed.available * displayed.price).toFixed(2)}`);
 
-  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
@@ -1651,7 +1604,6 @@ function animate() {
   setText("stakeMin", "0");
   setText("stakeMax", String(STAKE_TARGET_MAX));
 
-  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
@@ -1671,13 +1623,10 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  // APR + time
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
-  // ✅ keep status in sync
   refreshConnUI();
-
   requestAnimationFrame(animate);
 }
 animate();
