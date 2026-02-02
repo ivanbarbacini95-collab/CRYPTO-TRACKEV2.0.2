@@ -46,7 +46,7 @@ body[data-theme="light"]{
 
 .header-grid{
   display: grid;
-  grid-template-columns: 56px 1fr 56px;
+  grid-template-columns: 120px 1fr 56px;
   align-items: center;
   gap: .5rem;
 }
@@ -111,12 +111,26 @@ body[data-theme="light"]{
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Menu visible */
 .menu-btn{
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: .45rem .55rem;
+  border-radius: 0.75rem;
+  opacity: .95;
+}
+
+.menu-btn .menu-ic{
   font-size: 1.75rem;
   line-height: 1;
-  padding: .35rem .4rem;
-  border-radius: 0.6rem;
-  opacity: .95;
+}
+
+.menu-btn .menu-tx{
+  font-weight: 900;
+  letter-spacing: .03em;
 }
 
 .menu-btn:hover{ opacity: 1; }
@@ -134,17 +148,19 @@ body[data-theme="light"]{
 .icon-btn:hover{ opacity: 1; }
 
 /* ===================== SEARCH (minimal pro) ===================== */
+/* wrapper sits in header-right cell */
 .search-wrap{
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: .45rem;
-  width: 56px;
+  width: 56px;            /* collapsed size */
   height: 40px;
   transition: width .22s ease;
   overflow: hidden;
 }
 
+/* input: hidden when collapsed */
 #addressInput{
   width: 0;
   opacity: 0;
@@ -158,6 +174,7 @@ body[data-theme="light"]{
   transition: width .22s ease, opacity .18s ease, padding .22s ease;
 }
 
+/* expanded */
 .search-wrap.expanded{
   width: 260px;
   background: rgba(10,15,31,0.55);
@@ -178,6 +195,7 @@ body[data-theme="light"] .search-wrap.expanded{
   padding: .6rem .4rem;
 }
 
+/* icon in collapsed: no background/border */
 .search-wrap:not(.expanded) .icon-btn{
   width: 40px;
   height: 40px;
@@ -186,6 +204,7 @@ body[data-theme="light"] .search-wrap.expanded{
   box-shadow: none;
 }
 
+/* icon in expanded: subtle bg */
 .search-wrap.expanded .icon-btn{
   background: rgba(255,255,255,0.06);
 }
@@ -205,6 +224,21 @@ body[data-theme="light"] .search-wrap.expanded{
   border-radius: 50%;
   background: #ef4444;
   animation: pulse 1.5s infinite;
+}
+
+.status-dot.online { background: #22c55e; }
+.status-dot.offline { background: #ef4444; }
+.status-dot.loading { background: #f59e0b; }
+
+.status-dot.loading{
+  animation: pulseWarm 1.25s infinite;
+  box-shadow: 0 0 18px rgba(245,158,11,0.35);
+}
+
+@keyframes pulseWarm {
+  0% { transform: scale(1); opacity: 0.72; }
+  50% { transform: scale(1.35); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.72; }
 }
 
 @keyframes pulse {
@@ -291,6 +325,7 @@ body[data-theme="light"] .bar-container{
   transition: width 0.25s ease, left 0.25s ease, background 0.22s ease;
 }
 
+/* open marker fixed center */
 .open-marker {
   position: absolute;
   left: 50%;
@@ -316,6 +351,7 @@ body[data-theme="light"] .open-marker{
   transition: left 0.25s ease;
 }
 
+/* timeframe label always above centered */
 .bar-label {
   position: absolute;
   left: 50%;
@@ -326,17 +362,11 @@ body[data-theme="light"] .open-marker{
   color: rgba(249, 250, 251, 0.72);
   pointer-events: none;
   text-shadow: 0 1px 10px rgba(0,0,0,0.65);
-  padding: 0 .35rem;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.22);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 body[data-theme="light"] .bar-label{
   color: rgba(17,24,39,0.72);
   text-shadow: none;
-  background: rgba(255,255,255,0.65);
 }
 
 .bar-values {
@@ -371,6 +401,7 @@ body[data-theme="light"] .bar-values{
   text-shadow: 0 1px 10px rgba(0,0,0,0.55);
 }
 
+/* you wanted label hidden in reward bar previously; now timeframe labels are on price bars only */
 .reward-card .bar-label { display: none; }
 
 .stake-container { height: 26px; }
@@ -398,59 +429,17 @@ body[data-theme="light"] .bar-values{
   height: 100% !important;
 }
 
-/* ✅ overlay container (non blocca il canvas) */
 .chart-overlay{
   position: absolute;
   top: 12px;
   right: 14px;
   z-index: 10;
-  pointer-events: none;
-}
-
-/* ✅ tooltip pro (ora+prezzo) */
-.chart-tooltip{
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(148,163,184,0.18);
-  background: rgba(0,0,0,0.35);
-  backdrop-filter: blur(10px) saturate(1.1);
-  -webkit-backdrop-filter: blur(10px) saturate(1.1);
-  box-shadow: 0 14px 40px rgba(0,0,0,0.35);
-
-  opacity: 0;
-  transform: translateY(-6px) scale(0.98);
-  transition: opacity 160ms ease, transform 160ms ease;
-}
-
-body[data-theme="light"] .chart-tooltip{
-  background: rgba(255,255,255,0.72);
-  box-shadow: 0 12px 34px rgba(0,0,0,0.12);
-}
-
-.chart-tooltip.show{
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.chart-tooltip-time{
-  font-size: 0.78rem;
-  font-weight: 800;
-  color: rgba(156,163,175,0.95);
-  letter-spacing: .02em;
-}
-
-body[data-theme="light"] .chart-tooltip-time{
-  color: rgba(17,24,39,0.65);
-}
-
-.chart-tooltip-price{
-  font-size: 1.08rem;
-  font-weight: 950;
+  font-size: 1.05rem;
+  font-weight: 900;
   color: var(--ink);
-  text-shadow: 0 1px 10px rgba(0,0,0,0.45);
+  pointer-events: none;
+  text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+  opacity: 0.95;
 }
 
 /* Stake chart */
@@ -658,6 +647,65 @@ body[data-theme="light"] .toggle-btn{
   background: rgba(17,24,39,0.06);
 }
 
+/* Text actions */
+.drawer-actions{
+  padding: .7rem .75rem .35rem .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  border-bottom: 1px solid rgba(148,163,184,0.12);
+}
+
+.action-row{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  border: 1px solid rgba(148,163,184,0.12);
+  background: rgba(255,255,255,0.04);
+  color: var(--ink);
+  border-radius: .9rem;
+  padding: .65rem .75rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+body[data-theme="light"] .action-row{
+  background: rgba(17,24,39,0.05);
+}
+
+.action-ic{
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+  font-size: 1.05rem;
+}
+
+body[data-theme="light"] .action-ic{
+  background: rgba(17,24,39,0.06);
+}
+
+.action-tx{
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.action-title{
+  font-weight: 950;
+  letter-spacing: .02em;
+}
+
+.action-sub{
+  font-size: .82rem;
+  color: var(--muted);
+  font-weight: 750;
+}
+
 .drawer-nav{
   padding: .75rem;
   display: flex;
@@ -698,16 +746,19 @@ body[data-theme="light"] .nav-item{
   font-weight: 700;
 }
 
+/* These classes are toggled by JS */
 .backdrop.show{ opacity: 1; pointer-events: auto; }
 .drawer.show{ transform: translateX(0); }
 
+/* Blur app when drawer open (JS adds .blurred to #appRoot) */
 #appRoot.blurred{
   filter: blur(10px) saturate(1.05);
 }
 
 /* ===================== RESPONSIVE ===================== */
 @media (max-width: 560px){
-  .header-grid{ grid-template-columns: 52px 1fr 52px; }
+  .header-grid{ grid-template-columns: 88px 1fr 52px; }
+  .menu-btn .menu-tx{ display: none; }
   .header h1{ font-size: 1.6rem; }
   .subtitle{ font-size: .86rem; }
   .search-wrap.expanded{ width: 220px; }
