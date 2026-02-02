@@ -149,59 +149,29 @@
         </div>
       </div>
 
-      <!-- NET WORTH (REWORKED) -->
-<div class="card networth-card" id="netWorthCard">
+      <!-- NET WORTH (IMPROVED) -->
+      <div class="card networth-card" id="netWorthCard">
 
-  <!-- Background chart -->
-  <div class="networth-bg">
-    <canvas id="netWorthChart"></canvas>
-  </div>
-
-  <!-- Foreground layout -->
-  <div class="networth-content">
-
-    <!-- Top: USD (left) -->
-    <div class="networth-toprow">
-      <div class="networth-usdblock">
-        <div class="label">Net Worth</div>
-        <div class="networth-usd" id="netWorthUsd">$0.00</div>
-        <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
-      </div>
-    </div>
-
-    <!-- spacer to give more air between chart and top text -->
-    <div class="networth-air"></div>
-
-    <!-- Footer under chart: timeframe switch -->
-    <div class="networth-bottom">
-      <div class="tf-switch tf-under" id="nwTfSwitch">
-        <button class="tf-btn active" data-tf="1d" type="button">1D</button>
-        <button class="tf-btn" data-tf="1w" type="button">1W</button>
-        <button class="tf-btn" data-tf="1m" type="button">1M</button>
-        <button class="tf-btn" data-tf="1y" type="button">1Y</button>
-      </div>
-
-      <div class="nw-divider"></div>
-
-      <!-- Coin list -->
-      <div class="nw-coins">
-
-        <!-- MINI CARD: total INJ (stable position) -->
-        <div class="nw-mini">
-          <div class="nw-mini-left">
-            <span class="nw-coin-logo">🟣</span>
-            <div class="nw-mini-meta">
-              <div class="nw-mini-title">INJ</div>
-              <div class="nw-mini-sub">Total staked + available + rewards</div>
-            </div>
-          </div>
-          <div class="nw-mini-right">
-            <div class="nw-mini-qty" id="netWorthInj">0.0000 INJ</div>
-          </div>
+        <div class="networth-head">
+          <div class="label">Net Worth</div>
+          <div class="networth-usd" id="netWorthUsd">$0.00</div>
+          <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
         </div>
 
-        <!-- Row: INJ ticker | qty + small price -->
-        <div class="nw-row">
+        <div class="networth-chartwrap">
+          <canvas id="netWorthChart"></canvas>
+        </div>
+
+        <div class="tf-switch networth-tf" id="nwTfSwitch">
+          <button class="tf-btn active" data-tf="1d" type="button">1D</button>
+          <button class="tf-btn" data-tf="1w" type="button">1W</button>
+          <button class="tf-btn" data-tf="1m" type="button">1M</button>
+          <button class="tf-btn" data-tf="1y" type="button">1Y</button>
+        </div>
+
+        <div class="nw-divider"></div>
+
+        <div class="nw-row nw-row-clean">
           <div class="nw-row-left">
             <span class="nw-coin-logo">🟣</span>
             <span class="nw-coin-ticker">INJ</span>
@@ -214,12 +184,7 @@
           </div>
         </div>
 
-        <!-- (in futuro puoi aggiungere altre coin row uguali qui) -->
-
       </div>
-    </div>
-  </div>
-</div>
 
       <!-- AVAILABLE -->
       <div class="card">
