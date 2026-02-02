@@ -150,35 +150,37 @@
       </div>
 
       <!-- NET WORTH (NEW) -->
-      <div class="card networth-card" id="netWorthCard">
-        <div class="networth-bg">
-          <canvas id="netWorthChart"></canvas>
-        </div>
+<div class="card networth-card" id="netWorthCard">
+  <div class="networth-bg">
+    <canvas id="netWorthChart"></canvas>
+  </div>
 
-        <div class="networth-content">
-          <div class="networth-top">
-            <div class="label">Net Worth</div>
+  <div class="networth-content">
+    <div class="networth-top">
+      <div class="label">Net Worth</div>
 
-            <div class="tf-switch" id="nwTfSwitch">
-              <button class="tf-btn active" data-tf="1d" type="button">1D</button>
-              <button class="tf-btn" data-tf="1w" type="button">1W</button>
-              <button class="tf-btn" data-tf="1m" type="button">1M</button>
-              <button class="tf-btn" data-tf="1y" type="button">1Y</button>
-            </div>
-          </div>
-
-          <div class="networth-pnl" id="netWorthPnl">PnL: —</div>
-
-          <div class="networth-main">
-            <span class="networth-usd" id="netWorthUsd">$0.00</span>
-          </div>
-
-          <div class="networth-foot">
-            <span class="networth-note" id="netWorthNote">History: 0 pts</span>
-            <span class="networth-inj" id="netWorthInj">0.0000 INJ</span>
-          </div>
-        </div>
+      <div class="tf-switch" id="nwTfSwitch">
+        <button class="tf-btn active" data-tf="1d" type="button">1D</button>
+        <button class="tf-btn" data-tf="1w" type="button">1W</button>
+        <button class="tf-btn" data-tf="1m" type="button">1M</button>
+        <button class="tf-btn" data-tf="1y" type="button">1Y</button>
       </div>
+    </div>
+
+    <!-- ✅ $ in alto centrato -->
+    <div class="networth-main">
+      <span class="networth-usd" id="netWorthUsd">$0.00</span>
+    </div>
+
+    <!-- ✅ PnL sotto centrato -->
+    <div class="networth-pnl" id="netWorthPnl">PnL: —</div>
+
+    <!-- ✅ INJ in basso a sinistra -->
+    <div class="networth-foot networth-foot-left">
+      <span class="networth-inj" id="netWorthInj">0.0000 INJ</span>
+    </div>
+  </div>
+</div>
 
       <!-- AVAILABLE -->
       <div class="card">
