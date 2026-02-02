@@ -11,15 +11,14 @@ const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
 
-/* staked persistence */
+/* persistence */
 const STAKE_LOCAL_VER = 2;
 const RESET_STAKE_FROM_NOW_ON_BOOT = true;
 
-/* reward withdrawals persistence */
 const REWARD_WD_LOCAL_VER = 2;
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
-/* refresh mode staging */
+/* REFRESH mode staging */
 const REFRESH_RED_MS = 220;
 let refreshLoaded = false;
 let refreshLoading = false;
@@ -46,10 +45,29 @@ function fmtSmart(v){
   return v.toFixed(6);
 }
 
+/* ================= GLOBAL ERROR GUARDS ================= */
+function setStatusError(msg){
+  const statusText = $("statusText");
+  const statusDot = $("statusDot");
+  if (statusText) statusText.textContent = msg || "Error";
+  if (statusDot) statusDot.style.background = "#ef4444";
+}
+
+window.addEventListener("error", (e) => {
+  // evita silent crash: se qualcosa esplode, lo vedi subito
+  setStatusError("JS Error");
+  console.error("JS Error:", e?.error || e);
+});
+
+window.addEventListener("unhandledrejection", (e) => {
+  setStatusError("Promise Error");
+  console.error("Promise Error:", e?.reason || e);
+});
+
 /* ================= THEME / MODE (storage) ================= */
 const THEME_KEY = "inj_theme";
-const MODE_KEY = "inj_mode"; // live | refresh
-let theme = localStorage.getItem(THEME_KEY) || "dark";
+const MODE_KEY  = "inj_mode"; // live | refresh
+let theme   = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
 function axisGridColor() {
@@ -57,30 +75,6 @@ function axisGridColor() {
 }
 function axisTickColor() {
   return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
-}
-
-let chart = null;
-let stakeChart = null;
-let rewardChart = null;
-
-function refreshChartsTheme(){
-  if (stakeChart) {
-    stakeChart.options.scales.y.grid.color = axisGridColor();
-    stakeChart.options.scales.y.ticks.color = axisTickColor();
-    stakeChart.update("none");
-  }
-  if (rewardChart) {
-    rewardChart.options.scales.x.grid.color = axisGridColor();
-    rewardChart.options.scales.y.grid.color = axisGridColor();
-    rewardChart.options.scales.y.ticks.color = axisTickColor();
-    rewardChart.options.scales.x.ticks.color = axisTickColor();
-    rewardChart.update("none");
-  }
-  if (chart) {
-    chart.options.scales.y.grid.color = axisGridColor();
-    chart.options.scales.y.ticks.color = axisTickColor();
-    chart.update("none");
-  }
 }
 
 function applyTheme(t){
@@ -93,8 +87,28 @@ function applyTheme(t){
 }
 applyTheme(theme);
 
+/* ================= CHARTJS ZOOM REGISTER (NO CRASH) ================= */
+let ZOOM_OK = false;
+function tryRegisterZoom(){
+  try{
+    if (!window.Chart) return false;
+    // CDN: spesso espone ChartZoom o "chartjs-plugin-zoom"
+    const plug = window.ChartZoom || window["chartjs-plugin-zoom"];
+    if (plug) {
+      Chart.register(plug);
+    }
+    // in Chart.js 4: plugin id = "zoom"
+    const has = !!(Chart?.registry?.plugins?.get && Chart.registry.plugins.get("zoom"));
+    return has;
+  } catch (e){
+    console.warn("Zoom plugin not available:", e);
+    return false;
+  }
+}
+ZOOM_OK = tryRegisterZoom();
+
 /* ================= CONNECTION UI ================= */
-const statusDot = $("statusDot");
+const statusDot  = $("statusDot");
 const statusText = $("statusText");
 
 let wsTradeOnline = false;
@@ -104,13 +118,14 @@ let accountOnline = false;
 function hasInternet() { return navigator.onLine === true; }
 
 /*
-✅ REGOLE STATUS:
-- Senza internet => OFFLINE rosso
+STATUS RULES:
+- no internet => OFFLINE red
 - REFRESH:
-    - appena switch: rosso breve
-    - poi arancio "Connecting..." finché non ha caricato tutto
-    - poi verde "Online"
-- LIVE: Connecting giallo finché feed/account non pronti, poi verde
+  - switch -> red briefly
+  - then orange "Connecting..." until refreshLoaded
+  - then green "Online"
+- LIVE:
+  - Connecting yellow until trade+kline+account ok
 */
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
@@ -124,10 +139,10 @@ function refreshConnUI() {
   if (!liveMode) {
     if (!refreshLoaded) {
       statusText.textContent = "Connecting...";
-      statusDot.style.background = "#f59e0b"; // arancio
+      statusDot.style.background = "#f59e0b";
     } else {
       statusText.textContent = "Online";
-      statusDot.style.background = "#22c55e"; // verde
+      statusDot.style.background = "#22c55e";
     }
     return;
   }
@@ -151,6 +166,103 @@ function setUIReady(force=false){
   if (!force && !tfReady.d) return;
   root.classList.remove("loading");
   root.classList.add("ready");
+}
+
+/* ================= SAFE FETCH ================= */
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ================= SMOOTH DISPLAY ================= */
+function scrollSpeed() {
+  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
+  const base = 0.08;
+  const maxExtra = 0.80;
+  return base + (t * t) * maxExtra;
+}
+function tick(cur, tgt) {
+  if (!Number.isFinite(tgt)) return cur;
+  return cur + (tgt - cur) * scrollSpeed();
+}
+
+/* ================= COLORED DIGITS ================= */
+function colorNumber(el, n, o, d) {
+  if (!el) return;
+  const ns = n.toFixed(d), os = o.toFixed(d);
+  if (ns === os) { el.textContent = ns; return; }
+  el.innerHTML = [...ns].map((c, i) => {
+    const col = c !== os[i]
+      ? (n > o ? "#22c55e" : "#ef4444")
+      : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
+    return `<span style="color:${col}">${c}</span>`;
+  }).join("");
+}
+
+/* ================= PERF ================= */
+function pctChange(price, open) {
+  const p = safe(price), o = safe(open);
+  if (!o) return 0;
+  const v = ((p - o) / o) * 100;
+  return Number.isFinite(v) ? v : 0;
+}
+function updatePerf(arrowId, pctId, v) {
+  const arrow = $(arrowId), pct = $(pctId);
+  if (!arrow || !pct) return;
+
+  if (v > 0) { arrow.textContent = "▲"; arrow.className = "arrow up"; pct.className = "pct up"; }
+  else if (v < 0) { arrow.textContent = "▼"; arrow.className = "arrow down"; pct.className = "pct down"; }
+  else { arrow.textContent = "►"; arrow.className = "arrow flat"; pct.className = "pct flat"; }
+
+  pct.textContent = Math.abs(v).toFixed(2) + "%";
+}
+
+/* ================= BAR RENDER ================= */
+function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
+  if (!bar || !line) return;
+
+  open = safe(open); low = safe(low); high = safe(high); val = safe(val);
+
+  if (!open || !Number.isFinite(low) || !Number.isFinite(high) || high === low) {
+    line.style.left = "50%";
+    bar.style.left = "50%";
+    bar.style.width = "0%";
+    bar.style.background = "rgba(255,255,255,0.10)";
+    return;
+  }
+
+  const range = Math.max(Math.abs(high - open), Math.abs(open - low));
+  const min = open - range;
+  const max = open + range;
+
+  const pos = clamp(((val - min) / (max - min)) * 100, 0, 100);
+  const center = 50;
+
+  line.style.left = pos + "%";
+
+  if (val >= open) {
+    bar.style.left = center + "%";
+    bar.style.width = Math.max(0, pos - center) + "%";
+    bar.style.background = gradUp;
+  } else {
+    bar.style.left = pos + "%";
+    bar.style.width = Math.max(0, center - pos) + "%";
+    bar.style.background = gradDown;
+  }
+}
+
+/* ================= FLASH EXTREMES ================= */
+const lastExtremes = { d:{low:null,high:null}, w:{low:null,high:null}, m:{low:null,high:null} };
+function flash(el) {
+  if (!el) return;
+  el.classList.remove("flash-yellow");
+  void el.offsetWidth;
+  el.classList.add("flash-yellow");
 }
 
 /* ================= HEADER SEARCH UI ================= */
@@ -239,14 +351,13 @@ function closeDrawer(){
 }
 function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
 
-if (menuBtn) menuBtn.addEventListener("click", toggleDrawer, { passive:true });
-if (backdrop) backdrop.addEventListener("click", closeDrawer, { passive:true });
+menuBtn?.addEventListener("click", toggleDrawer, { passive:true });
+backdrop?.addEventListener("click", closeDrawer, { passive:true });
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDrawer();
 });
 
-/* theme toggle */
 themeToggle?.addEventListener("click", () => {
   applyTheme(theme === "dark" ? "light" : "dark");
 }, { passive:true });
@@ -264,7 +375,6 @@ function pageLabel(key){
   if (key === "settings") return "SETTINGS";
   return "PAGE";
 }
-
 function openComingSoon(pageKey){
   if (!comingSoon) return;
   if (comingTitle) comingTitle.textContent = `COMING SOON 🚀`;
@@ -277,15 +387,10 @@ function closeComingSoon(){
   comingSoon.classList.remove("show");
   comingSoon.setAttribute("aria-hidden", "true");
 }
-
 comingClose?.addEventListener("click", closeComingSoon, { passive:true });
 comingSoon?.addEventListener("click", (e) => { if (e.target === comingSoon) closeComingSoon(); }, { passive:true });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeComingSoon(); });
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeComingSoon();
-});
-
-/* menu items */
 function setActivePage(pageKey){
   const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
@@ -300,116 +405,7 @@ drawerNav?.addEventListener("click", (e) => {
   else closeComingSoon();
 }, { passive:true });
 
-/* ================= STATE ================= */
-let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
-
-let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-
-/* Candle state */
-const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 },
-  w: { t: 0, open: 0, high: 0, low: 0 },
-  m: { t: 0, open: 0, high: 0, low: 0 },
-};
-const tfReady = { d: false, w: false, m: false };
-
-/* extremes flash */
-const lastExtremes = { d: { low: null, high: null }, w: { low: null, high: null }, m: { low: null, high: null } };
-function flash(el) {
-  if (!el) return;
-  el.classList.remove("flash-yellow");
-  void el.offsetWidth;
-  el.classList.add("flash-yellow");
-}
-
-/* ================= NETWORK SAFE FETCH ================= */
-async function fetchJSON(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-/* ================= SMOOTH DISPLAY ================= */
-function scrollSpeed() {
-  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
-  const base = 0.08;
-  const maxExtra = 0.80;
-  return base + (t * t) * maxExtra;
-}
-function tick(cur, tgt) {
-  if (!Number.isFinite(tgt)) return cur;
-  return cur + (tgt - cur) * scrollSpeed();
-}
-
-/* ================= COLORED DIGITS ================= */
-function colorNumber(el, n, o, d) {
-  if (!el) return;
-  const ns = n.toFixed(d), os = o.toFixed(d);
-  if (ns === os) { el.textContent = ns; return; }
-  el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
-    return `<span style="color:${col}">${c}</span>`;
-  }).join("");
-}
-
-/* ================= PERF ================= */
-function pctChange(price, open) {
-  const p = safe(price), o = safe(open);
-  if (!o) return 0;
-  const v = ((p - o) / o) * 100;
-  return Number.isFinite(v) ? v : 0;
-}
-function updatePerf(arrowId, pctId, v) {
-  const arrow = $(arrowId), pct = $(pctId);
-  if (!arrow || !pct) return;
-
-  if (v > 0) { arrow.textContent = "▲"; arrow.className = "arrow up"; pct.className = "pct up"; }
-  else if (v < 0) { arrow.textContent = "▼"; arrow.className = "arrow down"; pct.className = "pct down"; }
-  else { arrow.textContent = "►"; arrow.className = "arrow flat"; pct.className = "pct flat"; }
-
-  pct.textContent = Math.abs(v).toFixed(2) + "%";
-}
-
-/* ================= BAR RENDER ================= */
-function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
-  if (!bar || !line) return;
-
-  open = safe(open); low = safe(low); high = safe(high); val = safe(val);
-
-  if (!open || !Number.isFinite(low) || !Number.isFinite(high) || high === low) {
-    line.style.left = "50%";
-    bar.style.left = "50%";
-    bar.style.width = "0%";
-    bar.style.background = "rgba(255,255,255,0.10)";
-    return;
-  }
-
-  const range = Math.max(Math.abs(high - open), Math.abs(open - low));
-  const min = open - range;
-  const max = open + range;
-
-  const pos = clamp(((val - min) / (max - min)) * 100, 0, 100);
-  const center = 50;
-
-  line.style.left = pos + "%";
-
-  if (val >= open) {
-    bar.style.left = center + "%";
-    bar.style.width = Math.max(0, pos - center) + "%";
-    bar.style.background = gradUp;
-  } else {
-    bar.style.left = pos + "%";
-    bar.style.width = Math.max(0, center - pos) + "%";
-    bar.style.background = gradDown;
-  }
-}
-
-/* ================= LIVE / REFRESH MODE ================= */
+/* ================= MODE SWITCH ================= */
 let accountPollTimer = null;
 let restSyncTimer = null;
 let chartSyncTimer = null;
@@ -421,7 +417,6 @@ function stopAllTimers(){
   if (chartSyncTimer) { clearInterval(chartSyncTimer); chartSyncTimer = null; }
   if (ensureChartTimer) { clearInterval(ensureChartTimer); ensureChartTimer = null; }
 }
-
 function startAllTimers(){
   stopAllTimers();
   accountPollTimer = setInterval(loadAccount, ACCOUNT_POLL_MS);
@@ -458,43 +453,53 @@ function setMode(isLive){
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
   if (!liveMode) {
-    // STOP LIVE
     stopAllTimers();
     stopAllSockets();
     wsTradeOnline = false;
     wsKlineOnline = false;
     accountOnline = false;
 
-    // richiesta: rosso -> arancio -> verde (se internet e tutto caricato)
     refreshLoaded = false;
     refreshLoading = false;
+
     if (statusText && statusDot) {
       statusText.textContent = "Offline";
       statusDot.style.background = "#ef4444";
     }
+
     setTimeout(() => {
-      refreshConnUI();
-      refreshLoadAllOnce();
+      refreshConnUI();          // arancio connecting
+      refreshLoadAllOnce();     // carica tutto
     }, REFRESH_RED_MS);
 
   } else {
-    // START LIVE
     refreshLoaded = false;
     refreshLoading = false;
 
-    startAllTimers();
     startTradeWS();
     startKlineWS();
-    loadAccount();
     loadCandleSnapshot();
     loadChartToday();
+    if (address) loadAccount();
+    startAllTimers();
     refreshConnUI();
   }
 }
 
-liveToggle?.addEventListener("click", () => {
-  setMode(!liveMode);
-}, { passive:true });
+liveToggle?.addEventListener("click", () => setMode(!liveMode), { passive:true });
+
+/* ================= STATE ================= */
+let targetPrice = 0;
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
+
+let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
+
+const candle = {
+  d: { t: 0, open: 0, high: 0, low: 0 },
+  w: { t: 0, open: 0, high: 0, low: 0 },
+  m: { t: 0, open: 0, high: 0, low: 0 },
+};
+const tfReady = { d: false, w: false, m: false };
 
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
@@ -524,7 +529,6 @@ function startTradeWS() {
 
   wsTradeOnline = false;
   refreshConnUI();
-
   if (!hasInternet()) return;
 
   wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
@@ -560,13 +564,11 @@ function applyKline(intervalKey, k) {
   const o = safe(k.o);
   const h = safe(k.h);
   const l = safe(k.l);
-
   if (o && h && l) {
     candle[intervalKey].t = t || candle[intervalKey].t;
     candle[intervalKey].open = o;
     candle[intervalKey].high = h;
     candle[intervalKey].low  = l;
-
     if (!tfReady[intervalKey]) {
       tfReady[intervalKey] = true;
       settleStart = Date.now();
@@ -580,7 +582,6 @@ function startKlineWS() {
 
   wsKlineOnline = false;
   refreshConnUI();
-
   if (!hasInternet()) return;
 
   const url =
@@ -599,35 +600,18 @@ function startKlineWS() {
   wsKline.onmessage = async (e) => {
     let payload;
     try { payload = JSON.parse(e.data); } catch { return; }
-
-    const data = payload.data;
-    if (!data || !data.k) return;
-
-    const stream = payload.stream || "";
-    const k = data.k;
+    const data = payload?.data;
+    const stream = payload?.stream || "";
+    const k = data?.k;
+    if (!k) return;
 
     if (stream.includes("@kline_1m")) {
       updateChartFrom1mKline(k);
       return;
     }
 
-    if (stream.includes("@kline_1d")) {
-      const prevDayOpen = candle.d.t;
-      applyKline("d", k);
-
-      if (!chartBootstrappedToday && tfReady.d && candle.d.t) {
-        await loadChartToday();
-      }
-
-      if (k.x === true) {
-        const nextOpen = safe(k.T) ? (safe(k.T) + 1) : 0;
-        await resetDayAndReloadChart(nextOpen || (prevDayOpen + 24 * 60 * 60 * 1000));
-      } else {
-        if (prevDayOpen && candle.d.t && candle.d.t !== prevDayOpen) {
-          await resetDayAndReloadChart(candle.d.t);
-        }
-      }
-    } else if (stream.includes("@kline_1w")) applyKline("w", k);
+    if (stream.includes("@kline_1d")) applyKline("d", k);
+    else if (stream.includes("@kline_1w")) applyKline("w", k);
     else if (stream.includes("@kline_1M")) applyKline("m", k);
 
     setUIReady(false);
@@ -637,6 +621,7 @@ function startKlineWS() {
 /* ================= ACCOUNT (Injective LCD) ================= */
 async function loadAccount(isRefresh=false) {
   if (!isRefresh && !liveMode) return;
+
   if (!address || !hasInternet()) {
     accountOnline = false;
     refreshConnUI();
@@ -660,8 +645,10 @@ async function loadAccount(isRefresh=false) {
   accountOnline = true;
   refreshConnUI();
 
-  availableInj = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
-  stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
+  const bal = b.balances?.find(x => x.denom === "inj");
+  availableInj = safe(bal?.amount) / 1e18;
+
+  stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
 
   const newRewards = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   rewardsInj = newRewards;
@@ -711,6 +698,7 @@ async function loadCandleSnapshot(isRefresh=false) {
 }
 
 /* ================= PRICE CHART (1D) ================= */
+let chart = null;
 let chartLabels = [];
 let chartData = [];
 let lastChartMinuteStart = 0;
@@ -721,8 +709,6 @@ let hoverIndex = null;
 let pinnedIndex = null;
 let isPanning = false;
 
-let lastChartSign = "neutral";
-
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
   afterDraw(ch) {
@@ -730,7 +716,6 @@ const verticalLinePlugin = {
     const meta = ch.getDatasetMeta(0);
     const el = meta?.data?.[hoverIndex];
     if (!el) return;
-
     const ctx = ch.ctx;
     ctx.save();
     ctx.beginPath();
@@ -786,8 +771,8 @@ function updatePinnedOverlay() {
     chartEl.textContent = "--";
     return;
   }
-  idx = clamp(Math.round(idx), 0, ds.length - 1);
 
+  idx = clamp(Math.round(idx), 0, ds.length - 1);
   const price = safe(ds[idx]);
   const label = lbs[idx];
   if (!Number.isFinite(price) || !label) {
@@ -823,7 +808,36 @@ async function fetchKlines1mRange(startTime, endTime) {
 
 function initChartToday() {
   const canvas = $("priceChart");
-  if (!canvas) return;
+  if (!canvas || !window.Chart) return;
+
+  const zoomBlock = ZOOM_OK ? {
+    zoom: {
+      pan: {
+        enabled: true,
+        mode: "x",
+        threshold: 2,
+        onPanStart: () => { isPanning = true; },
+        onPanComplete: ({ chart }) => {
+          isPanning = false;
+          const xScale = chart.scales.x;
+          const center = (chart.chartArea.left + chart.chartArea.right) / 2;
+          pinnedIndex = xScale.getValueForPixel(center);
+          updatePinnedOverlay();
+        }
+      },
+      zoom: {
+        wheel: { enabled: true },
+        pinch: { enabled: true },
+        mode: "x",
+        onZoomComplete: ({ chart }) => {
+          const xScale = chart.scales.x;
+          const center = (chart.chartArea.left + chart.chartArea.right) / 2;
+          pinnedIndex = xScale.getValueForPixel(center);
+          updatePinnedOverlay();
+        }
+      }
+    }
+  } : {};
 
   chart = new Chart(canvas, {
     type: "line",
@@ -845,32 +859,7 @@ function initChartToday() {
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
-        zoom: {
-          pan: {
-            enabled: true,
-            mode: "x",
-            threshold: 2,
-            onPanStart: () => { isPanning = true; },
-            onPanComplete: ({ chart }) => {
-              isPanning = false;
-              const xScale = chart.scales.x;
-              const center = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(center);
-              updatePinnedOverlay();
-            }
-          },
-          zoom: {
-            wheel: { enabled: true },
-            pinch: { enabled: true },
-            mode: "x",
-            onZoomComplete: ({ chart }) => {
-              const xScale = chart.scales.x;
-              const center = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(center);
-              updatePinnedOverlay();
-            }
-          }
-        }
+        ...zoomBlock
       },
       interaction: { mode: "index", intersect: false },
       scales: {
@@ -896,15 +885,14 @@ async function loadChartToday(isRefresh=false) {
   if (!kl.length) return;
 
   chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
-  chartData = kl.map(k => safe(k[4]));
-
+  chartData   = kl.map(k => safe(k[4]));
   lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
 
   const lastClose = safe(kl[kl.length - 1][4]);
   if (!targetPrice && lastClose) targetPrice = lastClose;
 
-  if (!chart && window.Chart) initChartToday();
-  else if (chart) {
+  if (!chart) initChartToday();
+  if (chart) {
     chart.data.labels = chartLabels;
     chart.data.datasets[0].data = chartData;
     chart.update("none");
@@ -916,10 +904,9 @@ async function loadChartToday(isRefresh=false) {
 
 function setupChartInteractions() {
   const canvas = $("priceChart");
-  if (!canvas) return;
+  if (!canvas || !chart) return;
 
   const getIndexFromEvent = (evt) => {
-    if (!chart) return null;
     const points = chart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
     if (!points || !points.length) return null;
     return points[0].index;
@@ -934,8 +921,8 @@ function setupChartInteractions() {
 
     hoverActive = true;
     hoverIndex = idx;
-
     pinnedIndex = idx;
+
     updatePinnedOverlay();
     chart.update("none");
   };
@@ -951,8 +938,8 @@ function setupChartInteractions() {
   canvas.addEventListener("mousemove", handleMove, { passive: true });
   canvas.addEventListener("mouseleave", handleLeave, { passive: true });
 
-  canvas.addEventListener("touchstart", (e) => { handleMove(e); }, { passive: true });
-  canvas.addEventListener("touchmove", (e) => { handleMove(e); }, { passive: true });
+  canvas.addEventListener("touchstart", (e) => handleMove(e), { passive: true });
+  canvas.addEventListener("touchmove", (e) => handleMove(e), { passive: true });
   canvas.addEventListener("touchend", handleLeave, { passive: true });
   canvas.addEventListener("touchcancel", handleLeave, { passive: true });
 }
@@ -964,29 +951,6 @@ async function ensureChartBootstrapped() {
   if (tfReady.d && candle.d.t) await loadChartToday();
 }
 
-async function resetDayAndReloadChart(nextOpenTime) {
-  chartBootstrappedToday = false;
-  chartLabels = [];
-  chartData = [];
-  lastChartMinuteStart = 0;
-
-  if (chart) {
-    chart.data.labels = [];
-    chart.data.datasets[0].data = [];
-    chart.update("none");
-  }
-
-  if (nextOpenTime) candle.d.t = nextOpenTime;
-
-  await loadCandleSnapshot();
-  await loadChartToday();
-
-  hoverActive = false;
-  hoverIndex = null;
-  pinnedIndex = null;
-  updatePinnedOverlay();
-}
-
 function updateChartFrom1mKline(k) {
   if (!liveMode) return;
   if (!chart || !chartBootstrappedToday || !tfReady.d || !candle.d.t) return;
@@ -994,7 +958,6 @@ function updateChartFrom1mKline(k) {
   const openTime = safe(k.t);
   const close = safe(k.c);
   if (!openTime || !close) return;
-
   if (openTime < candle.d.t) return;
 
   if (lastChartMinuteStart === openTime) {
@@ -1007,7 +970,6 @@ function updateChartFrom1mKline(k) {
   }
 
   lastChartMinuteStart = openTime;
-
   chart.data.labels.push(fmtHHMM(openTime));
   chart.data.datasets[0].data.push(close);
 
@@ -1017,7 +979,8 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKED CHART (persist, punto per movimento, 6 decimali) ================= */
+/* ================= STAKE CHART (persist) ================= */
+let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
 let stakeMoves = [];
@@ -1029,7 +992,6 @@ function stakeStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
 }
-
 function saveStakeSeries() {
   const key = stakeStoreKey(address);
   if (!key) return;
@@ -1040,7 +1002,6 @@ function saveStakeSeries() {
     }));
   } catch {}
 }
-
 function loadStakeSeries() {
   const key = stakeStoreKey(address);
   if (!key) return false;
@@ -1070,13 +1031,11 @@ function loadStakeSeries() {
     return false;
   }
 }
-
 function clearStakeSeriesStorage() {
   const key = stakeStoreKey(address);
   if (!key) return;
   try { localStorage.removeItem(key); } catch {}
 }
-
 function resetStakeSeriesFromNow() {
   stakeLabels = [nowLabel()];
   stakeData = [0];
@@ -1090,7 +1049,7 @@ function resetStakeSeriesFromNow() {
 
 function initStakeChart() {
   const canvas = $("stakeChart");
-  if (!canvas) return;
+  if (!canvas || !window.Chart) return;
 
   stakeChart = new Chart(canvas, {
     type: "line",
@@ -1104,14 +1063,8 @@ function initStakeChart() {
         tension: 0.25,
         pointRadius: 3,
         pointHoverRadius: 6,
-        pointBackgroundColor: (ctx) => {
-          const m = stakeMoves[ctx.dataIndex] || 0;
-          return m < 0 ? "#ef4444" : "#22c55e";
-        },
-        pointBorderColor: (ctx) => {
-          const m = stakeMoves[ctx.dataIndex] || 0;
-          return m < 0 ? "rgba(239,68,68,.95)" : "rgba(34,197,94,.90)";
-        },
+        pointBackgroundColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "#ef4444" : "#22c55e",
+        pointBorderColor: (ctx) => (stakeMoves[ctx.dataIndex] || 0) < 0 ? "rgba(239,68,68,.95)" : "rgba(34,197,94,.90)",
         pointBorderWidth: 1
       }]
     },
@@ -1134,35 +1087,26 @@ function initStakeChart() {
             }
           }
         },
-        zoom: {
-          pan: { enabled: true, mode: "x", threshold: 2 },
-          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
-        }
+        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
       },
       scales: {
         x: { display: false },
-        y: {
-          ticks: { color: axisTickColor() },
-          grid: { color: axisGridColor() }
-        }
+        y: { ticks: { color: axisTickColor() }, grid: { color: axisGridColor() } }
       }
     }
   });
 }
-
 function drawStakeChart() {
-  if (!stakeChart && window.Chart) initStakeChart();
-  else if (stakeChart) {
+  if (!stakeChart) initStakeChart();
+  if (stakeChart) {
     stakeChart.data.labels = stakeLabels;
     stakeChart.data.datasets[0].data = stakeData;
     stakeChart.update("none");
   }
 }
-
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
-
   const rounded = Number(s.toFixed(6));
 
   if (!stakeBaselineCaptured) {
@@ -1177,11 +1121,7 @@ function maybeAddStakePoint(currentStake) {
     return;
   }
 
-  if (lastStakeRecordedRounded == null) {
-    lastStakeRecordedRounded = rounded;
-    return;
-  }
-
+  if (lastStakeRecordedRounded == null) { lastStakeRecordedRounded = rounded; return; }
   if (rounded === lastStakeRecordedRounded) return;
 
   const delta = rounded - lastStakeRecordedRounded;
@@ -1196,7 +1136,7 @@ function maybeAddStakePoint(currentStake) {
   drawStakeChart();
 }
 
-/* ================= REWARD WITHDRAWALS (persist + filter + live + timeline) ================= */
+/* ================= REWARD WITHDRAWALS (persist) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
@@ -1212,21 +1152,16 @@ function wdStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
 }
-
 function saveWdAll() {
   const key = wdStoreKey(address);
   if (!key) return;
   try {
     localStorage.setItem(key, JSON.stringify({
-      v: REWARD_WD_LOCAL_VER,
-      t: Date.now(),
-      labels: wdLabelsAll,
-      values: wdValuesAll,
-      times: wdTimesAll
+      v: REWARD_WD_LOCAL_VER, t: Date.now(),
+      labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
   } catch {}
 }
-
 function loadWdAll() {
   const key = wdStoreKey(address);
   if (!key) return false;
@@ -1240,7 +1175,6 @@ function loadWdAll() {
     wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
     wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
 
-    if (wdLabelsAll.length !== wdValuesAll.length) return false;
     rebuildWdView();
     return true;
   } catch {
@@ -1251,7 +1185,7 @@ function loadWdAll() {
 function rebuildWdView() {
   wdLabels = [];
   wdValues = [];
-  wdTimes = [];
+  wdTimes  = [];
 
   for (let i = 0; i < wdValuesAll.length; i++) {
     const v = safe(wdValuesAll[i]);
@@ -1271,7 +1205,6 @@ const rewardPointLabelPlugin = {
   afterDatasetsDraw(ch) {
     const ds = ch.data.datasets?.[0];
     if (!ds) return;
-
     const meta = ch.getDatasetMeta(0);
     const dataEls = meta?.data || [];
     if (!dataEls.length) return;
@@ -1279,7 +1212,6 @@ const rewardPointLabelPlugin = {
     const xScale = ch.scales?.x;
     let min = xScale?.min;
     let max = xScale?.max;
-
     const n = ds.data.length;
     if (!Number.isFinite(min)) min = 0;
     if (!Number.isFinite(max)) max = n - 1;
@@ -1300,21 +1232,20 @@ const rewardPointLabelPlugin = {
       const el = dataEls[i];
       if (!el) continue;
       if (drawn >= maxDraw) break;
-
       const v = safe(ds.data[i]);
       if (!v) continue;
-
       ctx.fillText(`+${v.toFixed(4)} INJ`, el.x, el.y - 10);
       drawn++;
     }
-
     ctx.restore();
   }
 };
 
+let rewardChart = null;
+
 function initRewardWdChart() {
   const canvas = $("rewardChart");
-  if (!canvas) return;
+  if (!canvas || !window.Chart) return;
 
   rewardChart = new Chart(canvas, {
     type: "line",
@@ -1348,24 +1279,13 @@ function initRewardWdChart() {
             label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
           }
         },
-        zoom: {
-          pan: { enabled: true, mode: "x", threshold: 2 },
-          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
-        }
+        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
       },
       scales: {
-        x: {
-          ticks: { color: axisTickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
-          grid: { color: axisGridColor() }
-        },
+        x: { ticks: { color: axisTickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }, grid: { color: axisGridColor() } },
         y: {
           position: "right",
-          ticks: {
-            color: axisTickColor(),
-            mirror: true,
-            padding: 6,
-            callback: (val) => fmtSmart(val)
-          },
+          ticks: { color: axisTickColor(), mirror: true, padding: 6, callback: (val) => fmtSmart(val) },
           grid: { color: axisGridColor() }
         }
       }
@@ -1375,8 +1295,8 @@ function initRewardWdChart() {
 }
 
 function drawRewardWdChart() {
-  if (!rewardChart && window.Chart) initRewardWdChart();
-  else if (rewardChart) {
+  if (!rewardChart) initRewardWdChart();
+  if (rewardChart) {
     rewardChart.data.labels = wdLabels;
     rewardChart.data.datasets[0].data = wdValues;
     rewardChart.update("none");
@@ -1422,8 +1342,7 @@ function syncRewardTimelineUI(forceToEnd=false) {
 
 function attachRewardTimelineHandlers() {
   const slider = $("rewardTimeline");
-  if (!slider) return;
-  slider.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
+  slider?.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
 }
 function goRewardLive() {
   const slider = $("rewardTimeline");
@@ -1432,9 +1351,7 @@ function goRewardLive() {
   syncRewardTimelineUI(true);
 }
 function attachRewardLiveHandler() {
-  const btn = $("rewardLiveBtn");
-  if (!btn) return;
-  btn.addEventListener("click", () => goRewardLive(), { passive: true });
+  $("rewardLiveBtn")?.addEventListener("click", () => goRewardLive(), { passive: true });
 }
 function attachRewardFilterHandler() {
   const sel = $("rewardFilter");
@@ -1448,25 +1365,41 @@ function attachRewardFilterHandler() {
 
 function maybeRecordRewardWithdrawal(newRewards) {
   const r = safe(newRewards);
-
-  if (wdLastRewardsSeen == null) {
-    wdLastRewardsSeen = r;
-    return;
-  }
+  if (wdLastRewardsSeen == null) { wdLastRewardsSeen = r; return; }
 
   const diff = wdLastRewardsSeen - r;
   if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    const ts = Date.now();
-    wdTimesAll.push(ts);
+    wdTimesAll.push(Date.now());
     wdLabelsAll.push(nowLabel());
     wdValuesAll.push(diff);
-
     saveWdAll();
     rebuildWdView();
     goRewardLive();
   }
-
   wdLastRewardsSeen = r;
+}
+
+/* ================= CHART THEME REFRESH ================= */
+function refreshChartsTheme(){
+  try{
+    if (stakeChart) {
+      stakeChart.options.scales.y.grid.color = axisGridColor();
+      stakeChart.options.scales.y.ticks.color = axisTickColor();
+      stakeChart.update("none");
+    }
+    if (rewardChart) {
+      rewardChart.options.scales.x.grid.color = axisGridColor();
+      rewardChart.options.scales.y.grid.color = axisGridColor();
+      rewardChart.options.scales.x.ticks.color = axisTickColor();
+      rewardChart.options.scales.y.ticks.color = axisTickColor();
+      rewardChart.update("none");
+    }
+    if (chart) {
+      chart.options.scales.y.grid.color = axisGridColor();
+      chart.options.scales.y.ticks.color = axisTickColor();
+      chart.update("none");
+    }
+  } catch {}
 }
 
 /* ================= ADDRESS COMMIT ================= */
@@ -1481,9 +1414,11 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
+  // reset displayed
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
 
+  // stake series
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1492,6 +1427,7 @@ async function commitAddress(newAddr) {
     drawStakeChart();
   }
 
+  // rewards series
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
   loadWdAll();
@@ -1500,18 +1436,37 @@ async function commitAddress(newAddr) {
 
   if (liveMode) await loadAccount();
   else {
-    // in refresh: ricarica tutto per il nuovo wallet
     refreshLoaded = false;
     refreshConnUI();
     await refreshLoadAllOnce();
   }
 }
 
+/* ================= ONLINE / OFFLINE listeners ================= */
+window.addEventListener("online", () => {
+  refreshConnUI();
+  if (liveMode) {
+    startTradeWS();
+    startKlineWS();
+    if (address) loadAccount();
+  } else {
+    refreshLoadAllOnce();
+  }
+}, { passive: true });
+
+window.addEventListener("offline", () => {
+  wsTradeOnline = false;
+  wsKlineOnline = false;
+  accountOnline = false;
+  refreshLoaded = false;
+  refreshConnUI();
+}, { passive: true });
+
 /* ================= BOOT ================= */
 (async function boot() {
   refreshConnUI();
 
-  // failsafe UI visible
+  // failsafe: mostra UI anche se qualcosa ritarda
   setTimeout(() => setUIReady(true), 2800);
 
   attachRewardTimelineHandlers();
@@ -1527,6 +1482,7 @@ async function commitAddress(newAddr) {
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
+  // stake history
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1535,15 +1491,18 @@ async function commitAddress(newAddr) {
     drawStakeChart();
   }
 
+  // reward history
   if (address) {
     loadWdAll();
     rebuildWdView();
     goRewardLive();
   }
 
+  // load base data
+  await loadCandleSnapshot(liveMode ? false : true);
+  await loadChartToday(liveMode ? false : true);
+
   if (liveMode) {
-    await loadCandleSnapshot();
-    await loadChartToday();
     startTradeWS();
     startKlineWS();
     if (address) await loadAccount();
@@ -1559,15 +1518,13 @@ async function commitAddress(newAddr) {
 })();
 
 /* ================= LOOP ================= */
-let lastChartSign = "neutral";
-
 function animate() {
-  /* PRICE */
+  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  /* PERFORMANCE */
+  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -1576,13 +1533,11 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
+  // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
-  if (sign !== lastChartSign) {
-    lastChartSign = sign;
-    applyChartColorBySign(sign);
-  }
+  applyChartColorBySign(sign);
 
-  /* BARS gradients (più morbidi/premium) */
+  // BARS gradients
   const dUp   = "linear-gradient(90deg, rgba(34,197,94,.95), rgba(16,185,129,.78))";
   const dDown = "linear-gradient(270deg, rgba(239,68,68,.95), rgba(248,113,113,.72))";
 
@@ -1596,7 +1551,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* Values + flash extremes */
+  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -1637,39 +1592,35 @@ function animate() {
     setText("monthMin", "--"); setText("monthOpen", "--"); setText("monthMax", "--");
   }
 
-  /* AVAILABLE */
+  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
-  const aUsd = $("availableUsd");
-  if (aUsd) aUsd.textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
+  setText("availableUsd", `≈ $${(displayed.available * displayed.price).toFixed(2)}`);
 
-  /* STAKE */
+  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-  const sUsd = $("stakeUsd");
-  if (sUsd) sUsd.textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
+  setText("stakeUsd", `≈ $${(displayed.stake * displayed.price).toFixed(2)}`);
 
   const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
   const stakeBar = $("stakeBar");
   const stakeLine = $("stakeLine");
-  const stakePercent = $("stakePercent");
   if (stakeBar) {
     stakeBar.style.width = stakePct + "%";
     stakeBar.style.backgroundPosition = `${(100 - stakePct) * 0.6}% 0`;
   }
   if (stakeLine) stakeLine.style.left = stakePct + "%";
-  if (stakePercent) stakePercent.textContent = stakePct.toFixed(1) + "%";
+  setText("stakePercent", stakePct.toFixed(1) + "%");
   setText("stakeMin", "0");
   setText("stakeMax", String(STAKE_TARGET_MAX));
 
-  /* REWARDS */
+  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
-  const rUsd = $("rewardsUsd");
-  if (rUsd) rUsd.textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
+  setText("rewardsUsd", `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`);
 
   const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
@@ -1678,7 +1629,6 @@ function animate() {
   const rewardLine = $("rewardLine");
   if (rewardBar) {
     rewardBar.style.width = rp + "%";
-    // ✅ heat gradient “scorre” (più caldo quando rp sale)
     rewardBar.style.backgroundPosition = `${(100 - rp)}% 0`;
   }
   if (rewardLine) rewardLine.style.left = rp + "%";
@@ -1686,31 +1636,10 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  /* APR + time */
+  // APR + time
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
   requestAnimationFrame(animate);
 }
 animate();
-
-/* ================= APPLY CHART COLOR BY SIGN ================= */
-function applyChartColorBySign(sign) {
-  if (!chart) return;
-  const ds = chart.data.datasets?.[0];
-  if (!ds) return;
-
-  if (sign === "up") {
-    ds.borderColor = "#22c55e";
-    ds.backgroundColor = "rgba(34,197,94,.20)";
-  } else if (sign === "down") {
-    ds.borderColor = "#ef4444";
-    ds.backgroundColor = "rgba(239,68,68,.18)";
-  } else {
-    ds.borderColor = "#3b82f6";
-    ds.backgroundColor = "rgba(59,130,246,.14)";
-  }
-  chart.update("none");
-}
-
-/* ================= WS RETRY helpers remain above (already) ================= */
