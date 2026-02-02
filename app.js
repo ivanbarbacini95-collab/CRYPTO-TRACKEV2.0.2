@@ -18,8 +18,14 @@ const RESET_STAKE_FROM_NOW_ON_BOOT = false;
 const REWARD_WD_LOCAL_VER = 2;
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
+/* net worth persistence */
+const NW_LOCAL_VER = 1;
+const NW_MAX_POINTS = 2400;         // cap points (minute-level -> ~40h; but we keep longer with downsampling view)
+const NW_SAMPLE_MS = 60_000;        // record once per minute
+const NW_BOOT_ZERO_POINTS = 2;      // create 0 baseline first time
+
 /* cloud api */
-const CLOUD_ENDPOINT = "/api/point"; // /api/point?address=inj...
+const CLOUD_ENDPOINT = "/api/point";
 const CLOUD_SAVE_DEBOUNCE_MS = 650;
 
 /* REFRESH mode staging */
@@ -27,7 +33,6 @@ const REFRESH_RED_MS = 220;
 let refreshLoaded = false;
 let refreshLoading = false;
 
-/* status dot "mode loading" */
 let modeLoading = false;
 
 /* ================= HELPERS ================= */
@@ -44,12 +49,23 @@ function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
 function fmtSmart(v){
   v = safe(v);
   const av = Math.abs(v);
+  if (av >= 1000000) return v.toFixed(0);
+  if (av >= 10000) return v.toFixed(0);
   if (av >= 1000) return v.toFixed(0);
   if (av >= 100) return v.toFixed(1);
   if (av >= 10) return v.toFixed(2);
-  if (av >= 1) return v.toFixed(3);
-  if (av >= 0.1) return v.toFixed(4);
-  return v.toFixed(6);
+  if (av >= 1) return v.toFixed(2);
+  return v.toFixed(4);
+}
+function fmtUSD(v){
+  v = safe(v);
+  const sign = v < 0 ? "-" : "";
+  v = Math.abs(v);
+  if (v >= 1000000) return `${sign}$${(v/1000000).toFixed(2)}M`;
+  if (v >= 10000) return `${sign}$${v.toFixed(0)}`;
+  if (v >= 1000) return `${sign}$${v.toFixed(0)}`;
+  if (v >= 100) return `${sign}$${v.toFixed(2)}`;
+  return `${sign}$${v.toFixed(2)}`;
 }
 
 /* ================= GLOBAL ERROR GUARDS ================= */
@@ -64,7 +80,6 @@ window.addEventListener("error", (e) => {
   setStatusError("JS Error");
   console.error("JS Error:", e?.error || e);
 });
-
 window.addEventListener("unhandledrejection", (e) => {
   setStatusError("Promise Error");
   console.error("Promise Error:", e?.reason || e);
@@ -191,6 +206,26 @@ function colorNumber(el, n, o, d) {
   el.innerHTML = [...ns].map((c, i) => {
     const col = c !== os[i]
       ? (n > o ? "#22c55e" : "#ef4444")
+      : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
+    return `<span style="color:${col}">${c}</span>`;
+  }).join("");
+}
+function colorMoney(el, n, o){
+  if (!el) return;
+  const ns = fmtUSD(n);
+  const os = fmtUSD(o);
+  if (ns === os) { el.textContent = ns; return; }
+
+  // compare numeric for direction, but color per-char by diff vs previous string
+  const dirUp = n > o;
+  const maxLen = Math.max(ns.length, os.length);
+  const a = ns.padStart(maxLen, " ");
+  const b = os.padStart(maxLen, " ");
+
+  el.innerHTML = [...a].map((c, i) => {
+    if (c === " ") return `<span style="opacity:0"> </span>`;
+    const changed = c !== b[i];
+    const col = changed ? (dirUp ? "#22c55e" : "#ef4444")
       : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
@@ -343,7 +378,6 @@ function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
 
 menuBtn?.addEventListener("click", toggleDrawer, { passive:true });
 backdrop?.addEventListener("click", closeDrawer, { passive:true });
-
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
 themeToggle?.addEventListener("click", () => applyTheme(theme === "dark" ? "light" : "dark"), { passive:true });
@@ -503,7 +537,8 @@ function updateCloudHistoryBadge(){
   if (!el) return;
   const stakePts = Array.isArray(stakeData) ? stakeData.length : 0;
   const wdPts = Array.isArray(wdValuesAll) ? wdValuesAll.length : 0;
-  const total = stakePts + wdPts;
+  const nwPts = Array.isArray(nwUsdAll) ? nwUsdAll.length : 0;
+  const total = stakePts + wdPts + nwPts;
   el.textContent = `· ${total} pt${total === 1 ? "" : "s"}`;
 }
 
@@ -514,7 +549,8 @@ function cloudURL(addr){
 function buildCloudPayload(){
   return {
     stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
-    wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll }
+    wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll },
+    nw: { times: nwTimesAll, usd: nwUsdAll, inj: nwInjAll } // ✅
   };
 }
 
@@ -526,7 +562,6 @@ async function cloudPull(){
     const data = r?.data || null;
     if (!data) { setCloudUI("synced"); updateCloudHistoryBadge(); return; }
 
-    // Merge strategy: prefer longer arrays (cloud is source of truth across devices)
     if (data?.stake?.data?.length > (stakeData?.length || 0)) {
       stakeLabels = Array.isArray(data.stake.labels) ? data.stake.labels : [];
       stakeData   = Array.isArray(data.stake.data)   ? data.stake.data   : [];
@@ -542,6 +577,14 @@ async function cloudPull(){
       wdTimesAll  = Array.isArray(data.wd.times)  ? data.wd.times  : [];
       rebuildWdView();
       saveWdAll();
+    }
+
+    if (data?.nw?.usd?.length > (nwUsdAll?.length || 0)) {
+      nwTimesAll = Array.isArray(data.nw.times) ? data.nw.times : [];
+      nwUsdAll   = Array.isArray(data.nw.usd)   ? data.nw.usd   : [];
+      nwInjAll   = Array.isArray(data.nw.inj)   ? data.nw.inj   : [];
+      saveNWAll();
+      rebuildNWView(true);
     }
 
     setCloudUI("synced");
@@ -589,7 +632,7 @@ function cloudRequestSave(){
 
 /* ================= STATE ================= */
 let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0, netWorthInj: 0 };
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
@@ -599,6 +642,278 @@ const candle = {
   m: { t: 0, open: 0, high: 0, low: 0 },
 };
 const tfReady = { d: false, w: false, m: false };
+
+/* ================= NET WORTH SERIES (persist + chart) ================= */
+let nwTimesAll = [];
+let nwUsdAll = [];
+let nwInjAll = [];
+
+let nwTf = "1d";
+let netWorthChart = null;
+
+function nwStoreKey(addr){
+  const a = (addr || "").trim();
+  return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
+}
+function clampSeries(arr, max){
+  if (!Array.isArray(arr)) return [];
+  if (arr.length <= max) return arr;
+  return arr.slice(arr.length - max);
+}
+function saveNWAll(){
+  const key = nwStoreKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({
+      v: NW_LOCAL_VER, t: Date.now(),
+      times: nwTimesAll, usd: nwUsdAll, inj: nwInjAll
+    }));
+  } catch {}
+}
+function loadNWAll(){
+  const key = nwStoreKey(address);
+  if (!key) return false;
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== NW_LOCAL_VER) return false;
+
+    nwTimesAll = Array.isArray(obj.times) ? obj.times : [];
+    nwUsdAll   = Array.isArray(obj.usd)   ? obj.usd   : [];
+    nwInjAll   = Array.isArray(obj.inj)   ? obj.inj   : [];
+
+    const n = nwTimesAll.length;
+    nwUsdAll = nwUsdAll.slice(-n);
+    nwInjAll = nwInjAll.slice(-n);
+    while (nwUsdAll.length < n) nwUsdAll.unshift(0);
+    while (nwInjAll.length < n) nwInjAll.unshift(0);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+function ensureNWInitialized(){
+  // For new address: create baseline 0 -> 0 so chart starts from 0 (as requested)
+  if (nwTimesAll.length > 0) return;
+
+  const t0 = Date.now();
+  for (let i = 0; i < NW_BOOT_ZERO_POINTS; i++){
+    nwTimesAll.push(t0 + i * 1000);
+    nwUsdAll.push(0);
+    nwInjAll.push(0);
+  }
+  saveNWAll();
+}
+function totalInjNow(){
+  return safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
+}
+function totalUsdNow(){
+  return totalInjNow() * safe(targetPrice);
+}
+
+let nwLastSampleBucket = null;
+function maybeAddNetWorthPoint(force=false){
+  if (!address) return;
+  if (!safe(targetPrice)) return;
+
+  ensureNWInitialized();
+
+  const now = Date.now();
+  const bucket = Math.floor(now / NW_SAMPLE_MS);
+
+  if (!force && bucket === nwLastSampleBucket) return;
+  nwLastSampleBucket = bucket;
+
+  const inj = totalInjNow();
+  const usd = totalUsdNow();
+
+  nwTimesAll.push(now);
+  nwUsdAll.push(usd);
+  nwInjAll.push(inj);
+
+  // clamp
+  nwTimesAll = clampSeries(nwTimesAll, NW_MAX_POINTS);
+  nwUsdAll   = clampSeries(nwUsdAll,   NW_MAX_POINTS);
+  nwInjAll   = clampSeries(nwInjAll,   NW_MAX_POINTS);
+
+  saveNWAll();
+  rebuildNWView(false);
+  cloudRequestSave();
+}
+
+function tfMs(tf){
+  if (tf === "1d") return 24 * 60 * 60 * 1000;
+  if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
+  if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
+  if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
+  return 24 * 60 * 60 * 1000;
+}
+
+function downsampleSeries(times, values, maxPoints){
+  const n = times.length;
+  if (n <= maxPoints) return { times, values };
+  const step = Math.ceil(n / maxPoints);
+  const outT = [];
+  const outV = [];
+  for (let i = 0; i < n; i += step){
+    outT.push(times[i]);
+    outV.push(values[i]);
+  }
+  // ensure last point
+  if (outT[outT.length - 1] !== times[n - 1]){
+    outT.push(times[n - 1]);
+    outV.push(values[n - 1]);
+  }
+  return { times: outT, values: outV };
+}
+
+function pnlForTf(tf){
+  const ms = tfMs(tf);
+  const now = Date.now();
+  const minT = now - ms;
+
+  // find first point >= minT, else use first available
+  let idx0 = 0;
+  for (let i = 0; i < nwTimesAll.length; i++){
+    if (nwTimesAll[i] >= minT) { idx0 = i; break; }
+  }
+
+  const first = safe(nwUsdAll[idx0] ?? 0);
+  const last = safe(nwUsdAll[nwUsdAll.length - 1] ?? 0);
+  const diff = last - first;
+  const pct = first ? (diff / first) * 100 : 0;
+  return { first, last, diff, pct, idx0 };
+}
+
+function applyNWColors(sign){
+  // sign: 'up'|'down'|'flat'
+  const card = $("netWorthCard");
+  if (!card) return;
+  card.dataset.sign = sign;
+
+  // chart style
+  if (!netWorthChart) return;
+  const ds = netWorthChart.data.datasets?.[0];
+  if (!ds) return;
+
+  if (sign === "up") {
+    ds.borderColor = "#22c55e";
+    ds.backgroundColor = "rgba(34,197,94,.18)";
+  } else if (sign === "down") {
+    ds.borderColor = "#ef4444";
+    ds.backgroundColor = "rgba(239,68,68,.18)";
+  } else {
+    ds.borderColor = "#3b82f6";
+    ds.backgroundColor = "rgba(59,130,246,.14)";
+  }
+  netWorthChart.update("none");
+}
+
+function initNetWorthChart(){
+  const canvas = $("netWorthChart");
+  if (!canvas || !window.Chart) return;
+
+  netWorthChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59,130,246,.14)",
+        fill: true,
+        tension: 0.28,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false }
+      },
+      scales: {
+        x: { display: false },
+        y: { display: false }
+      }
+    }
+  });
+}
+
+function rebuildNWView(forceRedraw){
+  if (!address) return;
+
+  const note = $("netWorthNote");
+  if (note) note.textContent = `History: ${nwUsdAll.length} pts`;
+
+  if (!nwTimesAll.length) return;
+
+  const ms = tfMs(nwTf);
+  const now = Date.now();
+  const minT = now - ms;
+
+  // slice timeframe (or show all if not enough)
+  let start = 0;
+  for (let i = 0; i < nwTimesAll.length; i++){
+    if (nwTimesAll[i] >= minT) { start = i; break; }
+  }
+
+  const tSlice = nwTimesAll.slice(start);
+  const vSlice = nwUsdAll.slice(start);
+
+  // if timeframe yields too few points (e.g. new data), keep all available
+  const tUse = tSlice.length >= 3 ? tSlice : nwTimesAll;
+  const vUse = vSlice.length >= 3 ? vSlice : nwUsdAll;
+
+  // downsample for bg chart
+  const ds = downsampleSeries(tUse, vUse, 160);
+  const labels = ds.times.map(ts => {
+    const d = new Date(ts);
+    const hh = pad2(d.getHours());
+    const mm = pad2(d.getMinutes());
+    return `${hh}:${mm}`;
+  });
+
+  if (!netWorthChart) initNetWorthChart();
+  if (netWorthChart) {
+    netWorthChart.data.labels = labels;
+    netWorthChart.data.datasets[0].data = ds.values;
+    if (forceRedraw) netWorthChart.update();
+    else netWorthChart.update("none");
+  }
+
+  // PnL
+  const pnlEl = $("netWorthPnl");
+  const p = pnlForTf(nwTf);
+  const sign = p.diff > 0 ? "up" : (p.diff < 0 ? "down" : "flat");
+
+  if (pnlEl){
+    pnlEl.classList.remove("good","bad","flat");
+    pnlEl.classList.add(sign === "up" ? "good" : sign === "down" ? "bad" : "flat");
+    const pctTxt = (p.first ? p.pct : 0).toFixed(2);
+    pnlEl.textContent = `PnL (${nwTf.toUpperCase()}): ${fmtUSD(p.diff)} • ${pctTxt}%`;
+  }
+
+  applyNWColors(sign);
+}
+
+function attachNWTFHandlers(){
+  const wrap = $("nwTfSwitch");
+  if (!wrap) return;
+  wrap.addEventListener("click", (e) => {
+    const btn = e.target?.closest(".tf-btn");
+    if (!btn) return;
+    const tf = btn.dataset.tf || "1d";
+    nwTf = tf;
+
+    [...wrap.querySelectorAll(".tf-btn")].forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
+    rebuildNWView(true);
+  }, { passive:true });
+}
 
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
@@ -756,7 +1071,9 @@ async function loadAccount(isRefresh=false) {
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
 
-  // if a point was added, it requested cloud save already
+  // ✅ net worth sample (minute-level)
+  maybeAddNetWorthPoint(false);
+
   setUIReady(true);
 }
 
@@ -1501,6 +1818,9 @@ function refreshChartsTheme(){
       chart.options.scales.y.ticks.color = axisTickColor();
       chart.update("none");
     }
+    if (netWorthChart) {
+      netWorthChart.update("none");
+    }
   } catch {}
 }
 
@@ -1516,11 +1836,10 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
-  // reset displayed
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
+  displayed.netWorthUsd = 0; displayed.netWorthInj = 0;
 
-  // stake series (persist)
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1529,20 +1848,24 @@ async function commitAddress(newAddr) {
     drawStakeChart();
   }
 
-  // rewards series
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
   loadWdAll();
   rebuildWdView();
   goRewardLive();
 
+  // net worth: load local, ensure baseline, build view
+  nwLastSampleBucket = null;
+  loadNWAll();
+  ensureNWInitialized();
+  rebuildNWView(true);
+
   updateCloudHistoryBadge();
   setCloudUI("saving");
 
-  // pull cloud history for this address (show points right away)
+  // pull cloud history for this address
   await cloudPull();
 
-  // status: loading during address commit fetch
   modeLoading = true;
   refreshConnUI();
 
@@ -1581,8 +1904,6 @@ window.addEventListener("offline", () => {
 /* ================= BOOT ================= */
 (async function boot() {
   refreshConnUI();
-
-  // Initial defaults
   setCloudUI(hasInternet() ? "synced" : "error");
 
   setTimeout(() => setUIReady(true), 2800);
@@ -1590,6 +1911,9 @@ window.addEventListener("offline", () => {
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
   attachRewardFilterHandler();
+
+  // net worth TF handlers
+  attachNWTFHandlers();
 
   pendingAddress = address || "";
   if (addressInput) addressInput.value = pendingAddress;
@@ -1600,7 +1924,6 @@ window.addEventListener("offline", () => {
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // stake history
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -1609,19 +1932,23 @@ window.addEventListener("offline", () => {
     drawStakeChart();
   }
 
-  // reward history
   if (address) {
     loadWdAll();
     rebuildWdView();
     goRewardLive();
   }
 
+  // net worth
+  if (address) {
+    loadNWAll();
+    ensureNWInitialized();
+    rebuildNWView(true);
+  }
+
   updateCloudHistoryBadge();
 
-  // pull from cloud on boot for current address (if exists)
   if (address) await cloudPull();
 
-  // loading base data
   modeLoading = true;
   refreshConnUI();
 
@@ -1760,14 +2087,46 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
+  // ✅ NET WORTH realtime display + series
+  const nwUsd = totalUsdNow();
+  const nwInj = totalInjNow();
+
+  const oldUsd = displayed.netWorthUsd;
+  displayed.netWorthUsd = tick(displayed.netWorthUsd, nwUsd);
+  colorMoney($("netWorthUsd"), displayed.netWorthUsd, oldUsd);
+
+  const oldInj = displayed.netWorthInj;
+  displayed.netWorthInj = tick(displayed.netWorthInj, nwInj);
+  const injEl = $("netWorthInj");
+  if (injEl) injEl.textContent = `${displayed.netWorthInj.toFixed(4)} INJ`;
+
+  // sample history once/minute (no reset)
+  maybeAddNetWorthPoint(false);
+
   // APR + time
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
-  // keep status dot in sync
   refreshConnUI();
   updateCloudHistoryBadge();
 
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ================= REWARD CHART CONTROLS ================= */
+function attachRewardTimelineHandlers() {
+  $("rewardTimeline")?.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
+}
+function attachRewardLiveHandler() {
+  $("rewardLiveBtn")?.addEventListener("click", () => goRewardLive(), { passive: true });
+}
+function attachRewardFilterHandler() {
+  const sel = $("rewardFilter");
+  if (!sel) return;
+  sel.addEventListener("change", () => {
+    wdMinFilter = safe(sel.value);
+    rebuildWdView();
+    goRewardLive();
+  }, { passive: true });
+}
