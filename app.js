@@ -1,12 +1,6 @@
 /* =========================================================
-   Injective • Portfolio — app.js (FULL)
-   - Price realtime (Binance WS) + 1D/1W/1M bars
-   - Account (Injective LCD) available / staked / rewards / apr
-   - 1D Price Chart (REST bootstrap + WS 1m) + pan/zoom + overlay pinned
-   - Stake Chart: ALL points (saved), Y step=1, auto-scale on visible window, PAD=6
-   - Reward Withdrawals Chart: ALL points (saved), Y step=1, auto-scale on visible window, labels visible (no invade Y axis), no overlap
-   - Persistence: localStorage chunked append-only
-   - Offline indicator: Offline ONLY when no internet
+   Injective • Portfolio — app.js (UI + Data + LIVE/REFRESH)
+   Compatible with your latest HTML structure.
 ========================================================= */
 
 /* ===================== CONFIG ===================== */
@@ -21,21 +15,16 @@ const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
 
-/* Withdrawal detection */
-const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
-
-/* Persistence (append-only chunks) */
+const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ (drop -> withdrawal point)
 const STORE_VER = 1;
 const CHUNK_SIZE = 220;
 
-/* No-overlap readable window */
-const MAX_LABELS_VISIBLE = 80;
+const STAKE_PAD = 6; // requested
+const REWARD_PAD = 1;
+
 const MIN_PX_PER_POINT_STAKE = 46;
 const MIN_PX_PER_POINT_REWARD = 56;
-
-/* AXIS PADDING */
-const STAKE_PAD = 6;       // ✅ richiesto: pad 6
-const REWARD_PAD = 1;      // reward: pad “soft” (step 1 rimane)
+const MAX_LABELS_VISIBLE = 80;
 
 /* ===================== HELPERS ===================== */
 const $ = (id) => document.getElementById(id);
@@ -48,71 +37,67 @@ function nowLabel() { return new Date().toLocaleTimeString(); }
 function nowTS() { return Date.now(); }
 function hasInternet() { return navigator.onLine === true; }
 
-function fgColor() {
-  const isLight = document.body?.dataset?.theme === "light";
-  return isLight ? "#111827" : "#f9fafb";
-}
-
-/* Inject small CSS for flash if missing */
+/* Inject tiny CSS for flash + safety (if not present) */
 (function injectFlashCSS() {
   const id = "inj_flash_css";
   if (document.getElementById(id)) return;
   const st = document.createElement("style");
   st.id = id;
   st.textContent = `
-  .flash-yellow { animation: injFlashYellow 650ms ease; }
-  @keyframes injFlashYellow {
-    0% { transform: scale(1); color: inherit; }
-    30% { transform: scale(1.12); color: #facc15; }
-    100% { transform: scale(1); color: inherit; }
-  }`;
+    .flash-yellow { animation: injFlashYellow 650ms ease; }
+    @keyframes injFlashYellow {
+      0% { transform: scale(1); }
+      30% { transform: scale(1.12); color: #facc15; }
+      100% { transform: scale(1); }
+    }
+  `;
   document.head.appendChild(st);
 })();
 
-/* ===================== OPTIONAL UI (if present) ===================== */
-const statusDot = $("statusDot");
-const statusText = $("statusText");
-const addressInput = $("addressInput");
+/* ===================== THEME ===================== */
+const THEME_KEY = "inj_theme";
+function getTheme() { return localStorage.getItem(THEME_KEY) || "dark"; }
+function setTheme(t) { localStorage.setItem(THEME_KEY, t); applyTheme(); }
+function applyTheme() {
+  const t = getTheme();
+  document.body.dataset.theme = t;
+  const icon = $("themeIcon");
+  if (icon) icon.textContent = t === "light" ? "☀️" : "🌙";
+}
+applyTheme();
+
+/* ===================== MODE (LIVE/REFRESH) ===================== */
+const MODE_KEY = "inj_mode";
+function getMode() { return localStorage.getItem(MODE_KEY) || "live"; } // "live" | "refresh"
+function setMode(m) { localStorage.setItem(MODE_KEY, m); applyModeUI(); restartMode(); }
+function applyModeUI() {
+  const icon = $("liveIcon");
+  const hint = $("modeHint");
+  const m = getMode();
+  if (icon) icon.textContent = (m === "live") ? "📡" : "🔄";
+  if (hint) hint.textContent = `Mode: ${(m === "live") ? "LIVE" : "REFRESH"}`;
+}
+applyModeUI();
 
 /* ===================== CONNECTION UI ===================== */
-let wsTradeOnline = false;
-let wsKlineOnline = false;
-let accountOnline = false;
+const statusDot = $("statusDot");
+const statusText = $("statusText");
 
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
-
-  // Offline SOLO se manca internet
-  if (!hasInternet()) {
-    statusText.textContent = "Offline";
-    statusDot.style.background = "#ef4444";
-    return;
-  }
-
-  // In questa versione: sempre LIVE (se vuoi toggle, lo reinseriamo nel menu)
-  const ok = wsTradeOnline && wsKlineOnline && accountOnline;
-  if (ok) {
-    statusText.textContent = "Online";
-    statusDot.style.background = "#22c55e";
-  } else {
-    statusText.textContent = "Connecting...";
-    statusDot.style.background = "#facc15";
-  }
+  const ok = hasInternet();
+  statusText.textContent = ok ? "Online" : "Offline";
+  statusDot.style.background = ok ? "#22c55e" : "#ef4444";
 }
 
 window.addEventListener("online", () => {
   refreshConnUI();
-  startTradeWS();
-  startKlineWS();
-  loadAccount();
+  if (getMode() === "live") restartMode();
 }, { passive: true });
 
-window.addEventListener("offline", () => {
-  wsTradeOnline = false;
-  wsKlineOnline = false;
-  accountOnline = false;
-  refreshConnUI();
-}, { passive: true });
+window.addEventListener("offline", refreshConnUI, { passive: true });
+
+refreshConnUI();
 
 /* ===================== SMOOTH DISPLAY ===================== */
 let settleStart = Date.now();
@@ -127,18 +112,19 @@ function tick(cur, tgt) {
   return cur + (tgt - cur) * scrollSpeed();
 }
 
-/* colored digits */
+/* Colored digits */
 function colorNumber(el, n, o, d) {
   if (!el) return;
   const ns = n.toFixed(d), os = o.toFixed(d);
   if (ns === os) { el.textContent = ns; return; }
+  const baseColor = (document.body.dataset.theme === "light") ? "#111827" : "#f9fafb";
   el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : fgColor();
+    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : baseColor;
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
 }
 
-/* ===================== PERFORMANCE ===================== */
+/* ===================== PERF ===================== */
 function pctChange(price, open) {
   const p = safe(price), o = safe(open);
   if (!o) return 0;
@@ -189,8 +175,6 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
     bar.style.background = gradDown;
   }
 }
-
-/* rewards bar heat */
 function heatColor(p) {
   const t = clamp(p, 0, 100) / 100;
   return `rgb(${14 + (239 - 14) * t},${165 - 165 * t},${233 - 233 * t})`;
@@ -207,85 +191,152 @@ async function fetchJSON(url) {
   }
 }
 
-/* ===================== STATE ===================== */
-let address = localStorage.getItem("inj_address") || "";
-let targetPrice = 0;
+/* =========================================================
+   UI: DRAWER MENU + BACKDROP + NAV
+========================================================= */
+const appRoot = $("appRoot");
+const menuBtn = $("menuBtn");
+const drawer = $("drawer");
+const backdrop = $("backdrop");
+const drawerNav = $("drawerNav");
 
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
-let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-
-const candle = {
-  d: { t: 0, open: 0, high: 0, low: 0 },
-  w: { t: 0, open: 0, high: 0, low: 0 },
-  m: { t: 0, open: 0, high: 0, low: 0 },
-};
-const tfReady = { d: false, w: false, m: false };
-
-/* flash extremes */
-const lastExtremes = {
-  d: { low: null, high: null },
-  w: { low: null, high: null },
-  m: { low: null, high: null }
-};
-function flash(el) {
-  if (!el) return;
-  el.classList.remove("flash-yellow");
-  void el.offsetWidth;
-  el.classList.add("flash-yellow");
+function openDrawer() {
+  drawer?.classList.add("show");
+  backdrop?.classList.add("show");
+  drawer?.setAttribute("aria-hidden", "false");
+  backdrop?.setAttribute("aria-hidden", "false");
+  appRoot?.classList.add("blurred");
+}
+function closeDrawer() {
+  drawer?.classList.remove("show");
+  backdrop?.classList.remove("show");
+  drawer?.setAttribute("aria-hidden", "true");
+  backdrop?.setAttribute("aria-hidden", "true");
+  appRoot?.classList.remove("blurred");
 }
 
-/* ===================== ADDRESS INPUT ===================== */
-if (addressInput) {
-  addressInput.value = address;
-  addressInput.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    const next = (addressInput.value || "").trim();
-    if (!next) return;
+menuBtn?.addEventListener("click", () => {
+  if (drawer?.classList.contains("show")) closeDrawer();
+  else openDrawer();
+});
+backdrop?.addEventListener("click", closeDrawer);
 
-    address = next;
-    localStorage.setItem("inj_address", address);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDrawer();
+}, { passive: true });
 
-    // reset detectors (non perdi i punti salvati: sono per address)
-    lastRewardsSeenForWithdraw = null;
-    lastStakeForType = null;
-    lastRewardsForType = null;
+drawerNav?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".nav-item");
+  if (!btn) return;
+  [...drawerNav.querySelectorAll(".nav-item")].forEach(x => x.classList.remove("active"));
+  btn.classList.add("active");
+  // future: routing by data-page
+  closeDrawer();
+});
 
-    // carica punti storici e ridisegna
-    loadStakePointsForAddress(address);
-    loadRewardPointsForAddress(address);
-    if (stakeChart) redrawStakeChart(true);
-    if (rewardChart) redrawRewardChart(true);
+$("themeToggle")?.addEventListener("click", () => {
+  setTheme(getTheme() === "dark" ? "light" : "dark");
+});
 
-    settleStart = Date.now();
-    loadAccount();
-  });
-}
-
-/* ===================== CHARTJS ZOOM PLUGIN AUTOLOAD ===================== */
-async function ensureZoomPlugin() {
-  try {
-    if (window.Chart && window.ChartZoom) {
-      window.Chart.register(window.ChartZoom);
-      return;
-    }
-  } catch {}
-
-  await new Promise((resolve) => {
-    const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js";
-    s.onload = () => resolve();
-    s.onerror = () => resolve();
-    document.head.appendChild(s);
-  });
-
-  try {
-    if (window.Chart && window.ChartZoom) window.Chart.register(window.ChartZoom);
-  } catch {}
-}
+$("liveToggle")?.addEventListener("click", () => {
+  setMode(getMode() === "live" ? "refresh" : "live");
+});
 
 /* =========================================================
-   PERSISTENCE — Chunked append-only
+   UI: SEARCH (expand/collapse minimal)
+   - click lens => expand + focus
+   - Enter or lens when expanded => commit address + collapse
+========================================================= */
+let address = localStorage.getItem("inj_address") || "";
+
+const searchWrap = $("searchWrap");
+const addressInput = $("addressInput");
+const searchBtn = $("searchBtn");
+const addressDisplay = $("addressDisplay");
+
+function setAddressDisplay(addr) {
+  if (!addressDisplay) return;
+  addressDisplay.textContent = addr ? addr : "";
+}
+setAddressDisplay(address);
+
+function expandSearch() {
+  if (!searchWrap || !addressInput) return;
+  searchWrap.classList.add("expanded");
+  addressInput.focus();
+}
+function collapseSearch() {
+  if (!searchWrap) return;
+  searchWrap.classList.remove("expanded");
+}
+
+function commitAddress(next) {
+  const a = (next || "").trim();
+  if (!a) { collapseSearch(); return; }
+
+  address = a;
+  localStorage.setItem("inj_address", address);
+  setAddressDisplay(address);
+
+  settleStart = Date.now();
+
+  // reset some state for new address
+  lastRewardsSeenForWithdraw = null;
+  lastStakeForType = null;
+  lastRewardsForType = null;
+
+  // load persisted points for address
+  loadStakePointsForAddress(address);
+  loadRewardPointsForAddress(address);
+
+  // rebuild charts
+  if (stakeChart) redrawStakeChart();
+  if (rewardChart) rebuildRewardView(true);
+
+  // fetch once immediately
+  bootstrapOnce();
+
+  // collapse UI
+  collapseSearch();
+}
+
+if (addressInput) {
+  addressInput.value = address || "";
+
+  addressInput.addEventListener("focus", expandSearch, { passive: true });
+
+  addressInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitAddress(addressInput.value);
+    } else if (e.key === "Escape") {
+      collapseSearch();
+    }
+  });
+}
+
+if (searchBtn) {
+  searchBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    // if closed => open
+    if (!searchWrap?.classList.contains("expanded")) {
+      expandSearch();
+      return;
+    }
+    // if open => commit
+    commitAddress(addressInput?.value);
+  });
+}
+
+// click outside to collapse (only if expanded)
+document.addEventListener("click", (e) => {
+  if (!searchWrap?.classList.contains("expanded")) return;
+  const inside = searchWrap.contains(e.target);
+  if (!inside) collapseSearch();
+}, { passive: true });
+
+/* =========================================================
+   PERSISTENCE (chunked append-only)
 ========================================================= */
 function storageBase(prefix, addr) {
   const a = (addr || "").trim();
@@ -317,13 +368,8 @@ function readMeta(prefix, addr) {
 function writeMeta(prefix, addr, meta) {
   const k = metaKey(prefix, addr);
   if (!k) return true;
-  try {
-    localStorage.setItem(k, JSON.stringify(meta));
-    return true;
-  } catch (e) {
-    console.warn("[storage] META save failed (quota?)", e);
-    return false;
-  }
+  try { localStorage.setItem(k, JSON.stringify(meta)); return true; }
+  catch { return false; }
 }
 function readChunk(prefix, addr, idx) {
   const k = chunkKey(prefix, addr, idx);
@@ -340,17 +386,11 @@ function readChunk(prefix, addr, idx) {
 function writeChunk(prefix, addr, idx, arr) {
   const k = chunkKey(prefix, addr, idx);
   if (!k) return true;
-  try {
-    localStorage.setItem(k, JSON.stringify(arr));
-    return true;
-  } catch (e) {
-    console.warn("[storage] CHUNK save failed (quota?)", e);
-    return false;
-  }
+  try { localStorage.setItem(k, JSON.stringify(arr)); return true; }
+  catch { return false; }
 }
 function appendPoint(prefix, addr, pointObj) {
   const meta = readMeta(prefix, addr);
-
   let chunkIdx = Math.max(0, meta.chunks - 1);
   let chunk = meta.chunks > 0 ? readChunk(prefix, addr, chunkIdx) : [];
 
@@ -359,33 +399,28 @@ function appendPoint(prefix, addr, pointObj) {
     chunk = [];
     meta.chunks += 1;
   }
-
   chunk.push(pointObj);
   meta.total += 1;
 
   const ok1 = writeChunk(prefix, addr, chunkIdx, chunk);
   const ok2 = writeMeta(prefix, addr, meta);
-
   return ok1 && ok2;
 }
 function loadAllPoints(prefix, addr) {
   const meta = readMeta(prefix, addr);
   const out = [];
-  for (let i = 0; i < meta.chunks; i++) {
-    out.push(...readChunk(prefix, addr, i));
-  }
+  for (let i = 0; i < meta.chunks; i++) out.push(...readChunk(prefix, addr, i));
   return out;
 }
 
 /* =========================================================
-   NO-OVERLAP WINDOWING + AXIS AUTO-SCALING (VISIBLE RANGE)
+   CHART window + autoscale Y on visible
 ========================================================= */
 function ensureReadableWindow(ch, minPxPerPoint, maxLabels = MAX_LABELS_VISIBLE) {
   if (!ch) return;
-
   const ds = ch.data.datasets?.[0];
   const n = ds?.data?.length || 0;
-  if (n <= 1) return;
+  if (n <= 2) return;
 
   const area = ch.chartArea;
   if (!area || !area.width) return;
@@ -401,7 +436,6 @@ function ensureReadableWindow(ch, minPxPerPoint, maxLabels = MAX_LABELS_VISIBLE)
   const curMax = Number.isFinite(xScale.max) ? xScale.max : xmax;
   const visibleNow = Math.floor(curMax - curMin + 1);
 
-  // Se troppi punti visibili -> forza finestra leggibile sugli ultimi maxVisible
   if (visibleNow > maxVisible) {
     const xmin = Math.max(0, xmax - maxVisible + 1);
     ch.options.scales.x.min = xmin;
@@ -409,24 +443,22 @@ function ensureReadableWindow(ch, minPxPerPoint, maxLabels = MAX_LABELS_VISIBLE)
     ch.update("none");
   }
 }
-
 function visibleIndexRange(ch, n) {
   const xScale = ch?.scales?.x;
   if (!xScale || !n) return { min: 0, max: Math.max(0, n - 1) };
 
   let min = Number.isFinite(xScale.min) ? Math.floor(xScale.min) : 0;
   let max = Number.isFinite(xScale.max) ? Math.ceil(xScale.max) : (n - 1);
+
   min = clamp(min, 0, n - 1);
   max = clamp(max, 0, n - 1);
   if (max < min) [min, max] = [max, min];
   return { min, max };
 }
-
-/* Auto-scale Y based on VISIBLE points; keep integer ticks (step 1) */
 function autoScaleYOnVisible(ch, valuesArray, pad, { floorAtZero = false, minSpan = 2 } = {}) {
   if (!ch) return;
   const n = valuesArray?.length || 0;
-  if (n < 2) return;
+  if (n < 1) return;
 
   const { min: i0, max: i1 } = visibleIndexRange(ch, n);
 
@@ -443,18 +475,14 @@ function autoScaleYOnVisible(ch, valuesArray, pad, { floorAtZero = false, minSpa
   let max = Math.ceil(vMax + pad);
 
   if (floorAtZero) min = Math.max(0, min);
-
-  // ensure span
-  if (max - min < minSpan) {
-    max = min + minSpan;
-  }
+  if (max - min < minSpan) max = min + minSpan;
 
   ch.options.scales.y.min = min;
   ch.options.scales.y.max = max;
 }
 
 /* =========================================================
-   LABEL PLUGIN — clipped inside chartArea (never invades Y axis)
+   CLIPPED point labels plugin
 ========================================================= */
 function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, sans-serif" }) {
   return {
@@ -462,7 +490,6 @@ function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, san
     afterDatasetsDraw(ch) {
       const ds = ch.data.datasets?.[0];
       if (!ds) return;
-
       const meta = ch.getDatasetMeta(0);
       const els = meta?.data || [];
       if (!els.length) return;
@@ -473,13 +500,12 @@ function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, san
       const ctx = ch.ctx;
       ctx.save();
 
-      // CLIP inside chart area => never touches Y axis
       ctx.beginPath();
       ctx.rect(area.left, area.top, area.width, area.height);
       ctx.clip();
 
       ctx.font = font;
-      ctx.fillStyle = (document.body?.dataset?.theme === "light")
+      ctx.fillStyle = (document.body.dataset.theme === "light")
         ? "rgba(17,24,39,0.88)"
         : "rgba(249,250,251,0.92)";
       ctx.textBaseline = "bottom";
@@ -500,15 +526,9 @@ function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, san
         const pad = 6;
         const w = ctx.measureText(label).width;
 
-        if (x - w / 2 < area.left + pad) {
-          ctx.textAlign = "left";
-          x = area.left + pad;
-        } else if (x + w / 2 > area.right - pad) {
-          ctx.textAlign = "right";
-          x = area.right - pad;
-        } else {
-          ctx.textAlign = "center";
-        }
+        if (x - w / 2 < area.left + pad) { ctx.textAlign = "left"; x = area.left + pad; }
+        else if (x + w / 2 > area.right - pad) { ctx.textAlign = "right"; x = area.right - pad; }
+        else { ctx.textAlign = "center"; }
 
         ctx.fillText(label, x, y);
       }
@@ -519,7 +539,35 @@ function makeClippedPointLabelPlugin({ id, getLabel, font = "800 11px Inter, san
 }
 
 /* =========================================================
-   STAKE CHART — all points, step=1, auto-scale on visible, PAD=6
+   STATE
+========================================================= */
+let targetPrice = 0;
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0 };
+
+let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
+
+const candle = {
+  d: { t: 0, open: 0, high: 0, low: 0 },
+  w: { t: 0, open: 0, high: 0, low: 0 },
+  m: { t: 0, open: 0, high: 0, low: 0 },
+};
+const tfReady = { d: false, w: false, m: false };
+
+const lastExtremes = {
+  d: { low: null, high: null },
+  w: { low: null, high: null },
+  m: { low: null, high: null }
+};
+
+function flash(el) {
+  if (!el) return;
+  el.classList.remove("flash-yellow");
+  void el.offsetWidth;
+  el.classList.add("flash-yellow");
+}
+
+/* =========================================================
+   STAKE chart (persisted)
 ========================================================= */
 let stakeChart = null;
 let stakePoints = []; // {t,label,value,type}
@@ -529,8 +577,45 @@ const stakeLabelPlugin = makeClippedPointLabelPlugin({
   getLabel: (i) => (stakePoints[i]?.type ? String(stakePoints[i].type).toUpperCase() : "")
 });
 
-async function initStakeChart() {
-  await ensureZoomPlugin();
+function loadStakePointsForAddress(addr) {
+  stakePoints = loadAllPoints("inj_stake_points", addr)
+    .filter(p => p && Number.isFinite(+p.value))
+    .map(p => ({ t: safe(p.t) || 0, label: p.label || "", value: safe(p.value), type: p.type || "" }));
+}
+
+function inferStakeType(newStake, newRewards) {
+  if (lastStakeForType == null) return "START";
+  const ds = safe(newStake) - safe(lastStakeForType);
+  if (ds === 0) return null;
+
+  if (ds > 0) {
+    if (lastRewardsForType != null) {
+      const dr = safe(lastRewardsForType) - safe(newRewards);
+      if (dr > REWARD_WITHDRAW_THRESHOLD) return "COMPOUND";
+    }
+    return "DELEGATE";
+  }
+  return "UNDELEGATE";
+}
+
+function addStakePoint(addr, stakeValue, typeLabel) {
+  const s = safe(stakeValue);
+  if (!Number.isFinite(s) || !addr) return;
+
+  if (stakePoints.length) {
+    const prev = safe(stakePoints[stakePoints.length - 1].value);
+    if (s === prev) return; // only changes
+  }
+
+  const point = { t: nowTS(), label: nowLabel(), value: s, type: typeLabel || "" };
+  stakePoints.push(point);
+  appendPoint("inj_stake_points", addr, point);
+
+  if (!stakeChart) initStakeChart();
+  else redrawStakeChart();
+}
+
+function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas || !window.Chart) return;
 
@@ -606,61 +691,29 @@ async function initStakeChart() {
     plugins: [stakeLabelPlugin]
   });
 
-  // First-time: readable window + y autoscale visible with PAD=6
   ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE);
   autoScaleYOnVisible(stakeChart, stakeChart.data.datasets[0].data, STAKE_PAD, { floorAtZero: false, minSpan: 2 });
   stakeChart.update("none");
 }
 
-function redrawStakeChart(forceRescale = false) {
+function redrawStakeChart() {
   if (!stakeChart) return;
   stakeChart.data.labels = stakePoints.map(p => p.label);
   stakeChart.data.datasets[0].data = stakePoints.map(p => p.value);
 
-  // keep readable window; if user zoomed in a lot we don't crush it, only if too many points
   ensureReadableWindow(stakeChart, MIN_PX_PER_POINT_STAKE);
-
-  // auto-scale Y based on visible range, PAD=6
   autoScaleYOnVisible(stakeChart, stakeChart.data.datasets[0].data, STAKE_PAD, { floorAtZero: false, minSpan: 2 });
 
   stakeChart.update("none");
 }
 
-function loadStakePointsForAddress(addr) {
-  stakePoints = loadAllPoints("inj_stake_points", addr)
-    .filter(p => p && Number.isFinite(+p.value))
-    .map(p => ({
-      t: safe(p.t) || 0,
-      label: p.label || "",
-      value: safe(p.value),
-      type: p.type || ""
-    }));
-}
-
-function addStakePoint(addr, stakeValue, typeLabel) {
-  const s = safe(stakeValue);
-  if (!Number.isFinite(s)) return;
-
-  if (stakePoints.length) {
-    const prev = safe(stakePoints[stakePoints.length - 1].value);
-    if (s === prev) return; // ogni cambiamento = punto, identico = no
-  }
-
-  const point = { t: nowTS(), label: nowLabel(), value: s, type: typeLabel || "" };
-  stakePoints.push(point);
-
-  const ok = appendPoint("inj_stake_points", addr, point);
-  if (!ok) console.warn("[stake] localStorage quota? point NOT saved");
-
-  if (!stakeChart) initStakeChart().then(() => redrawStakeChart(true));
-  else redrawStakeChart(true);
-}
-
 /* =========================================================
-   REWARD WITHDRAWALS CHART — step=1, auto-scale on visible, no overlap
+   REWARD withdrawals chart (persisted) + filter + timeline + LIVE
 ========================================================= */
 let rewardChart = null;
-let rewardPoints = []; // {t,label,value}
+let rewardPointsAll = [];
+let rewardPointsView = [];
+let rewardFollowLive = true;
 
 const rewardLabelPlugin = makeClippedPointLabelPlugin({
   id: "rewardLabelPlugin",
@@ -671,17 +724,101 @@ const rewardLabelPlugin = makeClippedPointLabelPlugin({
   }
 });
 
-async function initRewardChart() {
-  await ensureZoomPlugin();
+const rewardFilterEl = $("rewardFilter");
+const rewardTimelineEl = $("rewardTimeline");
+const rewardTimelineMeta = $("rewardTimelineMeta");
+const rewardLiveBtn = $("rewardLiveBtn");
+
+function loadRewardPointsForAddress(addr) {
+  rewardPointsAll = loadAllPoints("inj_reward_withdrawals", addr)
+    .filter(p => p && Number.isFinite(+p.value))
+    .map(p => ({ t: safe(p.t) || 0, label: p.label || "", value: safe(p.value) }));
+}
+
+function addRewardWithdrawalPoint(addr, amount) {
+  const v = safe(amount);
+  if (!Number.isFinite(v) || v <= 0 || !addr) return;
+
+  const point = { t: nowTS(), label: nowLabel(), value: v };
+  rewardPointsAll.push(point);
+  appendPoint("inj_reward_withdrawals", addr, point);
+
+  rebuildRewardView(true);
+}
+
+function getRewardFilterMin() {
+  const v = safe(rewardFilterEl?.value);
+  return v || 0;
+}
+function buildRewardViewArray() {
+  const minVal = getRewardFilterMin();
+  if (!minVal) return rewardPointsAll.slice();
+  return rewardPointsAll.filter(p => safe(p.value) >= minVal);
+}
+
+function updateRewardTimelineMeta() {
+  if (!rewardTimelineMeta) return;
+  const n = rewardPointsView.length;
+  if (!n) { rewardTimelineMeta.textContent = "—"; return; }
+  const idx = clamp(parseInt(rewardTimelineEl?.value || "0", 10), 0, n - 1);
+  const p = rewardPointsView[idx];
+  rewardTimelineMeta.textContent = `${p.label} • +${safe(p.value).toFixed(6)} INJ`;
+}
+function updateRewardTimelineUI() {
+  if (!rewardTimelineEl) return;
+  const n = rewardPointsView.length;
+  rewardTimelineEl.min = "0";
+  rewardTimelineEl.max = String(Math.max(0, n - 1));
+  rewardTimelineEl.value = String(rewardFollowLive ? Math.max(0, n - 1) : clamp(parseInt(rewardTimelineEl.value || "0", 10), 0, Math.max(0, n - 1)));
+  updateRewardTimelineMeta();
+}
+
+function setRewardWindowAroundIndex(ch, idx) {
+  if (!ch) return;
+  const ds = ch.data.datasets?.[0]?.data || [];
+  const n = ds.length;
+  if (!n) return;
+
+  idx = clamp(idx, 0, n - 1);
+
+  const area = ch.chartArea;
+  const width = area?.width || 600;
+  const maxVisible = Math.max(8, Math.floor(width / MIN_PX_PER_POINT_REWARD));
+
+  const half = Math.floor(maxVisible / 2);
+  const xmin = clamp(idx - half, 0, n - 1);
+  const xmax = clamp(xmin + maxVisible - 1, 0, n - 1);
+
+  ch.options.scales.x.min = xmin;
+  ch.options.scales.x.max = xmax;
+}
+
+function rebuildRewardView(ensureLiveTail = false) {
+  rewardPointsView = buildRewardViewArray();
+
+  if (!rewardChart) initRewardChart();
+  else redrawRewardChart();
+
+  updateRewardTimelineUI();
+
+  if ((rewardFollowLive && rewardChart) || (ensureLiveTail && rewardChart && rewardFollowLive)) {
+    const lastIdx = Math.max(0, rewardPointsView.length - 1);
+    setRewardWindowAroundIndex(rewardChart, lastIdx);
+    autoScaleYOnVisible(rewardChart, rewardChart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
+    rewardChart.update("none");
+  }
+}
+
+function initRewardChart() {
   const canvas = $("rewardChart");
   if (!canvas || !window.Chart) return;
 
   rewardChart = new Chart(canvas, {
     type: "line",
     data: {
-      labels: rewardPoints.map(p => p.label),
+      labels: rewardPointsView.map(p => p.label),
       datasets: [{
-        data: rewardPoints.map(p => p.value),
+        data: rewardPointsView.map(p => p.value),
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
@@ -701,7 +838,7 @@ async function initRewardChart() {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => rewardPoints[items?.[0]?.dataIndex ?? 0]?.label || "",
+            title: (items) => rewardPointsView[items?.[0]?.dataIndex ?? 0]?.label || "",
             label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
           }
         },
@@ -749,71 +886,52 @@ async function initRewardChart() {
   rewardChart.update("none");
 }
 
-function redrawRewardChart(forceRescale = false) {
+function redrawRewardChart() {
   if (!rewardChart) return;
-  rewardChart.data.labels = rewardPoints.map(p => p.label);
-  rewardChart.data.datasets[0].data = rewardPoints.map(p => p.value);
+
+  rewardChart.data.labels = rewardPointsView.map(p => p.label);
+  rewardChart.data.datasets[0].data = rewardPointsView.map(p => p.value);
 
   ensureReadableWindow(rewardChart, MIN_PX_PER_POINT_REWARD);
-  autoScaleYOnVisible(rewardChart, rewardChart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
 
+  if (!rewardFollowLive && rewardTimelineEl) {
+    const idx = clamp(parseInt(rewardTimelineEl.value || "0", 10), 0, Math.max(0, rewardPointsView.length - 1));
+    setRewardWindowAroundIndex(rewardChart, idx);
+  } else {
+    const lastIdx = Math.max(0, rewardPointsView.length - 1);
+    setRewardWindowAroundIndex(rewardChart, lastIdx);
+  }
+
+  autoScaleYOnVisible(rewardChart, rewardChart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
   rewardChart.update("none");
 }
 
-function loadRewardPointsForAddress(addr) {
-  rewardPoints = loadAllPoints("inj_reward_withdrawals", addr)
-    .filter(p => p && Number.isFinite(+p.value))
-    .map(p => ({
-      t: safe(p.t) || 0,
-      label: p.label || "",
-      value: safe(p.value)
-    }));
-}
-
-function addRewardWithdrawalPoint(addr, amount) {
-  const v = safe(amount);
-  if (!Number.isFinite(v) || v <= 0) return;
-
-  const point = { t: nowTS(), label: nowLabel(), value: v };
-  rewardPoints.push(point);
-
-  const ok = appendPoint("inj_reward_withdrawals", addr, point);
-  if (!ok) console.warn("[reward] localStorage quota? point NOT saved");
-
-  if (!rewardChart) initRewardChart().then(() => redrawRewardChart(true));
-  else redrawRewardChart(true);
-}
+/* Reward UI bindings */
+rewardFilterEl?.addEventListener("change", () => rebuildRewardView(true));
+rewardTimelineEl?.addEventListener("input", () => {
+  rewardFollowLive = false;
+  updateRewardTimelineMeta();
+  if (rewardChart) {
+    const idx = clamp(parseInt(rewardTimelineEl.value || "0", 10), 0, Math.max(0, rewardPointsView.length - 1));
+    setRewardWindowAroundIndex(rewardChart, idx);
+    autoScaleYOnVisible(rewardChart, rewardChart.data.datasets[0].data, REWARD_PAD, { floorAtZero: true, minSpan: 2 });
+    rewardChart.update("none");
+  }
+});
+rewardLiveBtn?.addEventListener("click", () => {
+  rewardFollowLive = true;
+  rebuildRewardView(true);
+});
 
 /* =========================================================
    ACCOUNT (Injective LCD)
-   - stake points: every change
-   - reward withdrawals: when rewards drop
 ========================================================= */
 let lastRewardsSeenForWithdraw = null;
 let lastStakeForType = null;
 let lastRewardsForType = null;
 
-function inferStakeType(newStake, newRewards) {
-  if (lastStakeForType == null) return "START";
-  const ds = safe(newStake) - safe(lastStakeForType);
-  if (ds === 0) return null;
-
-  if (ds > 0) {
-    if (lastRewardsForType != null) {
-      const dr = safe(lastRewardsForType) - safe(newRewards);
-      if (dr > REWARD_WITHDRAW_THRESHOLD) return "COMPOUND";
-    }
-    return "DELEGATE";
-  }
-  return "UNDELEGATE";
-}
-
 async function loadAccount() {
-  if (!address || !hasInternet()) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
+  if (!address || !hasInternet()) return;
 
   const base = "https://lcd.injective.network";
   const [b, s, r, i] = await Promise.all([
@@ -822,30 +940,20 @@ async function loadAccount() {
     fetchJSON(`${base}/cosmos/distribution/v1beta1/delegators/${address}/rewards`),
     fetchJSON(`${base}/cosmos/mint/v1beta1/inflation`)
   ]);
-
-  if (!b || !s || !r || !i) {
-    accountOnline = false;
-    refreshConnUI();
-    return;
-  }
-
-  accountOnline = true;
-  refreshConnUI();
+  if (!b || !s || !r || !i) return;
 
   availableInj = safe(b.balances?.find(x => x.denom === "inj")?.amount) / 1e18;
   stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d.balance.amount), 0) / 1e18;
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
-  // withdrawal event: rewards dropped
+  // withdrawal point when rewards drop
   if (lastRewardsSeenForWithdraw == null) lastRewardsSeenForWithdraw = rewardsInj;
   const diff = safe(lastRewardsSeenForWithdraw) - safe(rewardsInj);
-  if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    addRewardWithdrawalPoint(address, diff);
-  }
+  if (diff > REWARD_WITHDRAW_THRESHOLD) addRewardWithdrawalPoint(address, diff);
   lastRewardsSeenForWithdraw = rewardsInj;
 
-  // stake event: every change with type inferred
+  // stake point on every change + inferred type
   const type = inferStakeType(stakeInj, rewardsInj);
   addStakePoint(address, stakeInj, type || "");
 
@@ -895,7 +1003,7 @@ async function loadCandleSnapshot() {
 }
 
 /* =========================================================
-   PRICE CHART 1D (REST bootstrap + WS 1m) + overlay pinned
+   PRICE CHART 1D (REST bootstrap) + LIVE WS 1m
 ========================================================= */
 let priceChart = null;
 let priceLabels = [];
@@ -948,34 +1056,22 @@ function applyPriceChartColorBySign(sign) {
 
 function updatePriceOverlayFromPinned() {
   const chartEl = $("chartPrice");
-  const overlay = $("chartOverlay"); // se non c'è, ok
   if (!chartEl || !priceChart) return;
 
   if (pinnedIndex == null) {
-    overlay?.classList?.remove("show");
     chartEl.textContent = "--";
     return;
   }
-
   const ds = priceChart.data.datasets?.[0]?.data || [];
   const lbs = priceChart.data.labels || [];
-  if (!ds.length || !lbs.length) {
-    overlay?.classList?.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
+  if (!ds.length || !lbs.length) { chartEl.textContent = "--"; return; }
 
-  let idx = clamp(Math.round(+pinnedIndex), 0, ds.length - 1);
+  const idx = clamp(Math.round(+pinnedIndex), 0, ds.length - 1);
   const price = safe(ds[idx]);
   const label = lbs[idx];
-  if (!Number.isFinite(price) || !label) {
-    overlay?.classList?.remove("show");
-    chartEl.textContent = "--";
-    return;
-  }
+  if (!Number.isFinite(price) || !label) { chartEl.textContent = "--"; return; }
 
   chartEl.textContent = `${label} • $${price.toFixed(4)}`;
-  overlay?.classList?.add("show");
 }
 
 async function fetchKlines1mRange(startTime, endTime) {
@@ -998,8 +1094,7 @@ async function fetchKlines1mRange(startTime, endTime) {
   return out.slice(0, DAY_MINUTES);
 }
 
-async function initPriceChart() {
-  await ensureZoomPlugin();
+function initPriceChart() {
   const canvas = $("priceChart");
   if (!canvas || !window.Chart) return;
 
@@ -1024,28 +1119,8 @@ async function initPriceChart() {
         legend: { display: false },
         tooltip: { enabled: false },
         zoom: {
-          pan: {
-            enabled: true,
-            mode: "x",
-            threshold: 2,
-            onPanComplete: ({ chart }) => {
-              const xScale = chart.scales.x;
-              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(centerPx);
-              updatePriceOverlayFromPinned();
-            }
-          },
-          zoom: {
-            wheel: { enabled: true },
-            pinch: { enabled: true },
-            mode: "x",
-            onZoomComplete: ({ chart }) => {
-              const xScale = chart.scales.x;
-              const centerPx = (chart.chartArea.left + chart.chartArea.right) / 2;
-              pinnedIndex = xScale.getValueForPixel(centerPx);
-              updatePriceOverlayFromPinned();
-            }
-          }
+          pan: { enabled: true, mode: "x", threshold: 2 },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
         }
       },
       interaction: { mode: "index", intersect: false },
@@ -1101,8 +1176,7 @@ function setupPriceChartInteractions() {
 }
 
 async function loadChartToday() {
-  if (!hasInternet()) return;
-  if (!tfReady.d || !candle.d.t) return;
+  if (!hasInternet() || !tfReady.d || !candle.d.t) return;
 
   const kl = await fetchKlines1mRange(candle.d.t, Date.now());
   if (!kl.length) return;
@@ -1114,7 +1188,7 @@ async function loadChartToday() {
   const lastClose = safe(kl[kl.length - 1][4]);
   if (!targetPrice && lastClose) targetPrice = lastClose;
 
-  if (!priceChart && window.Chart) await initPriceChart();
+  if (!priceChart) initPriceChart();
   if (priceChart) {
     priceChart.data.labels = priceLabels;
     priceChart.data.datasets[0].data = priceData;
@@ -1154,33 +1228,30 @@ function updateChartFrom1mKline(k) {
 
 async function ensureChartBootstrapped() {
   if (chartBootstrappedToday) return;
-  if (!tfReady.d || !candle.d.t) await loadCandleSnapshot();
-  if (tfReady.d && candle.d.t) await loadChartToday();
+  await loadCandleSnapshot();
+  await loadChartToday();
 }
 
 /* =========================================================
-   BINANCE WS TRADE
+   WS (LIVE only)
 ========================================================= */
 let wsTrade = null;
+let wsKline = null;
 let tradeRetryTimer = null;
+let klineRetryTimer = null;
 
 function clearTradeRetry() { if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; } }
-function scheduleTradeRetry() {
-  clearTradeRetry();
-  tradeRetryTimer = setTimeout(() => startTradeWS(), 1200);
-}
+function scheduleTradeRetry() { clearTradeRetry(); tradeRetryTimer = setTimeout(() => startTradeWS(), 1200); }
 
 function startTradeWS() {
   try { wsTrade?.close(); } catch {}
-  wsTradeOnline = false;
-  refreshConnUI();
-  if (!hasInternet()) return;
+  if (getMode() !== "live" || !hasInternet()) return;
 
   wsTrade = new WebSocket("wss://stream.binance.com:9443/ws/injusdt@trade");
 
-  wsTrade.onopen = () => { wsTradeOnline = true; refreshConnUI(); clearTradeRetry(); };
-  wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); scheduleTradeRetry(); };
-  wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
+  wsTrade.onopen = () => clearTradeRetry();
+  wsTrade.onclose = () => scheduleTradeRetry();
+  wsTrade.onerror = () => { try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
 
   wsTrade.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -1195,17 +1266,8 @@ function startTradeWS() {
   };
 }
 
-/* =========================================================
-   BINANCE WS KLINES
-========================================================= */
-let wsKline = null;
-let klineRetryTimer = null;
-
 function clearKlineRetry() { if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; } }
-function scheduleKlineRetry() {
-  clearKlineRetry();
-  klineRetryTimer = setTimeout(() => startKlineWS(), 1200);
-}
+function scheduleKlineRetry() { clearKlineRetry(); klineRetryTimer = setTimeout(() => startKlineWS(), 1200); }
 
 function applyKline(intervalKey, k) {
   const t = safe(k.t);
@@ -1228,9 +1290,7 @@ function applyKline(intervalKey, k) {
 
 function startKlineWS() {
   try { wsKline?.close(); } catch {}
-  wsKlineOnline = false;
-  refreshConnUI();
-  if (!hasInternet()) return;
+  if (getMode() !== "live" || !hasInternet()) return;
 
   const url =
     "wss://stream.binance.com:9443/stream?streams=" +
@@ -1241,9 +1301,9 @@ function startKlineWS() {
 
   wsKline = new WebSocket(url);
 
-  wsKline.onopen = () => { wsKlineOnline = true; refreshConnUI(); clearKlineRetry(); };
-  wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
-  wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
+  wsKline.onopen = () => clearKlineRetry();
+  wsKline.onclose = () => scheduleKlineRetry();
+  wsKline.onerror = () => { try { wsKline.close(); } catch {} scheduleKlineRetry(); };
 
   wsKline.onmessage = async (e) => {
     const payload = JSON.parse(e.data);
@@ -1270,14 +1330,16 @@ function startKlineWS() {
   };
 }
 
-/* ===================== LOOP ===================== */
+/* =========================================================
+   LOOP RENDER
+========================================================= */
 function animate() {
-  /* PRICE */
+  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  /* PERF */
+  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -1286,14 +1348,29 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  /* Price chart color by 24h sign */
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "neutral");
   if (sign !== lastChartSign) {
     lastChartSign = sign;
     applyPriceChartColorBySign(sign);
+
+    // tint stake/reward charts (not grey)
+    if (stakeChart) {
+      const ds = stakeChart.data.datasets[0];
+      if (sign === "up") { ds.borderColor = "#22c55e"; ds.backgroundColor = "rgba(34,197,94,.18)"; }
+      else if (sign === "down") { ds.borderColor = "#ef4444"; ds.backgroundColor = "rgba(239,68,68,.16)"; }
+      else { ds.borderColor = "#3b82f6"; ds.backgroundColor = "rgba(59,130,246,.12)"; }
+      stakeChart.update("none");
+    }
+    if (rewardChart) {
+      const ds = rewardChart.data.datasets[0];
+      if (sign === "up") { ds.borderColor = "#22c55e"; ds.backgroundColor = "rgba(34,197,94,.14)"; }
+      else if (sign === "down") { ds.borderColor = "#ef4444"; ds.backgroundColor = "rgba(239,68,68,.12)"; }
+      else { ds.borderColor = "#3b82f6"; ds.backgroundColor = "rgba(59,130,246,.12)"; }
+      rewardChart.update("none");
+    }
   }
 
-  /* Bars gradients (come richiesto: 1D/1W/1M diversi) */
+  // Bars gradients
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
@@ -1305,150 +1382,149 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  /* bar numbers + flash extremes */
+  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
 
   if (tfReady.d) {
     const low = safe(candle.d.low), high = safe(candle.d.high);
-    $("priceMin").textContent  = low.toFixed(3);
+    pMinEl.textContent = low.toFixed(3);
     $("priceOpen").textContent = safe(candle.d.open).toFixed(3);
-    $("priceMax").textContent  = high.toFixed(3);
+    pMaxEl.textContent = high.toFixed(3);
 
     if (lastExtremes.d.low !== null && low !== lastExtremes.d.low) flash(pMinEl);
     if (lastExtremes.d.high !== null && high !== lastExtremes.d.high) flash(pMaxEl);
     lastExtremes.d.low = low; lastExtremes.d.high = high;
   } else {
-    $("priceMin").textContent = "--";
-    $("priceOpen").textContent = "--";
-    $("priceMax").textContent = "--";
+    pMinEl.textContent = "--"; $("priceOpen").textContent = "--"; pMaxEl.textContent = "--";
   }
 
   if (tfReady.w) {
     const low = safe(candle.w.low), high = safe(candle.w.high);
-    $("weekMin").textContent   = low.toFixed(3);
-    $("weekOpen").textContent  = safe(candle.w.open).toFixed(3);
-    $("weekMax").textContent   = high.toFixed(3);
+    wMinEl.textContent = low.toFixed(3);
+    $("weekOpen").textContent = safe(candle.w.open).toFixed(3);
+    wMaxEl.textContent = high.toFixed(3);
 
     if (lastExtremes.w.low !== null && low !== lastExtremes.w.low) flash(wMinEl);
     if (lastExtremes.w.high !== null && high !== lastExtremes.w.high) flash(wMaxEl);
     lastExtremes.w.low = low; lastExtremes.w.high = high;
   } else {
-    $("weekMin").textContent = "--";
-    $("weekOpen").textContent = "--";
-    $("weekMax").textContent = "--";
+    wMinEl.textContent = "--"; $("weekOpen").textContent = "--"; wMaxEl.textContent = "--";
   }
 
   if (tfReady.m) {
     const low = safe(candle.m.low), high = safe(candle.m.high);
-    $("monthMin").textContent  = low.toFixed(3);
+    mMinEl.textContent = low.toFixed(3);
     $("monthOpen").textContent = safe(candle.m.open).toFixed(3);
-    $("monthMax").textContent  = high.toFixed(3);
+    mMaxEl.textContent = high.toFixed(3);
 
     if (lastExtremes.m.low !== null && low !== lastExtremes.m.low) flash(mMinEl);
     if (lastExtremes.m.high !== null && high !== lastExtremes.m.high) flash(mMaxEl);
     lastExtremes.m.low = low; lastExtremes.m.high = high;
   } else {
-    $("monthMin").textContent = "--";
-    $("monthOpen").textContent = "--";
-    $("monthMax").textContent = "--";
+    mMinEl.textContent = "--"; $("monthOpen").textContent = "--"; mMaxEl.textContent = "--";
   }
 
-  /* AVAILABLE */
+  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
-  const availableUsd = $("availableUsd");
-  if (availableUsd) availableUsd.textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
+  $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
 
-  /* STAKE */
+  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-  const stakeUsd = $("stakeUsd");
-  if (stakeUsd) stakeUsd.textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
+  $("stakeUsd").textContent = `≈ $${(displayed.stake * displayed.price).toFixed(2)}`;
 
   const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
-  const stakeBar = $("stakeBar");
-  const stakeLine = $("stakeLine");
-  const stakePercent = $("stakePercent");
-  if (stakeBar) stakeBar.style.width = stakePct + "%";
-  if (stakeLine) stakeLine.style.left = stakePct + "%";
-  if (stakePercent) stakePercent.textContent = stakePct.toFixed(1) + "%";
+  $("stakeBar").style.width = stakePct + "%";
+  $("stakeLine").style.left = stakePct + "%";
+  $("stakePercent").textContent = stakePct.toFixed(1) + "%";
 
-  const stakeMin = $("stakeMin");
-  const stakeMax = $("stakeMax");
-  if (stakeMin) stakeMin.textContent = "0";
-  if (stakeMax) stakeMax.textContent = String(STAKE_TARGET_MAX);
-
-  /* REWARDS */
+  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
-  const rewardsUsd = $("rewardsUsd");
-  if (rewardsUsd) rewardsUsd.textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
+  $("rewardsUsd").textContent = `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`;
 
   const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
+  $("rewardBar").style.width = rp + "%";
+  $("rewardBar").style.background = heatColor(rp);
+  $("rewardLine").style.left = rp + "%";
+  $("rewardPercent").textContent = rp.toFixed(1) + "%";
+  $("rewardMax").textContent = maxR.toFixed(1);
 
-  const rewardBar = $("rewardBar");
-  const rewardLine = $("rewardLine");
-  const rewardPercent = $("rewardPercent");
-  if (rewardBar) {
-    rewardBar.style.width = rp + "%";
-    rewardBar.style.background = heatColor(rp);
-  }
-  if (rewardLine) rewardLine.style.left = rp + "%";
-  if (rewardPercent) rewardPercent.textContent = rp.toFixed(1) + "%";
-
-  const rewardMin = $("rewardMin");
-  const rewardMax = $("rewardMax");
-  if (rewardMin) rewardMin.textContent = "0";
-  if (rewardMax) rewardMax.textContent = maxR.toFixed(1);
-
-  /* APR */
-  const aprEl = $("apr");
-  if (aprEl) aprEl.textContent = safe(apr).toFixed(2) + "%";
-
-  /* Updated */
-  const upd = $("updated");
-  if (upd) upd.textContent = "Last update: " + nowLabel();
+  // APR + updated
+  $("apr").textContent = safe(apr).toFixed(2) + "%";
+  $("updated").textContent = "Last update: " + nowLabel();
 
   requestAnimationFrame(animate);
 }
 
-/* ===================== TIMERS ===================== */
-setInterval(loadAccount, ACCOUNT_POLL_MS);
-setInterval(loadCandleSnapshot, REST_SYNC_MS);
-setInterval(loadChartToday, CHART_SYNC_MS);
-setInterval(ensureChartBootstrapped, 1500);
+/* =========================================================
+   MODE RUNNER (LIVE vs REFRESH)
+========================================================= */
+let timers = [];
+function clearAllTimers() {
+  timers.forEach(t => clearInterval(t));
+  timers = [];
+}
+function closeWS() {
+  try { wsTrade?.close(); } catch {}
+  try { wsKline?.close(); } catch {}
+  wsTrade = null; wsKline = null;
+}
 
-/* ===================== BOOT ===================== */
-(async function boot() {
+async function bootstrapOnce() {
   refreshConnUI();
+  if (!hasInternet()) return;
 
-  // Load stored points for current address
+  // load persisted points for current address
   if (address) {
     loadStakePointsForAddress(address);
     loadRewardPointsForAddress(address);
   }
 
-  // Init charts (if canvases exist)
-  await initStakeChart();
-  await initRewardChart();
+  if (!stakeChart) initStakeChart();
+  rebuildRewardView(true);
 
-  // Snapshot + chart
   await loadCandleSnapshot();
   await loadChartToday();
-
-  // Account initial
   await loadAccount();
+}
 
-  // WS
+function startLiveLoop() {
+  if (!hasInternet()) return;
+
+  clearAllTimers();
+  timers.push(setInterval(loadAccount, ACCOUNT_POLL_MS));
+  timers.push(setInterval(loadCandleSnapshot, REST_SYNC_MS));
+  timers.push(setInterval(loadChartToday, CHART_SYNC_MS));
+  timers.push(setInterval(ensureChartBootstrapped, 1500));
+
   startTradeWS();
   startKlineWS();
+}
 
-  // UI loop
+function restartMode() {
+  applyModeUI();
+  refreshConnUI();
+
+  clearAllTimers();
+  closeWS();
+
+  chartBootstrappedToday = false;
+
+  bootstrapOnce().then(() => {
+    if (getMode() === "live") startLiveLoop();
+  });
+}
+
+/* ===================== BOOT ===================== */
+(function boot() {
+  restartMode();
   animate();
 })();
