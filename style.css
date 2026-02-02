@@ -807,3 +807,41 @@ body[data-theme="light"] .pro-pill{
 }
 .pro-dot{ opacity:.6; }
 .pro-meta{ opacity:.85; }
+
+/* ================= MOBILE: title always centered ================= */
+@media (max-width: 520px){
+
+  /* grid: lasciamo 3 colonne ma rendiamo il centro “indipendente” */
+  .header-grid{
+    position: relative;
+    grid-template-columns: 44px 1fr 44px; /* spazio fisso per menu e search btn */
+  }
+
+  .header-center{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(72vw, 380px);
+    text-align: center;
+    pointer-events: none; /* non blocca click su menu/search */
+  }
+
+  /* menu e search sempre cliccabili */
+  .header-left,
+  .header-right{
+    z-index: 2;
+  }
+
+  /* evita che l'input “spinga” tutto quando è aperto */
+  .search-wrap{
+    justify-content: flex-end;
+  }
+
+  /* l’input si apre verso sinistra senza spostare il titolo */
+  .search-wrap input{
+    width: 220px; /* puoi alzare/abbassare */
+    transform-origin: right center;
+  }
+}
+
