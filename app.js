@@ -1,5 +1,8 @@
 /* =========================================================
-   Injective • Portfolio — app.js (UI + Data + LIVE/REFRESH)
+   Injective • Portfolio — app.js
+   - Drawer + routing (WIP pages)
+   - Search elegant + auto collapse to lens
+   - Connection dot: Offline / Loading / Online (ping based)
 ========================================================= */
 
 /* ===================== CONFIG ===================== */
@@ -14,16 +17,22 @@ const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
 
-const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ (drop -> withdrawal point)
+const REWARD_WITHDRAW_THRESHOLD = 0.0002;
 const STORE_VER = 1;
 const CHUNK_SIZE = 220;
 
-const STAKE_PAD = 6; // requested
+const STAKE_PAD = 6;
 const REWARD_PAD = 1;
 
 const MIN_PX_PER_POINT_STAKE = 46;
 const MIN_PX_PER_POINT_REWARD = 56;
 const MAX_LABELS_VISIBLE = 80;
+
+/* connection / ping */
+const CONN_PING_MS = 2500;     // how often we verify “real online”
+const CONN_PING_TIMEOUT_MS = 1400;
+const CONN_FAILS_TO_OFFLINE = 2; // how many consecutive ping fails => offline
+const CONN_OKS_TO_ONLINE = 1;    // how many consecutive ok => online
 
 /* ===================== HELPERS ===================== */
 const $ = (id) => document.getElementById(id);
@@ -34,9 +43,16 @@ function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function nowTS() { return Date.now(); }
-function hasInternet() { return navigator.onLine === true; }
+function hasInternetFlag() { return navigator.onLine === true; }
 
-/* Inject tiny CSS for flash + safety (if not present) */
+function shortAddress(a, head = 6, tail = 6) {
+  const s = (a || "").trim();
+  if (!s) return "";
+  if (s.length <= head + tail + 3) return s;
+  return `${s.slice(0, head)}...${s.slice(-tail)}`;
+}
+
+/* Inject tiny CSS for flash */
 (function injectFlashCSS() {
   const id = "inj_flash_css";
   if (document.getElementById(id)) return;
@@ -62,14 +78,12 @@ function applyTheme() {
   document.body.dataset.theme = t;
   const icon = $("themeIcon");
   if (icon) icon.textContent = t === "light" ? "☀️" : "🌙";
-  const iconRow = $("themeIconRow");
-  if (iconRow) iconRow.textContent = t === "light" ? "☀️" : "🌙";
 }
 applyTheme();
 
 /* ===================== MODE (LIVE/REFRESH) ===================== */
 const MODE_KEY = "inj_mode";
-function getMode() { return localStorage.getItem(MODE_KEY) || "live"; } // "live" | "refresh"
+function getMode() { return localStorage.getItem(MODE_KEY) || "live"; }
 function setMode(m) { localStorage.setItem(MODE_KEY, m); applyModeUI(); restartMode(); }
 function applyModeUI() {
   const icon = $("liveIcon");
@@ -77,62 +91,120 @@ function applyModeUI() {
   const m = getMode();
   if (icon) icon.textContent = (m === "live") ? "📡" : "🔄";
   if (hint) hint.textContent = `Mode: ${(m === "live") ? "LIVE" : "REFRESH"}`;
-  const iconRow = $("liveIconRow");
-  if (iconRow) iconRow.textContent = (m === "live") ? "📡" : "🔄";
 }
 applyModeUI();
 
-/* ===================== CONNECTION UI (3-states) ===================== */
+/* ===================== CONNECTION UI (Offline/Loading/Online) ===================== */
 const statusDot = $("statusDot");
 const statusText = $("statusText");
-let loadingCount = 0;
 
-function setConnState(state) {
+/**
+ * States:
+ * - offline: no net flag OR ping fails repeatedly
+ * - loading: net flag ok but ping in progress / not yet confirmed ok
+ * - online: ping ok
+ */
+let connState = "offline";
+let connFailStreak = 0;
+let connOkStreak = 0;
+let connPingTimer = null;
+
+function setConnState(next) {
   if (!statusDot || !statusText) return;
+  if (next === connState) return;
+  connState = next;
 
-  statusDot.classList.remove("online", "offline", "loading");
-
-  if (state === "loading") {
-    statusDot.classList.add("loading");
-    statusText.textContent = "Loading";
-    return;
-  }
-
-  if (state === "online") {
-    statusDot.classList.add("online");
+  if (next === "online") {
     statusText.textContent = "Online";
-    return;
+    statusDot.style.background = "#22c55e";
+    statusDot.style.boxShadow = "0 0 14px rgba(34,197,94,.28)";
+  } else if (next === "loading") {
+    statusText.textContent = "Loading";
+    statusDot.style.background = "#f59e0b";
+    statusDot.style.boxShadow = "0 0 14px rgba(245,158,11,.26)";
+  } else {
+    statusText.textContent = "Offline";
+    statusDot.style.background = "#ef4444";
+    statusDot.style.boxShadow = "0 0 14px rgba(239,68,68,.22)";
   }
-
-  statusDot.classList.add("offline");
-  statusText.textContent = "Offline";
 }
 
-function refreshConnUI() {
-  if (!hasInternet()) {
+async function pingOnline() {
+  // If browser says offline -> offline immediately
+  if (!hasInternetFlag()) {
+    connFailStreak = 0;
+    connOkStreak = 0;
     setConnState("offline");
-    return;
+    return false;
   }
-  setConnState(loadingCount > 0 ? "loading" : "online");
+
+  // we are "potentially online" -> show loading until confirmed
+  if (connState !== "online") setConnState("loading");
+
+  // Ping a reliable endpoint (Binance time). If this fails, we are not “really online”
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), CONN_PING_TIMEOUT_MS);
+
+  try {
+    const res = await fetch("https://api.binance.com/api/v3/time", {
+      cache: "no-store",
+      signal: controller.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+
+    connFailStreak = 0;
+    connOkStreak += 1;
+
+    if (connOkStreak >= CONN_OKS_TO_ONLINE) {
+      setConnState("online");
+      return true;
+    }
+
+    setConnState("loading");
+    return false;
+  } catch {
+    clearTimeout(t);
+    connOkStreak = 0;
+    connFailStreak += 1;
+
+    if (connFailStreak >= CONN_FAILS_TO_OFFLINE) {
+      setConnState("offline");
+      return false;
+    }
+
+    setConnState("loading");
+    return false;
+  }
 }
 
-function beginLoading() {
-  loadingCount++;
-  refreshConnUI();
-}
-function endLoading() {
-  loadingCount = Math.max(0, loadingCount - 1);
-  refreshConnUI();
+function startConnMonitor() {
+  if (connPingTimer) clearInterval(connPingTimer);
+  connPingTimer = setInterval(pingOnline, CONN_PING_MS);
+  pingOnline();
 }
 
 window.addEventListener("online", () => {
-  refreshConnUI();
-  if (getMode() === "live") restartMode();
+  connFailStreak = 0;
+  connOkStreak = 0;
+  setConnState("loading");
+  pingOnline().then(() => {
+    if (getMode() === "live") restartMode();
+  });
 }, { passive: true });
 
-window.addEventListener("offline", refreshConnUI, { passive: true });
+window.addEventListener("offline", () => {
+  connFailStreak = 0;
+  connOkStreak = 0;
+  setConnState("offline");
+}, { passive: true });
 
-refreshConnUI();
+startConnMonitor();
+
+/* used everywhere */
+function hasInternet() {
+  return connState === "online";
+}
 
 /* ===================== SMOOTH DISPLAY ===================== */
 let settleStart = Date.now();
@@ -227,7 +299,7 @@ async function fetchJSON(url) {
 }
 
 /* =========================================================
-   UI: DRAWER MENU + BACKDROP + NAV
+   UI: DRAWER MENU + BACKDROP + NAV + ROUTING
 ========================================================= */
 const appRoot = $("appRoot");
 const menuBtn = $("menuBtn");
@@ -260,6 +332,17 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDrawer();
 }, { passive: true });
 
+function setActivePage(pageKey) {
+  const pages = ["home","market","dashboard","event","settings"];
+  pages.forEach(k => {
+    const el = document.getElementById(`page-${k}`);
+    if (!el) return;
+    const active = (k === pageKey);
+    el.classList.toggle("active", active);
+    el.setAttribute("aria-hidden", active ? "false" : "true");
+  });
+}
+
 drawerNav?.addEventListener("click", (e) => {
   const btn = e.target.closest(".nav-item");
   if (!btn) return;
@@ -267,11 +350,9 @@ drawerNav?.addEventListener("click", (e) => {
   [...drawerNav.querySelectorAll(".nav-item")].forEach(x => x.classList.remove("active"));
   btn.classList.add("active");
 
-  const targetId = btn.getAttribute("data-scroll");
-  if (targetId) {
-    const el = document.getElementById(targetId);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  const page = btn.getAttribute("data-page") || "dashboard";
+  setActivePage(page);
+
   closeDrawer();
 });
 
@@ -283,12 +364,10 @@ $("liveToggle")?.addEventListener("click", () => {
   setMode(getMode() === "live" ? "refresh" : "live");
 });
 
-/* Drawer action rows -> trigger toggles */
-$("themeToggleRow")?.addEventListener("click", () => $("themeToggle")?.click());
-$("liveToggleRow")?.addEventListener("click", () => $("liveToggle")?.click());
-
 /* =========================================================
-   UI: SEARCH (expand/collapse minimal)
+   UI: SEARCH (expand/collapse)
+   - click lens => expand + focus
+   - Enter or lens when expanded => commit address + collapse to lens
 ========================================================= */
 let address = localStorage.getItem("inj_address") || "";
 
@@ -297,19 +376,9 @@ const addressInput = $("addressInput");
 const searchBtn = $("searchBtn");
 const addressDisplay = $("addressDisplay");
 
-/* short address 6 + 6 */
-function shortAddr6x6(addr) {
-  const a = String(addr || "").trim();
-  if (!a) return "";
-  if (a.length <= 16) return a;
-  return `${a.slice(0, 6)}…${a.slice(-6)}`;
-}
-
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
-  const full = (addr || "").trim();
-  addressDisplay.textContent = full ? shortAddr6x6(full) : "";
-  addressDisplay.title = full || "";
+  addressDisplay.textContent = addr ? shortAddress(addr, 6, 6) : "";
 }
 setAddressDisplay(address);
 
@@ -317,15 +386,22 @@ function expandSearch() {
   if (!searchWrap || !addressInput) return;
   searchWrap.classList.add("expanded");
   addressInput.focus();
+  addressInput.value = address || addressInput.value || "";
 }
-function collapseSearch() {
-  if (!searchWrap) return;
+
+function resetSearchUI() {
+  if (!searchWrap || !addressInput) return;
   searchWrap.classList.remove("expanded");
+  addressInput.blur();
+  // keep value (optional) but input is hidden; leaving value is fine
 }
 
 function commitAddress(next) {
   const a = (next || "").trim();
-  if (!a) { collapseSearch(); return; }
+  if (!a) {
+    resetSearchUI();
+    return;
+  }
 
   address = a;
   localStorage.setItem("inj_address", address);
@@ -333,12 +409,12 @@ function commitAddress(next) {
 
   settleStart = Date.now();
 
-  // reset some state for new address
+  // reset state for new address
   lastRewardsSeenForWithdraw = null;
   lastStakeForType = null;
   lastRewardsForType = null;
 
-  // load persisted points for address
+  // load persisted points
   loadStakePointsForAddress(address);
   loadRewardPointsForAddress(address);
 
@@ -346,10 +422,11 @@ function commitAddress(next) {
   if (stakeChart) redrawStakeChart();
   if (rewardChart) rebuildRewardView(true);
 
-  beginLoading();
+  // fetch once immediately
   bootstrapOnce();
 
-  collapseSearch();
+  // ✅ After insert -> back to lens only
+  resetSearchUI();
 }
 
 if (addressInput) {
@@ -362,7 +439,7 @@ if (addressInput) {
       e.preventDefault();
       commitAddress(addressInput.value);
     } else if (e.key === "Escape") {
-      collapseSearch();
+      resetSearchUI();
     }
   });
 }
@@ -378,10 +455,10 @@ if (searchBtn) {
   });
 }
 
+// click outside to collapse
 document.addEventListener("click", (e) => {
   if (!searchWrap?.classList.contains("expanded")) return;
-  const inside = searchWrap.contains(e.target);
-  if (!inside) collapseSearch();
+  if (!searchWrap.contains(e.target)) resetSearchUI();
 }, { passive: true });
 
 /* =========================================================
@@ -619,7 +696,7 @@ function flash(el) {
    STAKE chart (persisted)
 ========================================================= */
 let stakeChart = null;
-let stakePoints = []; // {t,label,value,type}
+let stakePoints = [];
 
 const stakeLabelPlugin = makeClippedPointLabelPlugin({
   id: "stakeLabelPlugin",
@@ -631,6 +708,10 @@ function loadStakePointsForAddress(addr) {
     .filter(p => p && Number.isFinite(+p.value))
     .map(p => ({ t: safe(p.t) || 0, label: p.label || "", value: safe(p.value), type: p.type || "" }));
 }
+
+let lastRewardsSeenForWithdraw = null;
+let lastStakeForType = null;
+let lastRewardsForType = null;
 
 function inferStakeType(newStake, newRewards) {
   if (lastStakeForType == null) return "START";
@@ -653,7 +734,7 @@ function addStakePoint(addr, stakeValue, typeLabel) {
 
   if (stakePoints.length) {
     const prev = safe(stakePoints[stakePoints.length - 1].value);
-    if (s === prev) return; // only changes
+    if (s === prev) return;
   }
 
   const point = { t: nowTS(), label: nowLabel(), value: s, type: typeLabel || "" };
@@ -757,7 +838,7 @@ function redrawStakeChart() {
 }
 
 /* =========================================================
-   REWARD withdrawals chart (persisted) + filter + timeline + LIVE
+   REWARD withdrawals chart (persisted)
 ========================================================= */
 let rewardChart = null;
 let rewardPointsAll = [];
@@ -975,10 +1056,6 @@ rewardLiveBtn?.addEventListener("click", () => {
 /* =========================================================
    ACCOUNT (Injective LCD)
 ========================================================= */
-let lastRewardsSeenForWithdraw = null;
-let lastStakeForType = null;
-let lastRewardsForType = null;
-
 async function loadAccount() {
   if (!address || !hasInternet()) return;
 
@@ -996,11 +1073,13 @@ async function loadAccount() {
   rewardsInj = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   apr = safe(i.inflation) * 100;
 
+  // withdrawal point when rewards drop
   if (lastRewardsSeenForWithdraw == null) lastRewardsSeenForWithdraw = rewardsInj;
   const diff = safe(lastRewardsSeenForWithdraw) - safe(rewardsInj);
   if (diff > REWARD_WITHDRAW_THRESHOLD) addRewardWithdrawalPoint(address, diff);
   lastRewardsSeenForWithdraw = rewardsInj;
 
+  // stake point on every change + inferred type
   const type = inferStakeType(stakeInj, rewardsInj);
   addStakePoint(address, stakeInj, type || "");
 
@@ -1046,7 +1125,6 @@ async function loadCandleSnapshot() {
   if (root && root.classList.contains("loading") && tfReady.d) {
     root.classList.remove("loading");
     root.classList.add("ready");
-    refreshConnUI();
   }
 }
 
@@ -1374,7 +1452,6 @@ function startKlineWS() {
     if (root && root.classList.contains("loading") && tfReady.d) {
       root.classList.remove("loading");
       root.classList.add("ready");
-      refreshConnUI();
     }
   };
 }
@@ -1383,10 +1460,12 @@ function startKlineWS() {
    LOOP RENDER
 ========================================================= */
 function animate() {
+  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
+  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -1395,27 +1474,7 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "neutral");
-  if (sign !== lastChartSign) {
-    lastChartSign = sign;
-    applyPriceChartColorBySign(sign);
-
-    if (stakeChart) {
-      const ds = stakeChart.data.datasets[0];
-      if (sign === "up") { ds.borderColor = "#22c55e"; ds.backgroundColor = "rgba(34,197,94,.18)"; }
-      else if (sign === "down") { ds.borderColor = "#ef4444"; ds.backgroundColor = "rgba(239,68,68,.16)"; }
-      else { ds.borderColor = "#3b82f6"; ds.backgroundColor = "rgba(59,130,246,.12)"; }
-      stakeChart.update("none");
-    }
-    if (rewardChart) {
-      const ds = rewardChart.data.datasets[0];
-      if (sign === "up") { ds.borderColor = "#22c55e"; ds.backgroundColor = "rgba(34,197,94,.14)"; }
-      else if (sign === "down") { ds.borderColor = "#ef4444"; ds.backgroundColor = "rgba(239,68,68,.12)"; }
-      else { ds.borderColor = "#3b82f6"; ds.backgroundColor = "rgba(59,130,246,.12)"; }
-      rewardChart.update("none");
-    }
-  }
-
+  // bars gradients
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
@@ -1427,6 +1486,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
+  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -1470,11 +1530,13 @@ function animate() {
     mMinEl.textContent = "--"; $("monthOpen").textContent = "--"; mMaxEl.textContent = "--";
   }
 
+  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
   $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
 
+  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
@@ -1485,6 +1547,7 @@ function animate() {
   $("stakeLine").style.left = stakePct + "%";
   $("stakePercent").textContent = stakePct.toFixed(1) + "%";
 
+  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
@@ -1498,6 +1561,7 @@ function animate() {
   $("rewardPercent").textContent = rp.toFixed(1) + "%";
   $("rewardMax").textContent = maxR.toFixed(1);
 
+  // APR + updated
   $("apr").textContent = safe(apr).toFixed(2) + "%";
   $("updated").textContent = "Last update: " + nowLabel();
 
@@ -1519,25 +1583,19 @@ function closeWS() {
 }
 
 async function bootstrapOnce() {
-  refreshConnUI();
   if (!hasInternet()) return;
 
-  beginLoading();
-  try {
-    if (address) {
-      loadStakePointsForAddress(address);
-      loadRewardPointsForAddress(address);
-    }
-
-    if (!stakeChart) initStakeChart();
-    rebuildRewardView(true);
-
-    await loadCandleSnapshot();
-    await loadChartToday();
-    await loadAccount();
-  } finally {
-    endLoading();
+  if (address) {
+    loadStakePointsForAddress(address);
+    loadRewardPointsForAddress(address);
   }
+
+  if (!stakeChart) initStakeChart();
+  rebuildRewardView(true);
+
+  await loadCandleSnapshot();
+  await loadChartToday();
+  await loadAccount();
 }
 
 function startLiveLoop() {
@@ -1555,7 +1613,6 @@ function startLiveLoop() {
 
 function restartMode() {
   applyModeUI();
-  refreshConnUI();
 
   clearAllTimers();
   closeWS();
@@ -1569,6 +1626,8 @@ function restartMode() {
 
 /* ===================== BOOT ===================== */
 (function boot() {
+  // default page: dashboard
+  setActivePage("dashboard");
   restartMode();
   animate();
 })();
