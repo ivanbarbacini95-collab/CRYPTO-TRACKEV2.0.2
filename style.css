@@ -168,11 +168,11 @@ body[data-theme="light"] .icon-btn{ color:rgba(15,23,42,.92); }
 
 /* input overlay (desktop/tablet) */
 .search-wrap input{
-  position:absolute;
-  right:52px;
-  top:50%;
-  transform:translateY(-50%) scaleX(0);
-  transform-origin:right center;
+  ...
+  width: var(--search-w, 320px);
+  max-width: var(--search-w, 320px);
+  ...
+}
 
   width:320px;
   max-width:min(70vw, 360px);
