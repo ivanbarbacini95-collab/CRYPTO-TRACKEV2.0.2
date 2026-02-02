@@ -289,27 +289,28 @@ body[data-theme="light"] .status-text{ color:rgba(15,23,42,.70); }
 .pct.down{color:#ef4444;}
 .pct.flat{color:#9ca3af;}
 
-/* ================= NET WORTH CARD (NEW) ================= */
+/* ================= NET WORTH CARD (PRO LAYOUT) ================= */
 .networth-card{
   position:relative;
   overflow:hidden;
-  min-height: 230px;            /* ✅ più alta */
-  padding: 1.1rem 1rem 1.0rem;  /* ✅ più respiro */
+  padding: 1.05rem 1rem 1rem;
+  min-height: 320px;
 }
 
+/* chart background */
 .networth-bg{
   position:absolute;
-  inset:-10px;
-  opacity:.55;
+  inset: 0;
+  opacity: .55;
   pointer-events:none;
-  filter:saturate(1.1);
+  filter: saturate(1.1);
 }
-
 .networth-bg canvas{
   width:100% !important;
   height:100% !important;
 }
 
+/* foreground */
 .networth-content{
   position:relative;
   z-index:2;
@@ -318,19 +319,65 @@ body[data-theme="light"] .status-text{ color:rgba(15,23,42,.70); }
   flex-direction:column;
 }
 
-.networth-top{
+/* top-left block (not centered anymore) */
+.networth-toprow{
   display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:.75rem;
+  justify-content:flex-start;
+  align-items:flex-start;
+}
+.networth-usdblock{
+  display:flex;
+  flex-direction:column;
+  gap:.25rem;
+  padding: .15rem .25rem;
 }
 
+/* ✅ price left top, with more separation from chart via shadow + padding */
+.networth-usd{
+  font-size: 2.05rem;
+  font-weight: 950;
+  letter-spacing: .01em;
+  line-height: 1.05;
+  text-shadow: 0 14px 55px rgba(0,0,0,.45);
+}
+body[data-theme="light"] .networth-usd{
+  text-shadow: none;
+}
+
+.networth-pnl{
+  font-size: .92rem;
+  font-weight: 950;
+  opacity: .95;
+}
+.networth-pnl.good{ color:#22c55e; }
+.networth-pnl.bad{ color:#ef4444; }
+.networth-pnl.flat{ color:#9ca3af; }
+
+/* ✅ extra air between chart and text */
+.networth-air{
+  height: 110px; /* aumenta/diminuisci se vuoi più/meno stacco */
+}
+
+/* bottom section */
+.networth-bottom{
+  margin-top:auto;
+  display:flex;
+  flex-direction:column;
+  gap:.65rem;
+}
+
+/* timeframe under the chart */
+.tf-under{
+  justify-content:center;
+  width:100%;
+}
+
+/* keep your tf button styles but ensure it wraps well */
 .tf-switch{
   display:flex;
   gap:.35rem;
-  flex-wrap:nowrap;
+  flex-wrap:wrap;
 }
-
 .tf-btn{
   height:28px;
   padding:0 .55rem;
@@ -360,58 +407,118 @@ body[data-theme="light"] .tf-btn.active{
   color: rgba(15,23,42,.92);
 }
 
-/* ✅ $ grande in alto centrato */
-.networth-main{
-  margin-top: .85rem;
+/* divider line */
+.nw-divider{
+  height:1px;
+  width:100%;
+  background: rgba(255,255,255,.10);
+}
+body[data-theme="light"] .nw-divider{
+  background: rgba(15,23,42,.10);
+}
+
+/* coin area */
+.nw-coins{
   display:flex;
-  justify-content:center;
+  flex-direction:column;
+  gap:.55rem;
+}
+
+/* mini-card for total INJ */
+.nw-mini{
+  display:flex;
   align-items:center;
-  min-height:64px;
+  justify-content:space-between;
+  gap:.75rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  padding: .65rem .7rem;
 }
-.networth-usd{
-  font-size:2.15rem;
-  font-weight:950;
-  letter-spacing:.01em;
-  text-align:center;
-  text-shadow:0 12px 40px rgba(0,0,0,.35);
-}
-body[data-theme="light"] .networth-usd{
-  text-shadow:none;
+body[data-theme="light"] .nw-mini{
+  border-color: rgba(15,23,42,.10);
+  background: rgba(15,23,42,.05);
 }
 
-/* ✅ PnL sotto centrato, più piccolo */
-.networth-pnl{
-  margin-top:.35rem;
-  font-size:.92rem;
-  font-weight:950;
-  text-align:center;
-  opacity:.95;
-}
-.networth-pnl.good{ color:#22c55e; }
-.networth-pnl.bad{ color:#ef4444; }
-.networth-pnl.flat{ color:#9ca3af; }
-
-/* ✅ INJ in basso a sinistra */
-.networth-foot{
-  margin-top:auto;
+.nw-mini-left{
   display:flex;
-  align-items:flex-end;
+  align-items:center;
+  gap:.55rem;
 }
-.networth-foot-left{
-  justify-content:flex-start;
-  padding-top: .9rem;
+.nw-mini-meta{
+  display:flex;
+  flex-direction:column;
+  gap:.12rem;
 }
-.networth-inj{
-  font-size:.95rem;
-  font-weight:950;
-  opacity:.95;
+.nw-mini-title{
+  font-weight: 950;
+  letter-spacing: .03em;
+}
+.nw-mini-sub{
+  font-size: .74rem;
+  opacity: .70;
 }
 
-/* Mobile extra breathing */
+.nw-mini-qty{
+  font-weight: 950;
+  font-size: .98rem;
+}
+
+/* row style (ticker | qty + small price) */
+.nw-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  padding: .15rem .15rem;
+}
+.nw-row-left{
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+}
+.nw-coin-logo{
+  width: 22px;
+  height: 22px;
+  display:grid;
+  place-items:center;
+  border-radius: 8px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
+  font-size: .9rem;
+}
+body[data-theme="light"] .nw-coin-logo{
+  background: rgba(15,23,42,.06);
+  border-color: rgba(15,23,42,.10);
+}
+
+.nw-coin-ticker{
+  font-weight: 950;
+  letter-spacing: .03em;
+}
+
+.nw-row-right{
+  display:flex;
+  align-items:baseline;
+  gap:.35rem;
+}
+.nw-coin-qty{
+  font-weight: 950;
+  opacity: .95;
+}
+.nw-row-sep{
+  opacity: .55;
+}
+.nw-coin-price{
+  font-size: .80rem;
+  opacity: .75;
+}
+
+/* mobile tweaks */
 @media (max-width:520px){
-  .networth-card{ min-height: 245px; }
-  .networth-usd{ font-size:2.05rem; }
-  .networth-pnl{ font-size:.90rem; }
+  .networth-card{ min-height: 335px; }
+  .networth-air{ height: 105px; }
+  .networth-usd{ font-size: 1.95rem; }
 }
 
 /* ================= BARS ================= */
