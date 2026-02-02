@@ -1,6 +1,5 @@
 /* =========================================================
    Injective • Portfolio — app.js (UI + Data + LIVE/REFRESH)
-   Compatible with your latest HTML structure.
 ========================================================= */
 
 /* ===================== CONFIG ===================== */
@@ -63,6 +62,8 @@ function applyTheme() {
   document.body.dataset.theme = t;
   const icon = $("themeIcon");
   if (icon) icon.textContent = t === "light" ? "☀️" : "🌙";
+  const iconRow = $("themeIconRow");
+  if (iconRow) iconRow.textContent = t === "light" ? "☀️" : "🌙";
 }
 applyTheme();
 
@@ -76,18 +77,52 @@ function applyModeUI() {
   const m = getMode();
   if (icon) icon.textContent = (m === "live") ? "📡" : "🔄";
   if (hint) hint.textContent = `Mode: ${(m === "live") ? "LIVE" : "REFRESH"}`;
+  const iconRow = $("liveIconRow");
+  if (iconRow) iconRow.textContent = (m === "live") ? "📡" : "🔄";
 }
 applyModeUI();
 
-/* ===================== CONNECTION UI ===================== */
+/* ===================== CONNECTION UI (3-states) ===================== */
 const statusDot = $("statusDot");
 const statusText = $("statusText");
+let loadingCount = 0;
+
+function setConnState(state) {
+  if (!statusDot || !statusText) return;
+
+  statusDot.classList.remove("online", "offline", "loading");
+
+  if (state === "loading") {
+    statusDot.classList.add("loading");
+    statusText.textContent = "Loading";
+    return;
+  }
+
+  if (state === "online") {
+    statusDot.classList.add("online");
+    statusText.textContent = "Online";
+    return;
+  }
+
+  statusDot.classList.add("offline");
+  statusText.textContent = "Offline";
+}
 
 function refreshConnUI() {
-  if (!statusDot || !statusText) return;
-  const ok = hasInternet();
-  statusText.textContent = ok ? "Online" : "Offline";
-  statusDot.style.background = ok ? "#22c55e" : "#ef4444";
+  if (!hasInternet()) {
+    setConnState("offline");
+    return;
+  }
+  setConnState(loadingCount > 0 ? "loading" : "online");
+}
+
+function beginLoading() {
+  loadingCount++;
+  refreshConnUI();
+}
+function endLoading() {
+  loadingCount = Math.max(0, loadingCount - 1);
+  refreshConnUI();
 }
 
 window.addEventListener("online", () => {
@@ -228,8 +263,15 @@ document.addEventListener("keydown", (e) => {
 drawerNav?.addEventListener("click", (e) => {
   const btn = e.target.closest(".nav-item");
   if (!btn) return;
+
   [...drawerNav.querySelectorAll(".nav-item")].forEach(x => x.classList.remove("active"));
   btn.classList.add("active");
+
+  const targetId = btn.getAttribute("data-scroll");
+  if (targetId) {
+    const el = document.getElementById(targetId);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   closeDrawer();
 });
 
@@ -241,6 +283,10 @@ $("liveToggle")?.addEventListener("click", () => {
   setMode(getMode() === "live" ? "refresh" : "live");
 });
 
+/* Drawer action rows -> trigger toggles */
+$("themeToggleRow")?.addEventListener("click", () => $("themeToggle")?.click());
+$("liveToggleRow")?.addEventListener("click", () => $("liveToggle")?.click());
+
 /* =========================================================
    UI: SEARCH (expand/collapse minimal)
 ========================================================= */
@@ -251,9 +297,19 @@ const addressInput = $("addressInput");
 const searchBtn = $("searchBtn");
 const addressDisplay = $("addressDisplay");
 
+/* short address 6 + 6 */
+function shortAddr6x6(addr) {
+  const a = String(addr || "").trim();
+  if (!a) return "";
+  if (a.length <= 16) return a;
+  return `${a.slice(0, 6)}…${a.slice(-6)}`;
+}
+
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
-  addressDisplay.textContent = addr ? addr : "";
+  const full = (addr || "").trim();
+  addressDisplay.textContent = full ? shortAddr6x6(full) : "";
+  addressDisplay.title = full || "";
 }
 setAddressDisplay(address);
 
@@ -277,22 +333,28 @@ function commitAddress(next) {
 
   settleStart = Date.now();
 
+  // reset some state for new address
   lastRewardsSeenForWithdraw = null;
   lastStakeForType = null;
   lastRewardsForType = null;
 
+  // load persisted points for address
   loadStakePointsForAddress(address);
   loadRewardPointsForAddress(address);
 
+  // rebuild charts
   if (stakeChart) redrawStakeChart();
   if (rewardChart) rebuildRewardView(true);
 
+  beginLoading();
   bootstrapOnce();
+
   collapseSearch();
 }
 
 if (addressInput) {
   addressInput.value = address || "";
+
   addressInput.addEventListener("focus", expandSearch, { passive: true });
 
   addressInput.addEventListener("keydown", (e) => {
@@ -984,6 +1046,7 @@ async function loadCandleSnapshot() {
   if (root && root.classList.contains("loading") && tfReady.d) {
     root.classList.remove("loading");
     root.classList.add("ready");
+    refreshConnUI();
   }
 }
 
@@ -1000,29 +1063,6 @@ let hoverActive = false;
 let hoverIndex = null;
 let pinnedIndex = null;
 let lastChartSign = "neutral";
-
-/* ✅ tooltip elements */
-const chartOverlay = $("chartOverlay");
-const chartTooltip = $("chartTooltip");
-const chartTimeEl = $("chartTime");
-const chartPriceEl = $("chartPrice");
-let hideTooltipTimer = null;
-
-function showChartTooltip() {
-  if (!chartTooltip || !chartOverlay) return;
-  if (hideTooltipTimer) { clearTimeout(hideTooltipTimer); hideTooltipTimer = null; }
-  chartOverlay.setAttribute("aria-hidden", "false");
-  chartTooltip.classList.add("show");
-}
-function hideChartTooltip(delayMs = 220) {
-  if (!chartTooltip || !chartOverlay) return;
-  if (hideTooltipTimer) clearTimeout(hideTooltipTimer);
-  hideTooltipTimer = setTimeout(() => {
-    chartTooltip.classList.remove("show");
-    chartOverlay.setAttribute("aria-hidden", "true");
-    hideTooltipTimer = null;
-  }, delayMs);
-}
 
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
@@ -1062,36 +1102,24 @@ function applyPriceChartColorBySign(sign) {
   priceChart.update("none");
 }
 
-/* ✅ update tooltip box (time + price) */
 function updatePriceOverlayFromPinned() {
-  if (!priceChart || !chartTimeEl || !chartPriceEl) return;
+  const chartEl = $("chartPrice");
+  if (!chartEl || !priceChart) return;
 
   if (pinnedIndex == null) {
-    chartTimeEl.textContent = "--:--";
-    chartPriceEl.textContent = "--";
+    chartEl.textContent = "--";
     return;
   }
-
   const ds = priceChart.data.datasets?.[0]?.data || [];
   const lbs = priceChart.data.labels || [];
-  if (!ds.length || !lbs.length) {
-    chartTimeEl.textContent = "--:--";
-    chartPriceEl.textContent = "--";
-    return;
-  }
+  if (!ds.length || !lbs.length) { chartEl.textContent = "--"; return; }
 
   const idx = clamp(Math.round(+pinnedIndex), 0, ds.length - 1);
   const price = safe(ds[idx]);
   const label = lbs[idx];
+  if (!Number.isFinite(price) || !label) { chartEl.textContent = "--"; return; }
 
-  if (!Number.isFinite(price) || !label) {
-    chartTimeEl.textContent = "--:--";
-    chartPriceEl.textContent = "--";
-    return;
-  }
-
-  chartTimeEl.textContent = String(label);
-  chartPriceEl.textContent = `$${price.toFixed(4)}`;
+  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
 }
 
 async function fetchKlines1mRange(startTime, endTime) {
@@ -1174,9 +1202,7 @@ function setupPriceChartInteractions() {
     hoverIndex = idx;
     pinnedIndex = idx;
 
-    showChartTooltip();
     updatePriceOverlayFromPinned();
-
     priceChart.update("none");
   };
 
@@ -1184,10 +1210,7 @@ function setupPriceChartInteractions() {
     hoverActive = false;
     hoverIndex = null;
     pinnedIndex = null;
-
     updatePriceOverlayFromPinned();
-    hideChartTooltip(220);
-
     priceChart.update("none");
   };
 
@@ -1236,9 +1259,6 @@ function updateChartFrom1mKline(k) {
     if (idx >= 0) {
       priceChart.data.datasets[0].data[idx] = close;
       priceChart.update("none");
-
-      /* se stai hoverando l’ultimo punto, aggiorna tooltip */
-      if (pinnedIndex != null) updatePriceOverlayFromPinned();
     }
     return;
   }
@@ -1252,8 +1272,6 @@ function updateChartFrom1mKline(k) {
   while (priceChart.data.datasets[0].data.length > DAY_MINUTES) priceChart.data.datasets[0].data.shift();
 
   priceChart.update("none");
-
-  if (pinnedIndex != null) updatePriceOverlayFromPinned();
 }
 
 async function ensureChartBootstrapped() {
@@ -1356,6 +1374,7 @@ function startKlineWS() {
     if (root && root.classList.contains("loading") && tfReady.d) {
       root.classList.remove("loading");
       root.classList.add("ready");
+      refreshConnUI();
     }
   };
 }
@@ -1364,12 +1383,10 @@ function startKlineWS() {
    LOOP RENDER
 ========================================================= */
 function animate() {
-  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -1399,7 +1416,6 @@ function animate() {
     }
   }
 
-  // Bars gradients
   const dUp   = "linear-gradient(to right, rgba(34,197,94,.95), rgba(16,185,129,.85))";
   const dDown = "linear-gradient(to left,  rgba(239,68,68,.95), rgba(248,113,113,.85))";
   const wUp   = "linear-gradient(to right, rgba(59,130,246,.95), rgba(99,102,241,.82))";
@@ -1411,7 +1427,6 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -1455,13 +1470,11 @@ function animate() {
     mMinEl.textContent = "--"; $("monthOpen").textContent = "--"; mMaxEl.textContent = "--";
   }
 
-  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
   $("availableUsd").textContent = `≈ $${(displayed.available * displayed.price).toFixed(2)}`;
 
-  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
@@ -1472,7 +1485,6 @@ function animate() {
   $("stakeLine").style.left = stakePct + "%";
   $("stakePercent").textContent = stakePct.toFixed(1) + "%";
 
-  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
@@ -1486,7 +1498,6 @@ function animate() {
   $("rewardPercent").textContent = rp.toFixed(1) + "%";
   $("rewardMax").textContent = maxR.toFixed(1);
 
-  // APR + updated
   $("apr").textContent = safe(apr).toFixed(2) + "%";
   $("updated").textContent = "Last update: " + nowLabel();
 
@@ -1511,17 +1522,22 @@ async function bootstrapOnce() {
   refreshConnUI();
   if (!hasInternet()) return;
 
-  if (address) {
-    loadStakePointsForAddress(address);
-    loadRewardPointsForAddress(address);
+  beginLoading();
+  try {
+    if (address) {
+      loadStakePointsForAddress(address);
+      loadRewardPointsForAddress(address);
+    }
+
+    if (!stakeChart) initStakeChart();
+    rebuildRewardView(true);
+
+    await loadCandleSnapshot();
+    await loadChartToday();
+    await loadAccount();
+  } finally {
+    endLoading();
   }
-
-  if (!stakeChart) initStakeChart();
-  rebuildRewardView(true);
-
-  await loadCandleSnapshot();
-  await loadChartToday();
-  await loadAccount();
 }
 
 function startLiveLoop() {
