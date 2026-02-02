@@ -808,40 +808,60 @@ body[data-theme="light"] .pro-pill{
 .pro-dot{ opacity:.6; }
 .pro-meta{ opacity:.85; }
 
-/* ================= MOBILE: title always centered ================= */
+/* ================= MOBILE: header layering fix ================= */
 @media (max-width: 520px){
 
-  /* grid: lasciamo 3 colonne ma rendiamo il centro “indipendente” */
   .header-grid{
     position: relative;
-    grid-template-columns: 44px 1fr 44px; /* spazio fisso per menu e search btn */
+    grid-template-columns: 44px 1fr 44px;
+    align-items: center;
+    min-height: 64px; /* spazio reale per evitare overlap */
   }
 
+  /* TITLE: sempre centrato e sopra */
   .header-center{
     position: absolute;
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: min(72vw, 380px);
+    width: min(70vw, 340px);
     text-align: center;
-    pointer-events: none; /* non blocca click su menu/search */
+    z-index: 1;
+    pointer-events: none; /* non blocca menu/search */
   }
 
-  /* menu e search sempre cliccabili */
+  /* MENU + SEARCH sopra al titolo come layer */
   .header-left,
   .header-right{
-    z-index: 2;
+    z-index: 3;
   }
 
-  /* evita che l'input “spinga” tutto quando è aperto */
-  .search-wrap{
+  /* SEARCH: resta a destra */
+  .header-right{
+    display: flex;
     justify-content: flex-end;
   }
 
-  /* l’input si apre verso sinistra senza spostare il titolo */
+  /* wrapper non invade il centro */
+  .search-wrap{
+    position: relative;
+    justify-content: flex-end;
+  }
+
+  /* INPUT: si apre SOLO verso sinistra e sotto il titolo */
   .search-wrap input{
-    width: 220px; /* puoi alzare/abbassare */
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px); /* sotto la lente */
+    width: 220px;
     transform-origin: right center;
+  }
+
+  /* quando aperta */
+  .search-wrap.open input{
+    transform: scaleX(1);
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 
