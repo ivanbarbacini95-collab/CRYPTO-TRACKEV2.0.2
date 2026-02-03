@@ -1,8 +1,11 @@
 // /api/point.js
-import { put, list } from "@vercel/blob";
+import { put, head } from "@vercel/blob";
 
 const MAX_BODY_BYTES = 220_000;
+
+// punti massimi per serie (stake/wd/nw) + eventi
 const MAX_POINTS = 2400;
+const MAX_EVENTS = 1200;
 
 function json(res, code, obj) {
   res.statusCode = code;
@@ -23,44 +26,77 @@ function clampArray(arr, max) {
   return arr.slice(arr.length - max);
 }
 
+function toNum(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toStr(x, maxLen = 200) {
+  const s = String(x ?? "");
+  return s.length > maxLen ? s.slice(0, maxLen) : s;
+}
+
+function sanitizeEvent(e) {
+  const ts = toNum(e?.ts) || Date.now();
+  const kind = toStr(e?.kind || e?.type || "event", 32); // es: withdraw | unstake | reward | compound | price
+  const title = toStr(e?.title || kind, 64);
+  const detail = toStr(e?.detail || e?.desc || "", 220);
+
+  // value può essere INJ, USD o % (dipende da kind). il client decide come mostrarlo.
+  const value = toNum(e?.value);
+
+  // dir: "up" | "down" | "" (per eventi prezzo)
+  const dir = toStr(e?.dir || "", 8);
+
+  // status: "pending" | "done" | "fail" (per eventi tx)
+  const status = toStr(e?.status || "done", 12);
+
+  // id stabile: se il client lo passa lo usiamo; altrimenti generiamo uno deterministico-ish
+  const id = toStr(e?.id || `${ts}:${kind}:${title}`.replace(/\s+/g, "_"), 120);
+
+  return { id, ts, kind, title, detail, value, dir, status };
+}
+
 function sanitizePayload(p) {
+  // ✅ mantengo v:2 per compatibilità, ma aggiungo "events"
   const out = {
     v: 2,
     t: Date.now(),
     stake: { labels: [], data: [], moves: [], types: [] },
     wd: { labels: [], values: [], times: [] },
-    nw: { times: [], usd: [], inj: [] }, // ✅ net worth series
+    nw: { times: [], usd: [], inj: [] },
+    events: [], // ✅ NEW
   };
 
   if (p?.stake) {
-    out.stake.labels = clampArray(p.stake.labels, MAX_POINTS).map(String);
-    out.stake.data   = clampArray(p.stake.data,   MAX_POINTS).map(Number);
-    out.stake.moves  = clampArray(p.stake.moves,  MAX_POINTS).map(Number);
-    out.stake.types  = clampArray(p.stake.types,  MAX_POINTS).map(String);
+    out.stake.labels = clampArray(p.stake.labels, MAX_POINTS).map((x) => toStr(x, 48));
+    out.stake.data = clampArray(p.stake.data, MAX_POINTS).map(toNum);
+    out.stake.moves = clampArray(p.stake.moves, MAX_POINTS).map(toNum);
+    out.stake.types = clampArray(p.stake.types, MAX_POINTS).map((x) => toStr(x, 40));
 
     const n = out.stake.data.length;
     out.stake.labels = out.stake.labels.slice(-n);
-    out.stake.moves  = out.stake.moves.slice(-n);
-    out.stake.types  = out.stake.types.slice(-n);
+    out.stake.moves = out.stake.moves.slice(-n);
+    out.stake.types = out.stake.types.slice(-n);
     while (out.stake.moves.length < n) out.stake.moves.unshift(0);
     while (out.stake.types.length < n) out.stake.types.unshift("Stake update");
   }
 
   if (p?.wd) {
-    out.wd.labels = clampArray(p.wd.labels, MAX_POINTS).map(String);
-    out.wd.values = clampArray(p.wd.values, MAX_POINTS).map(Number);
-    out.wd.times  = clampArray(p.wd.times,  MAX_POINTS).map(Number);
+    out.wd.labels = clampArray(p.wd.labels, MAX_POINTS).map((x) => toStr(x, 48));
+    out.wd.values = clampArray(p.wd.values, MAX_POINTS).map(toNum);
+    out.wd.times = clampArray(p.wd.times, MAX_POINTS).map(toNum);
 
     const n = out.wd.values.length;
     out.wd.labels = out.wd.labels.slice(-n);
-    out.wd.times  = out.wd.times.slice(-n);
+    out.wd.times = out.wd.times.slice(-n);
     while (out.wd.times.length < n) out.wd.times.unshift(0);
   }
 
   if (p?.nw) {
-    out.nw.times = clampArray(p.nw.times, MAX_POINTS).map(Number);
-    out.nw.usd   = clampArray(p.nw.usd,   MAX_POINTS).map(Number);
-    out.nw.inj   = clampArray(p.nw.inj,   MAX_POINTS).map(Number);
+    out.nw.times = clampArray(p.nw.times, MAX_POINTS).map(toNum);
+    out.nw.usd = clampArray(p.nw.usd, MAX_POINTS).map(toNum);
+    out.nw.inj = clampArray(p.nw.inj, MAX_POINTS).map(toNum);
 
     const n = out.nw.times.length;
     out.nw.usd = out.nw.usd.slice(-n);
@@ -69,18 +105,34 @@ function sanitizePayload(p) {
     while (out.nw.inj.length < n) out.nw.inj.unshift(0);
   }
 
+  // ✅ EVENTS (dedup + clamp)
+  if (Array.isArray(p?.events)) {
+    const cleaned = p.events.map(sanitizeEvent);
+
+    // dedup per id (tengo l’ultima occorrenza)
+    const map = new Map();
+    for (const ev of cleaned) map.set(ev.id, ev);
+
+    // ordino per ts crescente
+    const arr = Array.from(map.values()).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+    out.events = clampArray(arr, MAX_EVENTS);
+  }
+
   out.t = Date.now();
   return out;
 }
 
-async function readLatestBlobText(prefix) {
-  const r = await list({ prefix, limit: 1 });
-  const item = r?.blobs?.[0];
-  if (!item?.url) return null;
-
-  const resp = await fetch(item.url, { cache: "no-store" });
-  if (!resp.ok) return null;
-  return await resp.text();
+async function readBlobTextByPathname(pathname) {
+  try {
+    // ✅ Lettura stabile: head(pathname) -> url certo -> fetch contenuto
+    const meta = await head(pathname);
+    const resp = await fetch(meta.url, { cache: "no-store" });
+    if (!resp.ok) return null;
+    return await resp.text();
+  } catch {
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
@@ -101,37 +153,52 @@ export default async function handler(req, res) {
     const pathname = `${prefix}data.json`;
 
     if (req.method === "GET") {
-      const txt = await readLatestBlobText(prefix);
+      const txt = await readBlobTextByPathname(pathname);
       if (!txt) return json(res, 200, { ok: true, data: null });
+
       let data = null;
-      try { data = JSON.parse(txt); } catch { data = null; }
+      try {
+        data = JSON.parse(txt);
+      } catch {
+        data = null;
+      }
       return json(res, 200, { ok: true, data });
     }
 
     if (req.method === "POST") {
       let raw = "";
+      let tooLarge = false;
+
       await new Promise((resolve) => {
         req.on("data", (chunk) => {
           raw += chunk;
           if (raw.length > MAX_BODY_BYTES) {
+            tooLarge = true;
             raw = "";
-            req.destroy();
+            try { req.destroy(); } catch {}
           }
         });
         req.on("end", resolve);
       });
 
-      if (!raw) return json(res, 400, { ok: false, error: "Empty/Too large body" });
+      if (tooLarge) return json(res, 413, { ok: false, error: "Body too large" });
+      if (!raw) return json(res, 400, { ok: false, error: "Empty body" });
 
       let parsed = null;
-      try { parsed = JSON.parse(raw); } catch { return json(res, 400, { ok: false, error: "Invalid JSON" }); }
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return json(res, 400, { ok: false, error: "Invalid JSON" });
+      }
 
       const clean = sanitizePayload(parsed);
 
+      // ✅ FIX Cloud Sync: allowOverwrite deve essere true, altrimenti dal 2° salvataggio fallisce
       const blob = await put(pathname, JSON.stringify(clean), {
         access: "public",
         contentType: "application/json",
         addRandomSuffix: false,
+        allowOverwrite: true,
       });
 
       return json(res, 200, { ok: true, url: blob?.url || null, t: clean.t });
