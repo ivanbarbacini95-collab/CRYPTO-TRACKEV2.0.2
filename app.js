@@ -1,8 +1,15 @@
-/* ================= CONFIG ================= */
-const APP_VERSION = "2.0.2";
+/* ================= INJ PORTFOLIO • app.js =================
+   - Per-address persistence (stake / rewards / net worth / events)
+   - Net Worth: LIVE (2 min scrolling window) + fixed TF (1D/1W/1M/1Y/ALL) unlock as data grows
+   - Horizontal pan/zoom on all charts (when plugin available)
+   - Expand button inside each chart card -> fullscreen interactive view
+   - Pull-to-refresh on mobile (top spinner)
+   - Event page (not “coming soon”): table of detected events (stake/reward/price)
+   - Validator mini-card under Net Worth: shows validator + status dot (green/amber/red)
+============================================================= */
 
+/* ================= CONFIG ================= */
 const INITIAL_SETTLE_TIME = 4200;
-let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
 const REST_SYNC_MS = 60000;
@@ -13,146 +20,143 @@ const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
 
-/* persistence */
+/* persistence versions */
 const STAKE_LOCAL_VER = 2;
-/* ✅ non resettare più ad ogni refresh: mantieni punti anche se ricarichi pagina */
-const RESET_STAKE_FROM_NOW_ON_BOOT = false;
-
 const REWARD_WD_LOCAL_VER = 2;
-const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
+const NW_LOCAL_VER = 2;       // bumped (added LIVE + unlock + scale pref)
+const EVENTS_LOCAL_VER = 1;
 
-/* NET WORTH persistence */
-const NW_LOCAL_VER = 2; // bumped: include tf + scale + live
-const NW_MAX_POINTS = 4800;
-
-/* NET WORTH live window */
-const NW_LIVE_WINDOW_MS = 5 * 60_000; // ✅ LIVE = 5min (manteniamo 5 min)
+/* NET WORTH density + live window */
+const NW_MAX_POINTS = 8000;
+const NW_POINT_MIN_MS = 5_000;
+const NW_POINT_MIN_USD_DELTA = 0.25;
+const NW_LIVE_WINDOW_MS = 2 * 60 * 1000; // ✅ LIVE window = 2 minutes
 
 /* REFRESH mode staging */
 const REFRESH_RED_MS = 220;
-let refreshLoaded = false;
-let refreshLoading = false;
 
-/* ✅ Status dot "mode loading" (switch / data loading) */
-let modeLoading = false;
-
-/* Injective logo (stable PNG) */
+/* External assets */
 const INJ_LOGO_PNG =
-  "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/nativeinjective/info/logo.png";
+  "https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png";
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
+const q = (sel, root = document) => root.querySelector(sel);
+const qa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
 
 function pad2(n) { return String(n).padStart(2, "0"); }
-function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
-function fmtDDMM(ms) { const d = new Date(ms); return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}`; }
+function fmtHHMM(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function fmtDateShort(ms) {
+  const d = new Date(ms);
+  return d.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit" });
+}
 function nowLabel() { return new Date().toLocaleTimeString(); }
-function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
-function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
-function setHTML(id, html){ const el = $(id); if (el) el.innerHTML = html; }
 
-function isLight(){
-  return document.body.dataset.theme === "light";
+function shortAddr(a) {
+  const s = String(a || "").trim();
+  return s.length > 18 ? (s.slice(0, 10) + "…" + s.slice(-6)) : s;
+}
+function normalizeAddr(a) {
+  const s = String(a || "").trim();
+  if (!/^inj[a-z0-9]{20,80}$/i.test(s)) return "";
+  return s;
+}
+function setText(idOrEl, txt) {
+  const el = typeof idOrEl === "string" ? $(idOrEl) : idOrEl;
+  if (el) el.textContent = txt;
+}
+function setHTML(idOrEl, html) {
+  const el = typeof idOrEl === "string" ? $(idOrEl) : idOrEl;
+  if (el) el.innerHTML = html;
 }
 
-function fmtSmart(v){
+function fmtSmart(v) {
   v = safe(v);
   const av = Math.abs(v);
-  if (av >= 10000) return v.toFixed(0);
-  if (av >= 1000) return v.toFixed(1);
-  if (av >= 100) return v.toFixed(2);
-  if (av >= 10) return v.toFixed(3);
-  if (av >= 1) return v.toFixed(4);
+  if (av >= 1000) return v.toFixed(0);
+  if (av >= 100) return v.toFixed(1);
+  if (av >= 10) return v.toFixed(2);
+  if (av >= 1) return v.toFixed(3);
+  if (av >= 0.1) return v.toFixed(4);
   return v.toFixed(6);
 }
 
-/* ================= SMOOTH DISPLAY ================= */
-function scrollSpeed() {
-  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
-  const base = 0.08;
-  const maxExtra = 0.80;
-  return base + (t * t) * maxExtra;
+/* ================= DIGIT COLOR ANIMATION ================= */
+function baseDigitColor() {
+  return (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
 }
-function tick(cur, tgt) {
-  if (!Number.isFinite(tgt)) return cur;
-  return cur + (tgt - cur) * scrollSpeed();
-}
-
-/* ================= COLORED DIGITS (same style as price) ================= */
 function colorNumber(el, n, o, d) {
   if (!el) return;
   n = safe(n); o = safe(o);
   const ns = n.toFixed(d), os = o.toFixed(d);
   if (ns === os) { el.textContent = ns; return; }
-
-  const baseCol = isLight() ? "#0f172a" : "#f9fafb";
-  const upCol = "#22c55e";
-  const dnCol = "#ef4444";
-
+  const baseCol = baseDigitColor();
   el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i] ? (n > o ? upCol : dnCol) : baseCol;
+    const col = c !== os[i]
+      ? (n > o ? "#22c55e" : "#ef4444")
+      : baseCol;
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
 }
 
-function colorMoney(el, n, o, decimals = 2){
+function colorMoney(el, n, o, decimals = 2) {
   if (!el) return;
   n = safe(n); o = safe(o);
   const ns = n.toFixed(decimals);
   const os = o.toFixed(decimals);
   if (ns === os) { el.textContent = `$${ns}`; return; }
 
-  const baseCol = isLight() ? "#0f172a" : "#f9fafb";
+  const baseCol = baseDigitColor();
   const upCol = "#22c55e";
   const dnCol = "#ef4444";
   const dir = (n > o) ? "up" : "down";
 
   const out = [`<span style="color:${baseCol}">$</span>`];
-  for (let i = 0; i < ns.length; i++){
+  for (let i = 0; i < ns.length; i++) {
     const c = ns[i];
     const oc = os[i];
     const col = (c !== oc) ? (dir === "up" ? upCol : dnCol) : baseCol;
     out.push(`<span style="color:${col}">${c}</span>`);
   }
-  el.innerHTML = out.join("");
-}
-
-function colorPercent(el, n, o, decimals = 2){
-  if (!el) return;
-  n = safe(n); o = safe(o);
-  const ns = n.toFixed(decimals);
-  const os = o.toFixed(decimals);
-  if (ns === os) { el.textContent = `${ns}%`; return; }
-
-  const baseCol = isLight() ? "#0f172a" : "#f9fafb";
-  const upCol = "#22c55e";
-  const dnCol = "#ef4444";
-  const dir = (n > o) ? "up" : "down";
-
-  const out = [];
-  for (let i = 0; i < ns.length; i++){
-    const c = ns[i];
-    const oc = os[i];
-    const col = (c !== oc) ? (dir === "up" ? upCol : dnCol) : baseCol;
-    out.push(`<span style="color:${col}">${c}</span>`);
-  }
-  out.push(`<span style="color:${baseCol}">%</span>`);
   el.innerHTML = out.join("");
 }
 
 /* ================= GLOBAL ERROR GUARDS ================= */
-function setStatusError(msg){
-  const statusText = $("statusText");
-  const statusDot = $("statusDot");
-  if (statusText) statusText.textContent = msg || "Error";
-  if (statusDot) statusDot.style.background = "#ef4444";
+function statusEls() {
+  const dot =
+    $("statusDot") ||
+    q(".status-dot") ||
+    q(".status-pill .dot") ||
+    q("#connectionStatus .status-dot") ||
+    null;
+
+  const txt =
+    $("statusText") ||
+    q(".status-text") ||
+    q(".status-pill .txt") ||
+    q("#connectionStatus .status-text") ||
+    null;
+
+  return { dot, txt };
 }
+
+function setStatusError(msg) {
+  const { dot, txt } = statusEls();
+  if (txt) txt.textContent = msg || "Error";
+  if (dot) dot.style.background = "#ef4444";
+}
+
 window.addEventListener("error", (e) => {
   setStatusError("JS Error");
   console.error("JS Error:", e?.error || e);
 });
+
 window.addEventListener("unhandledrejection", (e) => {
   setStatusError("Promise Error");
   console.error("Promise Error:", e?.reason || e);
@@ -160,140 +164,118 @@ window.addEventListener("unhandledrejection", (e) => {
 
 /* ================= THEME / MODE (storage) ================= */
 const THEME_KEY = "inj_theme";
-const MODE_KEY  = "inj_mode"; // live | refresh
-let theme   = localStorage.getItem(THEME_KEY) || "dark";
+const MODE_KEY = "inj_mode"; // live | refresh
+
+let theme = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
+/* axis colors for charts */
 function axisGridColor() {
-  return isLight() ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
+  return (document.body.dataset.theme === "light")
+    ? "rgba(15,23,42,.14)"
+    : "rgba(249,250,251,.10)";
 }
 function axisTickColor() {
-  return isLight() ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
+  return (document.body.dataset.theme === "light")
+    ? "rgba(15,23,42,.65)"
+    : "rgba(249,250,251,.60)";
 }
 
-function applyTheme(t){
+function applyTheme(t) {
   theme = (t === "light") ? "light" : "dark";
   document.body.dataset.theme = theme;
   localStorage.setItem(THEME_KEY, theme);
-  const themeIcon = $("themeIcon");
+
+  const themeIcon = $("themeIcon") || q("#themeToggle span");
   if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
+
   refreshChartsTheme();
 }
 applyTheme(theme);
 
-/* ================= CHARTJS ZOOM REGISTER (NO CRASH) ================= */
+/* ================= Chart.js Zoom register (safe) ================= */
 let ZOOM_OK = false;
-function tryRegisterZoom(){
-  try{
+function tryRegisterZoom() {
+  try {
     if (!window.Chart) return false;
     const plug = window.ChartZoom || window["chartjs-plugin-zoom"];
     if (plug) Chart.register(plug);
     const has = !!(Chart?.registry?.plugins?.get && Chart.registry.plugins.get("zoom"));
     return has;
-  } catch (e){
+  } catch (e) {
     console.warn("Zoom plugin not available:", e);
     return false;
   }
 }
 ZOOM_OK = tryRegisterZoom();
 
-/* ================= CLOUD (footer + points) ================= */
+/* ================= CLOUD (local-only counter) ================= */
 const CLOUD_VER = 1;
 const CLOUD_KEY = `inj_cloud_v${CLOUD_VER}`;
 let cloudPts = 0;
 let cloudLastSync = 0;
 
-function cloudLoad(){
-  try{
+function cloudLoad() {
+  try {
     const raw = localStorage.getItem(CLOUD_KEY);
     if (!raw) return;
     const obj = JSON.parse(raw);
-    if (!obj) return;
-    cloudPts = safe(obj.pts);
-    cloudLastSync = safe(obj.lastSync);
+    cloudPts = safe(obj?.pts);
+    cloudLastSync = safe(obj?.lastSync);
   } catch {}
 }
-function cloudSave(){
-  try{
-    localStorage.setItem(CLOUD_KEY, JSON.stringify({ v: CLOUD_VER, pts: cloudPts, lastSync: cloudLastSync }));
+function cloudSave() {
+  try {
+    localStorage.setItem(CLOUD_KEY, JSON.stringify({
+      v: CLOUD_VER,
+      pts: cloudPts,
+      lastSync: cloudLastSync
+    }));
     return true;
   } catch {
     return false;
   }
 }
-
-function hasInternet() { return navigator.onLine === true; }
-
-function cloudSetState(state){
-  const root = $("appRoot");
-  const st = $("cloudStatus");
-  if (!root || !st) return;
-
-  root.classList.remove("cloud-synced","cloud-saving","cloud-error");
-
-  if (state === "saving"){
-    root.classList.add("cloud-saving");
-    st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
-    return;
-  }
-  if (state === "error"){
-    root.classList.add("cloud-error");
-    st.textContent = "Cloud: Error";
-    return;
-  }
-  root.classList.add("cloud-synced");
-  st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
+function cloudRender() {
+  const cloudStatus = $("cloudStatus");
+  const cloudHistory = $("cloudHistory");
+  const drawerCloud = $("drawerCloud") || q("[data-drawer-cloud]");
+  if (cloudHistory) cloudHistory.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
+  if (drawerCloud) drawerCloud.textContent = `Cloud Sync · ${Math.max(0, Math.floor(cloudPts))} pts`;
+  if (cloudStatus) cloudStatus.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
 }
-
-function cloudRender(){
-  const hist = $("cloudHistory");
-  if (hist) hist.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
-}
-
-function cloudBump(points = 1){
+function cloudBump(points = 1) {
   cloudPts = safe(cloudPts) + safe(points);
   cloudLastSync = Date.now();
-
-  cloudSetState("saving");
-  const ok = cloudSave();
+  cloudSave();
   cloudRender();
-
-  if (!ok) {
-    cloudSetState("error");
-    return;
-  }
-
-  setTimeout(() => {
-    cloudSetState("synced");
-    cloudRender();
-  }, 450);
 }
 
 /* ================= CONNECTION UI ================= */
-const statusDot  = $("statusDot");
-const statusText = $("statusText");
+let settleStart = Date.now();
+let refreshLoaded = false;
+let refreshLoading = false;
+let modeLoading = false;
 
 let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
 
-function liveReady(){
+function hasInternet() { return navigator.onLine === true; }
+
+function liveReady() {
   const socketsOk = wsTradeOnline && wsKlineOnline;
   const accountOk = !address || accountOnline;
   return socketsOk && accountOk;
 }
 
-let lastConnPaint = 0;
 function refreshConnUI() {
-  const now = Date.now();
-  if (now - lastConnPaint < 140) return; // throttle
-  lastConnPaint = now;
-
-  if (!statusDot || !statusText) return;
+  const { dot, txt } = statusEls();
+  if (!dot || !txt) return;
 
   if (!hasInternet()) {
-    statusText.textContent = "Offline";
-    statusDot.style.background = "#ef4444";
+    txt.textContent = "Offline";
+    dot.style.background = "#ef4444";
     return;
   }
 
@@ -304,17 +286,16 @@ function refreshConnUI() {
     (liveMode && !liveReady());
 
   if (loadingNow) {
-    statusText.textContent = "Loading...";
-    statusDot.style.background = "#f59e0b";
+    txt.textContent = "Loading...";
+    dot.style.background = "#f59e0b";
     return;
   }
 
-  statusText.textContent = "Online";
-  statusDot.style.background = "#22c55e";
+  txt.textContent = "Online";
+  dot.style.background = "#22c55e";
 }
 
-/* ================= UI READY FAILSAFE ================= */
-function setUIReady(force=false){
+function setUIReady(force = false) {
   const root = $("appRoot");
   if (!root) return;
   if (root.classList.contains("ready")) return;
@@ -329,9 +310,21 @@ async function fetchJSON(url) {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
-  } catch (e) {
+  } catch {
     return null;
   }
+}
+
+/* ================= SMOOTH DISPLAY ================= */
+function scrollSpeed() {
+  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
+  const base = 0.08;
+  const maxExtra = 0.80;
+  return base + (t * t) * maxExtra;
+}
+function tick(cur, tgt) {
+  if (!Number.isFinite(tgt)) return cur;
+  return cur + (tgt - cur) * scrollSpeed();
 }
 
 /* ================= PERF ================= */
@@ -342,7 +335,8 @@ function pctChange(price, open) {
   return Number.isFinite(v) ? v : 0;
 }
 function updatePerf(arrowId, pctId, v) {
-  const arrow = $(arrowId), pct = $(pctId);
+  const arrow = $(arrowId) || q(`#${arrowId}`) || null;
+  const pct = $(pctId) || q(`#${pctId}`) || null;
   if (!arrow || !pct) return;
 
   if (v > 0) { arrow.textContent = "▲"; arrow.className = "arrow up"; pct.className = "pct up"; }
@@ -352,7 +346,7 @@ function updatePerf(arrowId, pctId, v) {
   pct.textContent = Math.abs(v).toFixed(2) + "%";
 }
 
-/* ================= BAR RENDER ================= */
+/* ================= BAR RENDER (INJ price bars) ================= */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   if (!bar || !line) return;
 
@@ -386,24 +380,18 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   }
 }
 
-/* ================= FLASH EXTREMES ================= */
-const lastExtremes = { d:{low:null,high:null}, w:{low:null,high:null}, m:{low:null,high:null} };
-function flash(el) {
-  if (!el) return;
-  el.classList.remove("flash-yellow");
-  void el.offsetWidth;
-  el.classList.add("flash-yellow");
-}
-
 /* ================= HEADER SEARCH UI ================= */
-const searchWrap = $("searchWrap");
-const searchBtn = $("searchBtn");
-const addressInput = $("addressInput");
-const addressDisplay = $("addressDisplay");
-const menuBtn = $("menuBtn");
+const searchWrap = $("searchWrap") || q(".search-wrap");
+const searchBtn = $("searchBtn") || q("#searchBtn") || q(".search-wrap .icon-btn");
+const addressInput = $("addressInput") || q("#addressInput");
+const addressDisplay = $("addressDisplay") || q("#addressDisplay") || q(".address-display");
+const menuBtn = $("menuBtn") || q("#menuBtn");
+const modeHint = $("modeHint") || q("#modeHint");
+const liveIcon = $("liveIcon") || q("#liveIcon");
 
 let address = localStorage.getItem("inj_address") || "";
-let pendingAddress = address || "";
+address = normalizeAddr(address) || "";
+let pendingAddress = "";
 
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
@@ -425,21 +413,24 @@ function closeSearch() {
   addressInput?.blur();
 }
 
-if (addressInput) addressInput.value = "";
-
 if (searchBtn) {
   searchBtn.addEventListener("click", (e) => {
-    e?.preventDefault?.();
-    e?.stopPropagation?.();
-    if (!searchWrap.classList.contains("open")) openSearch();
+    e.preventDefault();
+    e.stopPropagation();
+    if (!searchWrap?.classList.contains("open")) openSearch();
     else addressInput?.focus();
   }, { passive: false });
 }
 
 if (addressInput) {
+  // ✅ after commit we keep displayed wallet, but input stays empty for next searches
+  addressInput.value = "";
+
   addressInput.addEventListener("focus", () => openSearch(), { passive: true });
 
-  addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
+  addressInput.addEventListener("input", (e) => {
+    pendingAddress = String(e.target.value || "").trim();
+  }, { passive: true });
 
   addressInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -455,7 +446,6 @@ if (addressInput) {
   });
 }
 
-/* ✅ non rompere la lente: chiudi solo se clicchi DAVVERO fuori */
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
@@ -468,81 +458,141 @@ const drawer = $("drawer");
 const drawerNav = $("drawerNav");
 const themeToggle = $("themeToggle");
 const liveToggle = $("liveToggle");
-const liveIcon = $("liveIcon");
-const modeHint = $("modeHint");
 
 let isDrawerOpen = false;
 
-function openDrawer(){
+function openDrawer() {
   isDrawerOpen = true;
   document.body.classList.add("drawer-open");
   drawer?.setAttribute("aria-hidden", "false");
   backdrop?.setAttribute("aria-hidden", "false");
 }
-function closeDrawer(){
+function closeDrawer() {
   isDrawerOpen = false;
   document.body.classList.remove("drawer-open");
   drawer?.setAttribute("aria-hidden", "true");
   backdrop?.setAttribute("aria-hidden", "true");
 }
-function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
+function toggleDrawer() { isDrawerOpen ? closeDrawer() : openDrawer(); }
 
 menuBtn?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  e?.stopPropagation?.();
+  e.preventDefault();
+  e.stopPropagation();
   toggleDrawer();
 }, { passive: false });
 
-backdrop?.addEventListener("click", () => closeDrawer(), { passive:true });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+backdrop?.addEventListener("click", () => closeDrawer(), { passive: true });
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDrawer();
+});
 
 themeToggle?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
+  e.preventDefault();
   applyTheme(theme === "dark" ? "light" : "dark");
-}, { passive:false });
+}, { passive: false });
 
-/* ================= COMING SOON overlay ================= */
-const comingSoon = $("comingSoon");
-const comingTitle = $("comingTitle");
-const comingSub = $("comingSub");
-const comingClose = $("comingClose");
+/* ================= PAGES (Dashboard / Event) ================= */
+const cardsWrapper = q(".cards-wrapper");
+let eventView = $("eventView");
 
-function pageLabel(key){
-  if (key === "home") return "HOME";
-  if (key === "market") return "MARKET";
-  if (key === "event") return "EVENT";
-  if (key === "settings") return "SETTINGS";
-  return "PAGE";
-}
-function openComingSoon(pageKey){
-  if (!comingSoon) return;
-  if (comingTitle) comingTitle.textContent = `COMING SOON 🚀`;
-  if (comingSub) comingSub.textContent = `${pageLabel(pageKey)} is coming soon.`;
-  comingSoon.classList.add("show");
-  comingSoon.setAttribute("aria-hidden", "false");
-}
-function closeComingSoon(){
-  if (!comingSoon) return;
-  comingSoon.classList.remove("show");
-  comingSoon.setAttribute("aria-hidden", "true");
-}
-comingClose?.addEventListener("click", (e) => { e?.preventDefault?.(); closeComingSoon(); }, { passive:false });
-comingSoon?.addEventListener("click", (e) => { if (e.target === comingSoon) closeComingSoon(); }, { passive:true });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeComingSoon(); });
+function ensureEventView() {
+  if (eventView) return eventView;
 
-function setActivePage(pageKey){
+  const root = $("appRoot") || q(".container");
+  if (!root) return null;
+
+  eventView = document.createElement("div");
+  eventView.id = "eventView";
+  eventView.style.display = "none";
+  eventView.style.marginTop = "0.6rem";
+
+  eventView.innerHTML = `
+    <div class="card">
+      <div class="label" style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">
+        <span>Events</span>
+        <button id="eventClearBtn" class="mini-btn" type="button" style="height:28px;">CLEAR</button>
+      </div>
+      <div style="margin-top:.75rem; overflow:auto; -webkit-overflow-scrolling: touch;">
+        <table id="eventTable" style="width:100%; border-collapse:collapse; min-width:520px;">
+          <thead>
+            <tr>
+              <th style="text-align:left; font-size:.78rem; opacity:.75; padding:.45rem .35rem;">Event</th>
+              <th style="text-align:left; font-size:.78rem; opacity:.75; padding:.45rem .35rem;">Date</th>
+              <th style="text-align:right; font-size:.78rem; opacity:.75; padding:.45rem .35rem;">Move</th>
+              <th style="text-align:right; font-size:.78rem; opacity:.75; padding:.45rem .35rem;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="eventTbody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:.65rem; font-size:.78rem; opacity:.7;">
+        Auto-detected from staking/rewards/price changes (per wallet).
+      </div>
+    </div>
+  `;
+
+  // place under header, above cards
+  const header = q(".header", root);
+  if (header && header.nextSibling) {
+    header.parentNode.insertBefore(eventView, header.nextSibling);
+  } else {
+    root.appendChild(eventView);
+  }
+
+  $("eventClearBtn")?.addEventListener("click", () => {
+    clearEvents();
+    renderEventsTable();
+  });
+
+  return eventView;
+}
+
+function showPage(pageKey) {
+  const ev = ensureEventView();
+
+  // nav active
   const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
+
+  if (pageKey === "event") {
+    if (cardsWrapper) cardsWrapper.style.display = "none";
+    if (ev) ev.style.display = "";
+    closeDrawer();
+    renderEventsTable();
+    return;
+  }
+
+  // default dashboard
+  if (ev) ev.style.display = "none";
+  if (cardsWrapper) cardsWrapper.style.display = "";
+  closeDrawer();
 }
+
 drawerNav?.addEventListener("click", (e) => {
   const btn = e.target?.closest(".nav-item");
   if (!btn) return;
   const page = btn.dataset.page || "dashboard";
-  setActivePage(page);
+
+  // dashboard + event real pages, others fallback to coming soon overlay if exists
+  if (page === "dashboard" || page === "event") {
+    showPage(page);
+    return;
+  }
+
+  // Coming soon overlay (if present)
+  const comingSoon = $("comingSoon");
+  const comingTitle = $("comingTitle");
+  const comingSub = $("comingSub");
+
+  if (comingSoon) {
+    if (comingTitle) comingTitle.textContent = "COMING SOON 🚀";
+    if (comingSub) comingSub.textContent = `${String(page).toUpperCase()} is coming soon.`;
+    comingSoon.classList.add("show");
+    comingSoon.setAttribute("aria-hidden", "false");
+  }
   closeDrawer();
-  if (page !== "dashboard") openComingSoon(page);
-  else closeComingSoon();
-}, { passive:true });
+}, { passive: true });
 
 /* ================= MODE SWITCH ================= */
 let accountPollTimer = null;
@@ -550,13 +600,13 @@ let restSyncTimer = null;
 let chartSyncTimer = null;
 let ensureChartTimer = null;
 
-function stopAllTimers(){
+function stopAllTimers() {
   if (accountPollTimer) { clearInterval(accountPollTimer); accountPollTimer = null; }
   if (restSyncTimer) { clearInterval(restSyncTimer); restSyncTimer = null; }
   if (chartSyncTimer) { clearInterval(chartSyncTimer); chartSyncTimer = null; }
   if (ensureChartTimer) { clearInterval(ensureChartTimer); ensureChartTimer = null; }
 }
-function startAllTimers(){
+function startAllTimers() {
   stopAllTimers();
   accountPollTimer = setInterval(loadAccount, ACCOUNT_POLL_MS);
   restSyncTimer = setInterval(loadCandleSnapshot, REST_SYNC_MS);
@@ -564,31 +614,36 @@ function startAllTimers(){
   ensureChartTimer = setInterval(ensureChartBootstrapped, 1500);
 }
 
-async function refreshLoadAllOnce(){
+async function refreshLoadAllOnce() {
   if (refreshLoading) return;
-  if (!hasInternet()) { refreshLoaded = false; refreshConnUI(); cloudSetState("synced"); return; }
+
+  if (!hasInternet()) {
+    refreshLoaded = false;
+    refreshConnUI();
+    return;
+  }
 
   refreshLoading = true;
   refreshLoaded = false;
   modeLoading = true;
   refreshConnUI();
 
-  try{
+  try {
     await loadCandleSnapshot(true);
     await loadChartToday(true);
     if (address) await loadAccount(true);
+
     refreshLoaded = true;
     modeLoading = false;
     refreshConnUI();
     setUIReady(true);
-    cloudSetState("synced");
   } finally {
     refreshLoading = false;
     refreshConnUI();
   }
 }
 
-function setMode(isLive){
+function setMode(isLive) {
   liveMode = !!isLive;
   localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
 
@@ -628,18 +683,23 @@ function setMode(isLive){
 }
 
 liveToggle?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
+  e.preventDefault();
   setMode(!liveMode);
-}, { passive:false });
+}, { passive: false });
 
 /* ================= STATE ================= */
-let targetPrice = safe(localStorage.getItem("inj_last_price") || 0);
+let targetPrice = 0;
 let displayed = {
-  price: targetPrice || 0,
+  price: 0,
   available: 0,
   stake: 0,
   rewards: 0,
   apr: 0,
+
+  availableUsd: 0,
+  stakeUsd: 0,
+  rewardsUsd: 0,
+
   netWorthUsd: 0
 };
 
@@ -652,51 +712,13 @@ const candle = {
 };
 const tfReady = { d: false, w: false, m: false };
 
-/* ================= ACCOUNT CACHE (avoid 0 after refresh) ================= */
-const ACCT_CACHE_VER = 1;
-function acctCacheKey(addr){
-  const a = (addr || "").trim();
-  return a ? `inj_acct_cache_v${ACCT_CACHE_VER}_${a}` : null;
-}
-function acctCacheLoad(){
-  const key = acctCacheKey(address);
-  if (!key) return;
-  try{
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    if (!obj) return;
-    availableInj = safe(obj.available);
-    stakeInj     = safe(obj.stake);
-    rewardsInj   = safe(obj.rewards);
-    apr          = safe(obj.apr);
-    displayed.available = availableInj;
-    displayed.stake     = stakeInj;
-    displayed.rewards   = rewardsInj;
-    displayed.apr       = apr;
-  } catch {}
-}
-function acctCacheSave(){
-  const key = acctCacheKey(address);
-  if (!key) return;
-  try{
-    localStorage.setItem(key, JSON.stringify({
-      t: Date.now(),
-      available: safe(availableInj),
-      stake: safe(stakeInj),
-      rewards: safe(rewardsInj),
-      apr: safe(apr),
-    }));
-  } catch {}
-}
-
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
 let wsKline = null;
 let tradeRetryTimer = null;
 let klineRetryTimer = null;
 
-function stopAllSockets(){
+function stopAllSockets() {
   try { wsTrade?.close(); } catch {}
   try { wsKline?.close(); } catch {}
   wsTrade = null; wsKline = null;
@@ -704,11 +726,8 @@ function stopAllSockets(){
   if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
 }
 
-function clearTradeRetry() {
-  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
-}
 function scheduleTradeRetry() {
-  clearTradeRetry();
+  if (tradeRetryTimer) clearTimeout(tradeRetryTimer);
   tradeRetryTimer = setTimeout(() => { if (liveMode) startTradeWS(); }, 1200);
 }
 
@@ -726,7 +745,6 @@ function startTradeWS() {
     wsTradeOnline = true;
     modeLoading = address ? !accountOnline : false;
     refreshConnUI();
-    clearTradeRetry();
   };
   wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); scheduleTradeRetry(); };
   wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
@@ -738,7 +756,6 @@ function startTradeWS() {
     if (!p) return;
 
     targetPrice = p;
-    try { localStorage.setItem("inj_last_price", String(p)); } catch {}
 
     if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
     if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
@@ -746,11 +763,8 @@ function startTradeWS() {
   };
 }
 
-function clearKlineRetry() {
-  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
-}
 function scheduleKlineRetry() {
-  clearKlineRetry();
+  if (klineRetryTimer) clearTimeout(klineRetryTimer);
   klineRetryTimer = setTimeout(() => { if (liveMode) startKlineWS(); }, 1200);
 }
 
@@ -763,7 +777,7 @@ function applyKline(intervalKey, k) {
     candle[intervalKey].t = t || candle[intervalKey].t;
     candle[intervalKey].open = o;
     candle[intervalKey].high = h;
-    candle[intervalKey].low  = l;
+    candle[intervalKey].low = l;
     if (!tfReady[intervalKey]) {
       tfReady[intervalKey] = true;
       settleStart = Date.now();
@@ -792,12 +806,11 @@ function startKlineWS() {
     wsKlineOnline = true;
     modeLoading = address ? !accountOnline : false;
     refreshConnUI();
-    clearKlineRetry();
   };
   wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
   wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
 
-  wsKline.onmessage = async (e) => {
+  wsKline.onmessage = (e) => {
     let payload;
     try { payload = JSON.parse(e.data); } catch { return; }
     const data = payload?.data;
@@ -819,11 +832,93 @@ function startKlineWS() {
 }
 
 /* ================= ACCOUNT (Injective LCD) ================= */
-async function loadAccount(isRefresh=false) {
+let validatorAddress = "";
+let validatorMoniker = "";
+let validatorCache = new Map(); // addr -> moniker
+
+async function fetchValidatorMoniker(valAddr) {
+  const a = String(valAddr || "").trim();
+  if (!a) return "";
+  if (validatorCache.has(a)) return validatorCache.get(a) || "";
+  const base = "https://lcd.injective.network";
+  const v = await fetchJSON(`${base}/cosmos/staking/v1beta1/validators/${a}`);
+  const mon = v?.validator?.description?.moniker || shortAddr(a);
+  validatorCache.set(a, mon);
+  return mon;
+}
+
+function ensureValidatorMiniCard() {
+  const nwCard = $("netWorthCard") || q(".networth-card");
+  if (!nwCard) return null;
+
+  let wrap = q("#nwValidatorMini", nwCard);
+  if (wrap) return wrap;
+
+  // place under networth foot
+  const foot = q(".networth-foot", nwCard) || nwCard;
+
+  wrap = document.createElement("div");
+  wrap.id = "nwValidatorMini";
+  wrap.className = "nw-mini nw-mini-single";
+  wrap.style.marginTop = "10px";
+
+  wrap.innerHTML = `
+    <div class="nw-mini-left">
+      <span class="nw-coin-logo" style="background: rgba(245,158,11,.14);">⛓️</span>
+      <div class="nw-mini-meta">
+        <div class="nw-mini-title" id="nwValidatorName">Validator</div>
+        <div class="nw-mini-sub" id="nwValidatorSub">—</div>
+      </div>
+    </div>
+    <div class="nw-mini-right" style="display:flex;align-items:center;gap:.55rem;">
+      <span id="nwValidatorDot" style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
+      <span id="nwValidatorState" style="font-weight:900; font-size:.85rem; opacity:.9;">Loading</span>
+    </div>
+  `;
+
+  foot.appendChild(wrap);
+  return wrap;
+}
+
+function setValidatorState(state) {
+  ensureValidatorMiniCard();
+  const dot = $("nwValidatorDot");
+  const st = $("nwValidatorState");
+  const sub = $("nwValidatorSub");
+
+  if (!dot || !st) return;
+
+  if (!hasInternet()) {
+    dot.style.background = "#ef4444";
+    st.textContent = "Offline";
+    if (sub && validatorMoniker) sub.textContent = validatorMoniker;
+    return;
+  }
+
+  if (state === "loading") {
+    dot.style.background = "#f59e0b";
+    st.textContent = "Loading";
+    if (sub && validatorMoniker) sub.textContent = validatorMoniker;
+    return;
+  }
+
+  if (state === "ok") {
+    dot.style.background = "#22c55e";
+    st.textContent = "Active";
+    if (sub && validatorMoniker) sub.textContent = validatorMoniker;
+    return;
+  }
+
+  dot.style.background = "#9ca3af";
+  st.textContent = "—";
+}
+
+async function loadAccount(isRefresh = false) {
   if (!isRefresh && !liveMode) return;
 
   if (!address || !hasInternet()) {
     accountOnline = false;
+    setValidatorState("loading");
     refreshConnUI();
     return;
   }
@@ -838,6 +933,7 @@ async function loadAccount(isRefresh=false) {
 
   if (!b || !s || !r || !i) {
     accountOnline = false;
+    setValidatorState("loading");
     refreshConnUI();
     return;
   }
@@ -849,26 +945,37 @@ async function loadAccount(isRefresh=false) {
   const bal = b.balances?.find(x => x.denom === "inj");
   availableInj = safe(bal?.amount) / 1e18;
 
-  stakeInj = (s.delegation_responses || []).reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
+  const delegations = (s.delegation_responses || []);
+  stakeInj = delegations.reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
+
+  // ✅ validator detection
+  const vAddr = delegations?.[0]?.delegation?.validator_address || "";
+  if (vAddr && vAddr !== validatorAddress) {
+    validatorAddress = vAddr;
+    setValidatorState("loading");
+    validatorMoniker = await fetchValidatorMoniker(vAddr);
+    setText("nwValidatorName", "Validator");
+    setValidatorState("ok");
+  } else {
+    setValidatorState(liveMode ? (liveReady() ? "ok" : "loading") : (refreshLoaded ? "ok" : "loading"));
+  }
 
   const newRewards = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   rewardsInj = newRewards;
 
   apr = safe(i.inflation) * 100;
 
-  acctCacheSave();
-
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
 
-  /* ✅ NET WORTH: record point once account updates */
-  recordNetWorthPoint(true);
+  // ✅ net worth point is per address and persistent
+  recordNetWorthPoint();
 
   setUIReady(true);
 }
 
 /* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
-async function loadCandleSnapshot(isRefresh=false) {
+async function loadCandleSnapshot(isRefresh = false) {
   if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
 
@@ -882,21 +989,21 @@ async function loadCandleSnapshot(isRefresh=false) {
     candle.d.t = safe(d[0][0]);
     candle.d.open = safe(d[0][1]);
     candle.d.high = safe(d[0][2]);
-    candle.d.low  = safe(d[0][3]);
+    candle.d.low = safe(d[0][3]);
     if (candle.d.open && candle.d.high && candle.d.low) tfReady.d = true;
   }
   if (Array.isArray(w) && w[0]) {
     candle.w.t = safe(w[0][0]);
     candle.w.open = safe(w[0][1]);
     candle.w.high = safe(w[0][2]);
-    candle.w.low  = safe(w[0][3]);
+    candle.w.low = safe(w[0][3]);
     if (candle.w.open && candle.w.high && candle.w.low) tfReady.w = true;
   }
   if (Array.isArray(m) && m[0]) {
     candle.m.t = safe(m[0][0]);
     candle.m.open = safe(m[0][1]);
     candle.m.high = safe(m[0][2]);
-    candle.m.low  = safe(m[0][3]);
+    candle.m.low = safe(m[0][3]);
     if (candle.m.open && candle.m.high && candle.m.low) tfReady.m = true;
   }
 
@@ -1084,7 +1191,7 @@ function initChartToday() {
   setupChartInteractions();
 }
 
-async function loadChartToday(isRefresh=false) {
+async function loadChartToday(isRefresh = false) {
   if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
   if (!tfReady.d || !candle.d.t) return;
@@ -1093,7 +1200,7 @@ async function loadChartToday(isRefresh=false) {
   if (!kl.length) return;
 
   chartLabels = kl.map(k => fmtHHMM(safe(k[0])));
-  chartData   = kl.map(k => safe(k[4]));
+  chartData = kl.map(k => safe(k[4]));
   lastChartMinuteStart = safe(kl[kl.length - 1][0]) || 0;
 
   const lastClose = safe(kl[kl.length - 1][4]);
@@ -1187,7 +1294,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKE CHART (persist) ================= */
+/* ================= STAKE CHART (persist, per address) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -1197,7 +1304,7 @@ let lastStakeRecordedRounded = null;
 let stakeBaselineCaptured = false;
 
 function stakeStoreKey(addr) {
-  const a = (addr || "").trim();
+  const a = normalizeAddr(addr);
   return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
 }
 function saveStakeSeries() {
@@ -1209,9 +1316,7 @@ function saveStakeSeries() {
       labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
     }));
     cloudBump(1);
-  } catch {
-    cloudSetState("error");
-  }
+  } catch {}
 }
 function loadStakeSeries() {
   const key = stakeStoreKey(address);
@@ -1223,29 +1328,28 @@ function loadStakeSeries() {
     if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
 
     stakeLabels = Array.isArray(obj.labels) ? obj.labels : [];
-    stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
-    stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
-    stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
+    stakeData = Array.isArray(obj.data) ? obj.data : [];
+    stakeMoves = Array.isArray(obj.moves) ? obj.moves : [];
+    stakeTypes = Array.isArray(obj.types) ? obj.types : [];
 
     const n = stakeData.length;
     stakeLabels = stakeLabels.slice(0, n);
-    stakeMoves  = stakeMoves.slice(0, n);
-    stakeTypes  = stakeTypes.slice(0, n);
+    stakeMoves = stakeMoves.slice(0, n);
+    stakeTypes = stakeTypes.slice(0, n);
 
     while (stakeMoves.length < n) stakeMoves.push(0);
     while (stakeTypes.length < n) stakeTypes.push("Stake update");
 
     stakeBaselineCaptured = stakeData.length > 0;
     lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
+
+    // initialize displayed value from last
+    if (stakeData.length) displayed.stake = safe(stakeData[stakeData.length - 1]);
+
     return true;
   } catch {
     return false;
   }
-}
-function clearStakeSeriesStorage() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-  try { localStorage.removeItem(key); } catch {}
 }
 function resetStakeSeriesFromNow() {
   stakeLabels = [nowLabel()];
@@ -1300,7 +1404,12 @@ function initStakeChart() {
             }
           }
         },
-        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
+        ...(ZOOM_OK ? {
+          zoom: {
+            pan: { enabled: true, mode: "x", threshold: 2 },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+          }
+        } : {})
       },
       scales: {
         x: { display: false },
@@ -1317,9 +1426,11 @@ function drawStakeChart() {
     stakeChart.update("none");
   }
 }
+
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
+
   const rounded = Number(s.toFixed(6));
 
   if (!stakeBaselineCaptured) {
@@ -1347,22 +1458,31 @@ function maybeAddStakePoint(currentStake) {
 
   saveStakeSeries();
   drawStakeChart();
+
+  // ✅ event log
+  addEvent({
+    type: delta > 0 ? "STAKE / COMPOUND" : "UNSTAKE",
+    ts: Date.now(),
+    move: `${delta > 0 ? "+" : ""}${delta.toFixed(6)} INJ`,
+    status: "ok",
+    kind: delta > 0 ? "up" : "down"
+  });
 }
 
-/* ================= REWARD WITHDRAWALS (persist) ================= */
+/* ================= REWARD WITHDRAWALS (persist, per address) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
-let wdTimesAll  = [];
+let wdTimesAll = [];
 
 let wdLabels = [];
 let wdValues = [];
-let wdTimes  = [];
+let wdTimes = [];
 
 let wdLastRewardsSeen = null;
 let wdMinFilter = 0;
 
 function wdStoreKey(addr) {
-  const a = (addr || "").trim();
+  const a = normalizeAddr(addr);
   return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
 }
 function saveWdAll() {
@@ -1374,9 +1494,7 @@ function saveWdAll() {
       labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
     cloudBump(1);
-  } catch {
-    cloudSetState("error");
-  }
+  } catch {}
 }
 function loadWdAll() {
   const key = wdStoreKey(address);
@@ -1389,9 +1507,11 @@ function loadWdAll() {
 
     wdLabelsAll = Array.isArray(obj.labels) ? obj.labels : [];
     wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
-    wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
+    wdTimesAll = Array.isArray(obj.times) ? obj.times : [];
 
     rebuildWdView();
+
+    // initialize displayed rewards from last known (if any)
     return true;
   } catch {
     return false;
@@ -1401,7 +1521,7 @@ function loadWdAll() {
 function rebuildWdView() {
   wdLabels = [];
   wdValues = [];
-  wdTimes  = [];
+  wdTimes = [];
 
   for (let i = 0; i < wdValuesAll.length; i++) {
     const v = safe(wdValuesAll[i]);
@@ -1441,13 +1561,13 @@ const rewardPointLabelPlugin = {
     const ctx = ch.ctx;
     ctx.save();
     ctx.font = "800 11px Inter, sans-serif";
-    ctx.fillStyle = isLight()
+    ctx.fillStyle = (document.body.dataset.theme === "light")
       ? "rgba(15,23,42,0.88)"
       : "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
 
-    const leftBound  = ch.chartArea.left + 6;
+    const leftBound = ch.chartArea.left + 6;
     const rightBound = ch.chartArea.right - 6;
 
     let drawn = 0;
@@ -1515,7 +1635,12 @@ function initRewardWdChart() {
             label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
           }
         },
-        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
+        ...(ZOOM_OK ? {
+          zoom: {
+            pan: { enabled: true, mode: "x", threshold: 2 },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+          }
+        } : {})
       },
       scales: {
         x: { ticks: { color: axisTickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }, grid: { color: axisGridColor() } },
@@ -1539,7 +1664,7 @@ function drawRewardWdChart() {
   }
 }
 
-function syncRewardTimelineUI(forceToEnd=false) {
+function syncRewardTimelineUI(forceToEnd = false) {
   const slider = $("rewardTimeline");
   const meta = $("rewardTimelineMeta");
   if (!slider || !meta) return;
@@ -1604,56 +1729,189 @@ function maybeRecordRewardWithdrawal(newRewards) {
   if (wdLastRewardsSeen == null) { wdLastRewardsSeen = r; return; }
 
   const diff = wdLastRewardsSeen - r;
-  if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    wdTimesAll.push(Date.now());
+  if (diff > 0.0002) {
+    const ts = Date.now();
+    wdTimesAll.push(ts);
     wdLabelsAll.push(nowLabel());
     wdValuesAll.push(diff);
     saveWdAll();
     rebuildWdView();
     goRewardLive();
+
+    addEvent({
+      type: "REWARD WITHDRAW",
+      ts,
+      move: `+${diff.toFixed(6)} INJ`,
+      status: "ok",
+      kind: "up"
+    });
   }
   wdLastRewardsSeen = r;
 }
 
-/* ================= NET WORTH (persist + chart) ================= */
-let nwTf = "live";          // ✅ live | 1d | 1w | 1m | 1y | all
-let nwScale = "linear";     // linear | log
+/* ================= EVENTS (per address) ================= */
+let events = [];
+
+function eventsKey(addr) {
+  const a = normalizeAddr(addr);
+  return a ? `inj_events_v${EVENTS_LOCAL_VER}_${a}` : null;
+}
+function loadEvents() {
+  const key = eventsKey(address);
+  events = [];
+  if (!key) return;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== EVENTS_LOCAL_VER) return;
+    events = Array.isArray(obj.items) ? obj.items : [];
+  } catch {}
+}
+function saveEvents() {
+  const key = eventsKey(address);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ v: EVENTS_LOCAL_VER, t: Date.now(), items: events }));
+    cloudBump(1);
+  } catch {}
+}
+function clearEvents() {
+  events = [];
+  saveEvents();
+}
+function eventDedupeKey(e) {
+  return `${e.type}|${Math.floor(safe(e.ts) / 60000)}|${e.move}`;
+}
+function addEvent(e) {
+  if (!address) return;
+
+  const item = {
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    type: String(e?.type || "EVENT"),
+    ts: safe(e?.ts) || Date.now(),
+    move: String(e?.move || "—"),
+    status: String(e?.status || "ok"), // ok | pending | err
+    kind: String(e?.kind || "flat")    // up | down | flat
+  };
+
+  // dedupe last 150
+  const dk = eventDedupeKey(item);
+  const last = events.slice(-150);
+  if (last.some(x => eventDedupeKey(x) === dk)) return;
+
+  events.push(item);
+  // keep max 2000
+  if (events.length > 2000) events = events.slice(-2000);
+
+  saveEvents();
+}
+
+function statusBadgeHTML(status, kind) {
+  const isPending = status === "pending";
+  const isErr = status === "err";
+  const bg = isErr ? "rgba(239,68,68,.18)" : (isPending ? "rgba(245,158,11,.18)" : "rgba(34,197,94,.16)");
+  const col = isErr ? "#ef4444" : (isPending ? "#f59e0b" : "#22c55e");
+
+  const arrow = kind === "up" ? "▲" : (kind === "down" ? "▼" : "•");
+  const anim = isPending ? "animation: pulse 1.2s infinite;" : "";
+  return `
+    <span style="
+      display:inline-flex; align-items:center; justify-content:flex-end;
+      gap:.35rem; padding:.18rem .55rem; border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:${bg}; color:${col};
+      font-weight:900; font-size:.75rem; ${anim}
+    ">
+      <span>${arrow}</span>
+      <span>${isErr ? "ERROR" : (isPending ? "PENDING" : "OK")}</span>
+    </span>
+  `;
+}
+
+function renderEventsTable() {
+  ensureEventView();
+  const tbody = $("eventTbody");
+  if (!tbody) return;
+
+  const list = (events || []).slice().sort((a, b) => safe(b.ts) - safe(a.ts)).slice(0, 400);
+  if (!list.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" style="padding:.7rem .35rem; opacity:.75;">
+          No events yet for this wallet.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = list.map(ev => {
+    const dt = new Date(safe(ev.ts) || 0);
+    const dtLabel = `${dt.toLocaleDateString()} ${dt.toLocaleTimeString()}`;
+    const moveCol = ev.kind === "up" ? "#22c55e" : (ev.kind === "down" ? "#ef4444" : "rgba(249,250,251,.75)");
+    const moveStyle = `color:${moveCol}; font-weight:900;`;
+    return `
+      <tr style="border-top:1px solid rgba(255,255,255,.06);">
+        <td style="padding:.55rem .35rem; font-weight:900;">${ev.type}</td>
+        <td style="padding:.55rem .35rem; opacity:.85;">${dtLabel}</td>
+        <td style="padding:.55rem .35rem; text-align:right; ${moveStyle}">${ev.move}</td>
+        <td style="padding:.55rem .35rem; text-align:right;">${statusBadgeHTML(ev.status, ev.kind)}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+/* ================= NET WORTH (persist + chart + LIVE) ================= */
+let nwTf = "live"; // live | 1d | 1w | 1m | 1y | all
+let nwScale = "lin"; // lin | log
+
 let nwTAll = [];
 let nwUsdAll = [];
 let nwInjAll = [];
 
 let netWorthChart = null;
-
 let nwHoverActive = false;
 let nwHoverIndex = null;
 
-function nwStoreKey(addr){
-  const a = (addr || "").trim();
+function nwStoreKey(addr) {
+  const a = normalizeAddr(addr);
   return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
 }
+function nwPrefsKey() {
+  const a = normalizeAddr(address);
+  return a ? `inj_networth_prefs_v${NW_LOCAL_VER}_${a}` : null;
+}
 
-function saveNW(){
+function saveNW() {
   const key = nwStoreKey(address);
   if (!key) return;
-  try{
+  try {
     localStorage.setItem(key, JSON.stringify({
       v: NW_LOCAL_VER, t: Date.now(),
       tAll: nwTAll,
       usdAll: nwUsdAll,
-      injAll: nwInjAll,
+      injAll: nwInjAll
+    }));
+    cloudBump(1);
+  } catch {}
+}
+function saveNWPrefs() {
+  const key = nwPrefsKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      v: NW_LOCAL_VER,
       tf: nwTf,
       scale: nwScale
     }));
-    cloudBump(1);
-  } catch {
-    cloudSetState("error");
-  }
+  } catch {}
 }
 
-function loadNW(){
+function loadNW() {
   const key = nwStoreKey(address);
   if (!key) return false;
-  try{
+  try {
     const raw = localStorage.getItem(key);
     if (!raw) return false;
     const obj = JSON.parse(raw);
@@ -1663,32 +1921,40 @@ function loadNW(){
     nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
     nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
 
-    const tf = String(obj.tf || "live");
-    nwTf = (["live","1d","1w","1m","1y","all"].includes(tf)) ? tf : "live";
-    const sc = String(obj.scale || "linear");
-    nwScale = (sc === "log") ? "log" : "linear";
-
     clampNWArrays();
+
+    // displayed net worth init from last
+    if (nwUsdAll.length) displayed.netWorthUsd = safe(nwUsdAll[nwUsdAll.length - 1]);
+
+    // prefs
+    const pRaw = localStorage.getItem(nwPrefsKey());
+    if (pRaw) {
+      const p = JSON.parse(pRaw);
+      const tf = String(p?.tf || "live");
+      const sc = String(p?.scale || "lin");
+      nwTf = ["live", "1d", "1w", "1m", "1y", "all"].includes(tf) ? tf : "live";
+      nwScale = sc === "log" ? "log" : "lin";
+    }
+
     return true;
   } catch {
     return false;
   }
 }
 
-function clampNWArrays(){
+function clampNWArrays() {
   const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
   nwTAll = nwTAll.slice(-n);
   nwUsdAll = nwUsdAll.slice(-n);
   nwInjAll = nwInjAll.slice(-n);
-  if (nwTAll.length > NW_MAX_POINTS){
+  if (nwTAll.length > NW_MAX_POINTS) {
     nwTAll = nwTAll.slice(-NW_MAX_POINTS);
     nwUsdAll = nwUsdAll.slice(-NW_MAX_POINTS);
     nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
   }
 }
 
-function nwWindowMs(tf){
-  if (tf === "live") return NW_LIVE_WINDOW_MS;
+function nwWindowMs(tf) {
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
@@ -1696,67 +1962,137 @@ function nwWindowMs(tf){
   return Infinity;
 }
 
-function nwDataSpan(){
+function nwSpanMs() {
   if (nwTAll.length < 2) return 0;
-  const first = safe(nwTAll[0]);
-  const last = safe(nwTAll[nwTAll.length - 1]);
-  return Math.max(0, last - first);
+  return safe(nwTAll[nwTAll.length - 1]) - safe(nwTAll[0]);
 }
 
-function nwFmtX(ts, tf){
-  const w = nwWindowMs(tf);
-  if (tf === "1y" || w >= 7 * 24 * 60 * 60 * 1000) return fmtDDMM(ts);
-  return fmtHHMM(ts);
+function ensureNwTfButtons() {
+  const wrap = $("nwTfSwitch") || q("#nwTfSwitch") || q(".tf-switch");
+  if (!wrap) return null;
+
+  // inject LIVE if missing
+  if (!q('.tf-btn[data-tf="live"]', wrap)) {
+    const liveBtn = document.createElement("button");
+    liveBtn.className = "tf-btn";
+    liveBtn.type = "button";
+    liveBtn.dataset.tf = "live";
+    liveBtn.textContent = "LIVE";
+    wrap.insertBefore(liveBtn, wrap.firstChild);
+  }
+
+  // ensure ALL exists
+  if (!q('.tf-btn[data-tf="all"]', wrap)) {
+    const allBtn = document.createElement("button");
+    allBtn.className = "tf-btn";
+    allBtn.type = "button";
+    allBtn.dataset.tf = "all";
+    allBtn.textContent = "ALL";
+    wrap.appendChild(allBtn);
+  }
+
+  return wrap;
 }
 
-/* ✅ Build view:
-   - LIVE: scorre sempre (ultimi 5min, ancora a destra)
-   - TF fissi: parte da sinistra e "riempie" finché non completa la finestra,
-     poi diventa rolling (last window) per restare utile.
-*/
-function nwBuildView(tf){
-  const n = nwTAll.length;
-  const points = [];
-  if (!n) return { points, xMin: 0, xMax: 0, tf };
+function updateTfUnlockUI() {
+  const wrap = ensureNwTfButtons();
+  if (!wrap) return;
 
-  const firstAll = safe(nwTAll[0]);
-  const lastAll  = safe(nwTAll[n - 1]);
-  const w = nwWindowMs(tf);
+  const span = nwSpanMs();
+  const can1d = nwTAll.length >= 2;
+  const can1w = span >= (7 * 24 * 60 * 60 * 1000);
+  const can1m = span >= (30 * 24 * 60 * 60 * 1000);
+  const can1y = span >= (365 * 24 * 60 * 60 * 1000);
+  const canAll = nwTAll.length >= 2;
 
-  let xMin, xMax;
+  const rules = {
+    live: true,
+    "1d": can1d,
+    "1w": can1w,
+    "1m": can1m,
+    "1y": can1y,
+    all: canAll
+  };
+
+  const btns = qa(".tf-btn", wrap);
+  btns.forEach(b => {
+    const tf = b.dataset.tf || "";
+    const ok = !!rules[tf];
+    b.disabled = !ok;
+    b.style.opacity = ok ? "1" : "0.35";
+    b.style.pointerEvents = ok ? "" : "none";
+    b.classList.toggle("active", tf === nwTf);
+  });
+
+  // if current selection becomes unavailable, fallback
+  if (!rules[nwTf]) {
+    nwTf = "live";
+    saveNWPrefs();
+    btns.forEach(b => b.classList.toggle("active", (b.dataset.tf || "") === nwTf));
+  }
+}
+
+/* Build view for NW chart based on tf.
+   - LIVE: last 2 minutes sliding (scrolling)
+   - Fixed TF: last window points (no auto-scroll behavior beyond window) */
+function nwBuildView(tf) {
+  const labels = [];
+  const data = [];
+  const times = [];
+
+  if (nwTAll.length < 2) return { labels, data, times };
+
+  const now = Date.now();
+
+  if (tf === "live") {
+    const minT = now - NW_LIVE_WINDOW_MS;
+
+    for (let i = 0; i < nwTAll.length; i++) {
+      const t = safe(nwTAll[i]);
+      const u = safe(nwUsdAll[i]);
+      if (t >= minT && Number.isFinite(u) && u > 0) {
+        times.push(t);
+        labels.push(fmtHHMM(t));
+        data.push(u);
+      }
+    }
+
+    return { labels, data, times };
+  }
 
   if (tf === "all") {
-    xMin = firstAll;
-    xMax = lastAll || (firstAll + 1);
-  } else if (tf === "live") {
-    xMax = Date.now();
-    xMin = xMax - w;
-  } else {
-    const span = Math.max(0, lastAll - firstAll);
-    if (span < w) {
-      xMin = firstAll;
-      xMax = firstAll + w; // ✅ costruzione da sinistra: "spazio vuoto" a destra
-    } else {
-      xMax = lastAll;
-      xMin = xMax - w;     // rolling dopo che è pieno
+    for (let i = 0; i < nwTAll.length; i++) {
+      const t = safe(nwTAll[i]);
+      const u = safe(nwUsdAll[i]);
+      if (Number.isFinite(u) && u > 0) {
+        times.push(t);
+        labels.push(nwSpanMs() >= (24 * 60 * 60 * 1000) ? fmtDateShort(t) : fmtHHMM(t));
+        data.push(u);
+      }
+    }
+    return { labels, data, times };
+  }
+
+  const w = nwWindowMs(tf);
+  const minT = now - w;
+
+  for (let i = 0; i < nwTAll.length; i++) {
+    const t = safe(nwTAll[i]);
+    const u = safe(nwUsdAll[i]);
+    if (t >= minT && Number.isFinite(u) && u > 0) {
+      times.push(t);
+      labels.push(w >= (24 * 60 * 60 * 1000) ? fmtDateShort(t) : fmtHHMM(t));
+      data.push(u);
     }
   }
 
-  for (let i = 0; i < n; i++){
-    const t = safe(nwTAll[i]);
-    const u = safe(nwUsdAll[i]);
-    if (!Number.isFinite(t) || !Number.isFinite(u) || u <= 0) continue;
-    if (t < xMin || t > xMax) continue;
-    points.push({ x: t, y: u });
-  }
-
-  return { points, xMin, xMax, tf };
+  return { labels, data, times };
 }
 
-/* ✅ Pro: vertical line while interacting */
+/* NW chart plugins: vertical line on hover + blinking last dot */
 const nwVerticalLinePlugin = {
   id: "nwVerticalLinePlugin",
-  afterDraw(ch){
+  afterDraw(ch) {
     if (!nwHoverActive || nwHoverIndex == null) return;
     const meta = ch.getDatasetMeta(0);
     const el = meta?.data?.[nwHoverIndex];
@@ -1773,31 +2109,17 @@ const nwVerticalLinePlugin = {
   }
 };
 
-/* ✅ Blinking yellow dot at last visible point */
 const nwLastDotPlugin = {
   id: "nwLastDotPlugin",
   afterDatasetsDraw(ch) {
     const ds = ch.data.datasets?.[0];
     if (!ds) return;
-    const pts = ds.data || [];
-    if (!pts.length) return;
 
     const meta = ch.getDatasetMeta(0);
-    const els = meta?.data || [];
-    if (!els.length) return;
+    const pts = meta?.data || [];
+    if (!pts.length) return;
 
-    const xScale = ch.scales?.x;
-    const xMax = Number.isFinite(xScale?.max) ? xScale.max : null;
-
-    let lastIdx = els.length - 1;
-    if (xMax != null) {
-      for (let i = els.length - 1; i >= 0; i--){
-        const p = pts[i];
-        if (p && Number.isFinite(p.x) && p.x <= xMax) { lastIdx = i; break; }
-      }
-    }
-
-    const el = els[lastIdx];
+    const el = pts[pts.length - 1];
     if (!el) return;
 
     const t = Date.now();
@@ -1824,73 +2146,45 @@ const nwLastDotPlugin = {
   }
 };
 
-function nwApplySignStyling(pnl){
+function nwSetScale(scale) {
+  nwScale = (scale === "log") ? "log" : "lin";
+  saveNWPrefs();
   if (!netWorthChart) return;
-  const ds = netWorthChart.data.datasets?.[0];
-  if (!ds) return;
+  const y = netWorthChart.options?.scales?.y;
+  if (!y) return;
 
-  if (pnl > 0){
-    ds.borderColor = "#22c55e";
-    ds.backgroundColor = "rgba(34,197,94,.16)";
-  } else if (pnl < 0){
-    ds.borderColor = "#ef4444";
-    ds.backgroundColor = "rgba(239,68,68,.14)";
-  } else {
-    ds.borderColor = "#3b82f6";
-    ds.backgroundColor = "rgba(59,130,246,.12)";
-  }
+  // log can't show <=0
+  y.type = (nwScale === "log") ? "logarithmic" : "linear";
+  netWorthChart.update("none");
+
+  const btn = $("nwScaleToggle");
+  if (btn) btn.textContent = (nwScale === "log") ? "LOG" : "LIN";
 }
 
-function nwUpdatePnLFromPoints(points){
-  const pnlEl = $("netWorthPnl");
-  if (!pnlEl) return;
-
-  if (!points || points.length < 2){
-    pnlEl.classList.remove("good","bad");
-    pnlEl.classList.add("flat");
-    pnlEl.textContent = "PnL: —";
-    nwApplySignStyling(0);
-    return;
-  }
-
-  const first = safe(points[0]?.y);
-  const last  = safe(points[points.length - 1]?.y);
-  const pnl = last - first;
-  const pnlPct = first ? (pnl / first) * 100 : 0;
-
-  pnlEl.classList.remove("good","bad","flat");
-  pnlEl.classList.add(pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat"));
-  const sign = pnl > 0 ? "+" : "";
-  pnlEl.textContent = `PnL: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
-
-  nwApplySignStyling(pnl);
-}
-
-function initNWChart(){
+function initNWChart() {
   const canvas = $("netWorthChart");
   if (!canvas || !window.Chart) return;
+
+  updateTfUnlockUI();
 
   const view = nwBuildView(nwTf);
 
   netWorthChart = new Chart(canvas, {
     type: "line",
     data: {
+      labels: view.labels,
       datasets: [{
-        parsing: false,
-        data: view.points,
+        data: view.data,
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.12)",
         borderWidth: 2,
         fill: true,
-
         tension: 0.35,
         cubicInterpolationMode: "monotone",
-
         pointRadius: 0,
         pointHitRadius: 18,
-
         clip: { left: 0, top: 0, right: 22, bottom: 0 },
-        spanGaps: true,
+        spanGaps: true
       }]
     },
     options: {
@@ -1899,11 +2193,9 @@ function initNWChart(){
       animation: false,
       normalized: true,
       layout: { padding: { left: 8, right: 34, top: 8, bottom: 12 } },
-
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
-
         ...(ZOOM_OK ? {
           zoom: {
             pan: { enabled: true, mode: "x", threshold: 2 },
@@ -1911,21 +2203,16 @@ function initNWChart(){
           }
         } : {})
       },
-
       interaction: { mode: "index", intersect: false },
-
       scales: {
         x: {
-          type: "linear",
-          min: view.xMin,
-          max: view.xMax,
+          display: true,
           ticks: {
             color: axisTickColor(),
             maxRotation: 0,
             autoSkip: true,
             maxTicksLimit: 6,
-            padding: 8,
-            callback: (val) => nwFmtX(val, nwTf)
+            padding: 8
           },
           grid: { display: false },
           border: { display: false }
@@ -1934,6 +2221,7 @@ function initNWChart(){
           type: (nwScale === "log") ? "logarithmic" : "linear",
           position: "right",
           ticks: {
+            mirror: false,
             color: axisTickColor(),
             padding: 10,
             maxTicksLimit: 5,
@@ -1948,68 +2236,127 @@ function initNWChart(){
   });
 
   attachNWInteractions();
-  nwUpdatePnLFromPoints(view.points);
+  attachNWTFHandlers();
+
+  const btn = $("nwScaleToggle");
+  if (btn) {
+    btn.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    btn.addEventListener("click", () => {
+      nwSetScale(nwScale === "lin" ? "log" : "lin");
+    }, { passive: true });
+  }
+
+  // inject logo if there is an <img> placeholder
+  const img =
+    $("nwLogoImg") ||
+    q("#netWorthCard img[data-inj-logo]") ||
+    q("#netWorthCard img") ||
+    null;
+
+  if (img && !img.dataset._injSet) {
+    img.src = INJ_LOGO_PNG;
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.dataset._injSet = "1";
+  }
 }
 
-function drawNW(){
+function nwApplySignStyling(sign) {
+  if (!netWorthChart) return;
+  const ds = netWorthChart.data.datasets?.[0];
+  if (!ds) return;
+
+  if (sign === "up") {
+    ds.borderColor = "#22c55e";
+    ds.backgroundColor = "rgba(34,197,94,.16)";
+  } else if (sign === "down") {
+    ds.borderColor = "#ef4444";
+    ds.backgroundColor = "rgba(239,68,68,.14)";
+  } else {
+    ds.borderColor = "#3b82f6";
+    ds.backgroundColor = "rgba(59,130,246,.12)";
+  }
+  netWorthChart.update("none");
+}
+
+function drawNW() {
   if (!netWorthChart) initNWChart();
   if (!netWorthChart) return;
 
+  updateTfUnlockUI();
+
   const view = nwBuildView(nwTf);
 
-  netWorthChart.data.datasets[0].data = view.points;
-  netWorthChart.options.scales.x.min = view.xMin;
-  netWorthChart.options.scales.x.max = view.xMax;
-
-  // scale
-  netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
-
-  // theme ticks
-  netWorthChart.options.scales.x.ticks.color = axisTickColor();
-  netWorthChart.options.scales.y.ticks.color = axisTickColor();
-  netWorthChart.options.scales.y.grid.color  = axisGridColor();
-
+  netWorthChart.data.labels = view.labels;
+  netWorthChart.data.datasets[0].data = view.data;
   netWorthChart.update("none");
-  nwUpdatePnLFromPoints(view.points);
 
-  // update TF buttons visibility
-  nwRefreshTFButtons();
+  // PnL (only for fixed TF / all). For LIVE show "LIVE"
+  const pnlEl = $("netWorthPnl");
+  if (!pnlEl) return;
+
+  if (nwTf === "live") {
+    pnlEl.classList.remove("good", "bad");
+    pnlEl.classList.add("flat");
+    pnlEl.textContent = "LIVE";
+    nwApplySignStyling("flat");
+    return;
+  }
+
+  if (view.data.length >= 2) {
+    const first = safe(view.data[0]);
+    const last = safe(view.data[view.data.length - 1]);
+    const pnl = last - first;
+    const pnlPct = first ? (pnl / first) * 100 : 0;
+
+    pnlEl.classList.remove("good", "bad", "flat");
+    const cls = pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat");
+    pnlEl.classList.add(cls);
+
+    const sign = pnl > 0 ? "+" : "";
+    pnlEl.textContent = `PnL: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
+    nwApplySignStyling(pnl > 0 ? "up" : (pnl < 0 ? "down" : "flat"));
+  } else {
+    pnlEl.classList.remove("good", "bad");
+    pnlEl.classList.add("flat");
+    pnlEl.textContent = "PnL: —";
+    nwApplySignStyling("flat");
+  }
 }
 
-/* ✅ Interaction: hover/touch shows point value in Net Worth metrics */
-function nwGetIndexFromEvent(evt){
+function nwGetIndexFromEvent(evt) {
   if (!netWorthChart) return null;
   const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
   if (!pts || !pts.length) return null;
   return pts[0].index;
 }
 
-function nwShowHoverValue(idx){
+function nwShowHoverValue(idx) {
   if (!netWorthChart) return;
-
   const data = netWorthChart.data.datasets?.[0]?.data || [];
+  const labels = netWorthChart.data.labels || [];
   idx = clamp(idx, 0, data.length - 1);
-
-  const p = data[idx];
-  if (!p || !Number.isFinite(p.y)) return;
+  const v = safe(data[idx]);
+  const lab = labels[idx] || "";
+  if (!v) return;
 
   const el = $("netWorthUsd");
-  if (el) el.textContent = `$${safe(p.y).toFixed(2)}`;
+  if (el) el.textContent = `$${v.toFixed(2)}`;
 
   const pnlEl = $("netWorthPnl");
-  if (pnlEl){
-    pnlEl.classList.remove("good","bad","flat");
+  if (pnlEl) {
+    pnlEl.classList.remove("good", "bad");
     pnlEl.classList.add("flat");
-    pnlEl.textContent = `Point: ${nwFmtX(p.x, nwTf)} • $${safe(p.y).toFixed(2)}`;
+    pnlEl.textContent = `${lab} • $${v.toFixed(2)}`;
   }
 }
 
-function nwRestoreRealtimeValue(){
+function nwRestoreRealtimeValue() {
   nwHoverActive = false;
   nwHoverIndex = null;
 }
 
-function attachNWInteractions(){
+function attachNWInteractions() {
   const canvas = $("netWorthChart");
   if (!canvas || !netWorthChart) return;
 
@@ -2024,9 +2371,6 @@ function attachNWInteractions(){
 
   const onLeave = () => {
     nwRestoreRealtimeValue();
-    // restore pnl immediately
-    const view = nwBuildView(nwTf);
-    nwUpdatePnLFromPoints(view.points);
     netWorthChart.update("none");
   };
 
@@ -2039,123 +2383,33 @@ function attachNWInteractions(){
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
 
-/* ✅ TF buttons: inject LIVE + ALL if missing, unlock progressively */
-function nwEnsureTFButtons(){
-  const wrap = $("nwTfSwitch");
+function attachNWTFHandlers() {
+  const wrap = ensureNwTfButtons();
   if (!wrap) return;
-
-  const ensureBtn = (tf, label) => {
-    let b = wrap.querySelector(`.tf-btn[data-tf="${tf}"]`);
-    if (b) return b;
-    b = document.createElement("button");
-    b.className = "tf-btn";
-    b.type = "button";
-    b.dataset.tf = tf;
-    b.textContent = label;
-    wrap.appendChild(b);
-    return b;
-  };
-
-  // keep order: LIVE, 1D, 1W, 1M, 1Y, ALL
-  const desired = [
-    ["live", "LIVE"],
-    ["1d", "1D"],
-    ["1w", "1W"],
-    ["1m", "1M"],
-    ["1y", "1Y"],
-    ["all", "ALL"]
-  ];
-
-  // create missing
-  desired.forEach(([tf, lab]) => ensureBtn(tf, lab));
-
-  // reorder in DOM
-  const btns = Array.from(wrap.querySelectorAll(".tf-btn"));
-  desired.forEach(([tf]) => {
-    const b = btns.find(x => x.dataset.tf === tf);
-    if (b) wrap.appendChild(b);
-  });
-}
-
-function nwRefreshTFButtons(){
-  const wrap = $("nwTfSwitch");
-  if (!wrap) return;
-
-  const span = nwDataSpan();
-
-  // unlock rules
-  const unlock = {
-    live: true,
-    "1d": true,
-    "1w": span >= (24 * 60 * 60 * 1000),           // unlock after 24h span
-    "1m": span >= (7 * 24 * 60 * 60 * 1000),       // unlock after 7d
-    "1y": span >= (30 * 24 * 60 * 60 * 1000),      // unlock after 30d
-    all:  span >= (24 * 60 * 60 * 1000)            // unlock ALL after 24h
-  };
-
-  const btns = Array.from(wrap.querySelectorAll(".tf-btn"));
-  btns.forEach(b => {
-    const tf = b.dataset.tf || "";
-    const ok = !!unlock[tf];
-    b.style.display = ok ? "" : "none";
-  });
-
-  // if current selection is hidden, fallback
-  const curBtn = wrap.querySelector(`.tf-btn[data-tf="${nwTf}"]`);
-  if (!curBtn || curBtn.style.display === "none"){
-    nwTf = "live";
-  }
-
-  // active styles
-  btns.forEach(b => b.classList.toggle("active", (b.dataset.tf || "") === nwTf));
-}
-
-function attachNWTFHandlers(){
-  const wrap = $("nwTfSwitch");
-  if (!wrap) return;
-
-  nwEnsureTFButtons();
-  nwRefreshTFButtons();
 
   wrap.addEventListener("click", (e) => {
     const btn = e.target?.closest(".tf-btn");
     if (!btn) return;
-
     const tf = btn.dataset.tf || "live";
-    if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
-    if (btn.style.display === "none") return;
+    if (!["live", "1d", "1w", "1m", "1y", "all"].includes(tf)) return;
+
+    // if disabled, ignore
+    if (btn.disabled) return;
 
     nwTf = tf;
-    saveNW();
+    saveNWPrefs();
+    updateTfUnlockUI();
+
+    // reset zoom when switching TF for easier navigation
+    if (netWorthChart?.resetZoom) netWorthChart.resetZoom();
+
     drawNW();
-  }, { passive:true });
+  }, { passive: true });
 }
 
-/* ✅ scale toggle (linear/log) */
-function attachNWScaleToggle(){
-  const btn = $("nwScaleToggle");
-  if (!btn) return;
-
-  // initialize label
-  btn.textContent = (nwScale === "log") ? "LOG" : "LIN";
-
-  btn.addEventListener("click", (e) => {
-    e?.preventDefault?.();
-    nwScale = (nwScale === "log") ? "linear" : "log";
-    btn.textContent = (nwScale === "log") ? "LOG" : "LIN";
-    saveNW();
-    drawNW();
-  }, { passive:false });
-}
-
-/* ✅ Record point throttled */
-let nwLastRecordT = 0;
-let nwLastRecordUsd = 0;
-
-function recordNetWorthPoint(force=false){
+function recordNetWorthPoint() {
   if (!address) return;
-
-  const px = safe(targetPrice || displayed.price);
+  const px = safe(targetPrice);
   if (!Number.isFinite(px) || px <= 0) return;
 
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
@@ -2171,8 +2425,7 @@ function recordNetWorthPoint(force=false){
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
 
-  // ✅ densità: ogni 5s o se cambia di $0.25
-  if (!force && lastT && dt < 5_000 && dUsd < 0.25) return;
+  if (lastT && dt < NW_POINT_MIN_MS && dUsd < NW_POINT_MIN_USD_DELTA) return;
 
   nwTAll.push(now);
   nwUsdAll.push(totalUsd);
@@ -2180,16 +2433,369 @@ function recordNetWorthPoint(force=false){
   clampNWArrays();
   saveNW();
 
-  // update record stamps for extra safety
-  nwLastRecordT = now;
-  nwLastRecordUsd = totalUsd;
+  // initialize displayed net worth as soon as we have data
+  if (displayed.netWorthUsd <= 0) displayed.netWorthUsd = totalUsd;
 
   drawNW();
 }
 
+/* ================= EXPAND CHART MODAL (inside card, no overlap) ================= */
+let modal = null;
+let modalInner = null;
+let modalTitle = null;
+let modalClose = null;
+
+let movedCanvas = null;
+let movedFrom = null;
+let movedPlaceholder = null;
+
+function ensureChartModal() {
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "chartModal";
+  modal.style.position = "fixed";
+  modal.style.inset = "0";
+  modal.style.zIndex = "999";
+  modal.style.display = "none";
+  modal.style.background = "rgba(0,0,0,.55)";
+  modal.style.backdropFilter = "blur(14px)";
+  modal.style.webkitBackdropFilter = "blur(14px)";
+  modal.style.padding = "14px";
+
+  modalInner = document.createElement("div");
+  modalInner.style.width = "min(980px, 96vw)";
+  modalInner.style.height = "min(740px, 92vh)";
+  modalInner.style.margin = "0 auto";
+  modalInner.style.borderRadius = "18px";
+  modalInner.style.border = "1px solid rgba(255,255,255,.10)";
+  modalInner.style.background =
+    (document.body.dataset.theme === "light")
+      ? "linear-gradient(135deg, rgba(240,242,246,.98), rgba(230,234,242,.96))"
+      : "linear-gradient(135deg, rgba(11,18,32,.95), rgba(17,28,47,.92))";
+  modalInner.style.boxShadow = "0 26px 90px rgba(0,0,0,.55)";
+  modalInner.style.display = "flex";
+  modalInner.style.flexDirection = "column";
+  modalInner.style.overflow = "hidden";
+
+  const top = document.createElement("div");
+  top.style.display = "flex";
+  top.style.alignItems = "center";
+  top.style.justifyContent = "space-between";
+  top.style.gap = "10px";
+  top.style.padding = "10px 12px";
+  top.style.borderBottom = "1px solid rgba(255,255,255,.08)";
+
+  modalTitle = document.createElement("div");
+  modalTitle.style.fontWeight = "950";
+  modalTitle.style.letterSpacing = ".02em";
+  modalTitle.textContent = "Chart";
+
+  modalClose = document.createElement("button");
+  modalClose.type = "button";
+  modalClose.textContent = "✕";
+  modalClose.style.width = "40px";
+  modalClose.style.height = "36px";
+  modalClose.style.borderRadius = "12px";
+  modalClose.style.border = "1px solid rgba(255,255,255,.12)";
+  modalClose.style.background = "rgba(255,255,255,.06)";
+  modalClose.style.cursor = "pointer";
+  modalClose.style.fontWeight = "900";
+
+  modalClose.addEventListener("click", closeChartModal);
+
+  top.appendChild(modalTitle);
+  top.appendChild(modalClose);
+
+  const body = document.createElement("div");
+  body.id = "chartModalBody";
+  body.style.flex = "1 1 auto";
+  body.style.position = "relative";
+  body.style.padding = "10px";
+  body.style.overflow = "hidden";
+
+  modalInner.appendChild(top);
+  modalInner.appendChild(body);
+  modal.appendChild(modalInner);
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeChartModal();
+  });
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function openChartModal(canvasId, title = "Chart") {
+  const canvas = $(canvasId);
+  if (!canvas) return;
+
+  ensureChartModal();
+  const body = $("chartModalBody");
+  if (!body) return;
+
+  // move canvas into modal
+  movedCanvas = canvas;
+  movedFrom = canvas.parentNode;
+
+  movedPlaceholder = document.createElement("div");
+  movedPlaceholder.style.height = movedFrom?.offsetHeight ? `${movedFrom.offsetHeight}px` : "240px";
+  movedPlaceholder.dataset._placeholder = "1";
+
+  movedFrom.insertBefore(movedPlaceholder, movedCanvas);
+  body.appendChild(movedCanvas);
+
+  // make canvas fill modal area
+  movedCanvas.style.width = "100%";
+  movedCanvas.style.height = "100%";
+
+  if (modalTitle) modalTitle.textContent = title;
+
+  modal.style.display = "block";
+
+  // force resize
+  setTimeout(() => {
+    try {
+      if (canvasId === "netWorthChart" && netWorthChart) netWorthChart.resize();
+      if (canvasId === "priceChart" && chart) chart.resize();
+      if (canvasId === "stakeChart" && stakeChart) stakeChart.resize();
+      if (canvasId === "rewardChart" && rewardChart) rewardChart.resize();
+    } catch {}
+  }, 60);
+}
+
+function closeChartModal() {
+  if (!modal || !movedCanvas || !movedFrom || !movedPlaceholder) {
+    if (modal) modal.style.display = "none";
+    return;
+  }
+
+  // move canvas back where it was
+  movedFrom.insertBefore(movedCanvas, movedPlaceholder);
+  movedPlaceholder.remove();
+
+  movedCanvas = null;
+  movedFrom = null;
+  movedPlaceholder = null;
+
+  modal.style.display = "none";
+
+  // force resize
+  setTimeout(() => {
+    try {
+      if (netWorthChart) netWorthChart.resize();
+      if (chart) chart.resize();
+      if (stakeChart) stakeChart.resize();
+      if (rewardChart) rewardChart.resize();
+    } catch {}
+  }, 60);
+}
+
+function ensureExpandButtons() {
+  const map = [
+    { canvasId: "netWorthChart", title: "Net Worth" },
+    { canvasId: "stakeChart", title: "Staked" },
+    { canvasId: "rewardChart", title: "Rewards" },
+    { canvasId: "priceChart", title: "1D Price Chart" }
+  ];
+
+  map.forEach(({ canvasId, title }) => {
+    const canvas = $(canvasId);
+    if (!canvas) return;
+    const card = canvas.closest(".card");
+    if (!card) return;
+
+    card.style.position = card.style.position || "relative";
+
+    // if already present, don't recreate
+    if (q(`button[data-expand="${canvasId}"]`, card)) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.expand = canvasId;
+    btn.setAttribute("aria-label", "Expand chart");
+    btn.textContent = "⤢";
+
+    // ✅ small & non-invasive
+    btn.style.position = "absolute";
+    btn.style.top = "12px";
+    btn.style.right = "12px";
+    btn.style.width = "34px";
+    btn.style.height = "34px";
+    btn.style.borderRadius = "12px";
+    btn.style.border = "1px solid rgba(255,255,255,.12)";
+    btn.style.background = "rgba(255,255,255,.06)";
+    btn.style.color = (document.body.dataset.theme === "light") ? "rgba(15,23,42,.86)" : "rgba(249,250,251,.92)";
+    btn.style.fontWeight = "900";
+    btn.style.cursor = "pointer";
+    btn.style.zIndex = "6";
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openChartModal(canvasId, title);
+    });
+
+    card.appendChild(btn);
+  });
+}
+
+/* ================= PULL TO REFRESH (mobile) ================= */
+let ptr = null;
+let ptrSpinner = null;
+let ptrText = null;
+
+let ptrStartY = 0;
+let ptrPull = 0;
+let ptrArmed = false;
+let ptrBusy = false;
+
+function ensurePTR() {
+  if (ptr) return ptr;
+
+  ptr = document.createElement("div");
+  ptr.id = "ptr";
+  ptr.style.position = "fixed";
+  ptr.style.top = "10px";
+  ptr.style.left = "50%";
+  ptr.style.transform = "translateX(-50%) translateY(-40px)";
+  ptr.style.transition = "transform 220ms ease, opacity 220ms ease";
+  ptr.style.opacity = "0";
+  ptr.style.zIndex = "998";
+  ptr.style.display = "inline-flex";
+  ptr.style.alignItems = "center";
+  ptr.style.gap = "10px";
+  ptr.style.padding = "10px 14px";
+  ptr.style.borderRadius = "999px";
+  ptr.style.border = "1px solid rgba(255,255,255,.12)";
+  ptr.style.background = "rgba(0,0,0,.35)";
+  ptr.style.backdropFilter = "blur(10px)";
+  ptr.style.webkitBackdropFilter = "blur(10px)";
+
+  ptrSpinner = document.createElement("div");
+  ptrSpinner.style.width = "16px";
+  ptrSpinner.style.height = "16px";
+  ptrSpinner.style.borderRadius = "50%";
+  ptrSpinner.style.border = "2px solid rgba(255,255,255,.35)";
+  ptrSpinner.style.borderTopColor = "rgba(250,204,21,.95)";
+  ptrSpinner.style.animation = "spin 0.9s linear infinite";
+
+  ptrText = document.createElement("div");
+  ptrText.style.fontWeight = "900";
+  ptrText.style.fontSize = ".8rem";
+  ptrText.style.color = "rgba(249,250,251,.92)";
+  ptrText.textContent = "Pull to refresh";
+
+  // inject keyframes
+  if (!q("#_ptrStyle")) {
+    const st = document.createElement("style");
+    st.id = "_ptrStyle";
+    st.textContent = `@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`;
+    document.head.appendChild(st);
+  }
+
+  ptr.appendChild(ptrSpinner);
+  ptr.appendChild(ptrText);
+  document.body.appendChild(ptr);
+
+  return ptr;
+}
+
+function ptrShow(pull, armed, busy) {
+  ensurePTR();
+  const y = busy ? 0 : (armed ? 0 : (-40 + Math.min(40, pull)));
+  ptr.style.transform = `translateX(-50%) translateY(${y}px)`;
+  ptr.style.opacity = busy ? "1" : (pull > 10 ? "1" : "0");
+
+  if (ptrText) {
+    if (busy) ptrText.textContent = "Refreshing…";
+    else ptrText.textContent = armed ? "Release to refresh" : "Pull to refresh";
+  }
+}
+
+async function ptrTrigger() {
+  if (ptrBusy) return;
+  ptrBusy = true;
+  ptrShow(ptrPull, true, true);
+
+  try {
+    modeLoading = true;
+    refreshConnUI();
+
+    if (liveMode) {
+      await loadCandleSnapshot(true);
+      await loadChartToday(true);
+      if (address) await loadAccount(true);
+      setUIReady(true);
+    } else {
+      await refreshLoadAllOnce();
+    }
+
+    addEvent({
+      type: "REFRESH",
+      ts: Date.now(),
+      move: "Manual refresh",
+      status: "ok",
+      kind: "flat"
+    });
+  } finally {
+    modeLoading = false;
+    refreshConnUI();
+    ptrBusy = false;
+    ptrPull = 0;
+    ptrArmed = false;
+    ptrShow(0, false, false);
+  }
+}
+
+function attachPullToRefresh() {
+  const root = $("appRoot") || q(".container");
+  if (!root) return;
+
+  ensurePTR();
+
+  window.addEventListener("touchstart", (e) => {
+    if (ptrBusy) return;
+    if (document.body.classList.contains("drawer-open")) return;
+    if (modal && modal.style.display === "block") return;
+
+    if (window.scrollY > 0) return;
+    ptrStartY = e.touches?.[0]?.clientY || 0;
+    ptrPull = 0;
+    ptrArmed = false;
+  }, { passive: true });
+
+  window.addEventListener("touchmove", (e) => {
+    if (ptrBusy) return;
+    if (document.body.classList.contains("drawer-open")) return;
+    if (modal && modal.style.display === "block") return;
+
+    if (window.scrollY > 0) return;
+
+    const y = e.touches?.[0]?.clientY || 0;
+    const dy = y - ptrStartY;
+    if (dy <= 0) return;
+
+    ptrPull = dy * 0.45;
+    ptrArmed = ptrPull > 42;
+    ptrShow(ptrPull, ptrArmed, false);
+  }, { passive: true });
+
+  window.addEventListener("touchend", async () => {
+    if (ptrBusy) return;
+    if (ptrArmed) {
+      await ptrTrigger();
+      return;
+    }
+    ptrPull = 0;
+    ptrArmed = false;
+    ptrShow(0, false, false);
+  }, { passive: true });
+}
+
 /* ================= CHART THEME REFRESH ================= */
-function refreshChartsTheme(){
-  try{
+function refreshChartsTheme() {
+  try {
     if (stakeChart) {
       stakeChart.options.scales.y.grid.color = axisGridColor();
       stakeChart.options.scales.y.ticks.color = axisTickColor();
@@ -2216,308 +2822,42 @@ function refreshChartsTheme(){
   } catch {}
 }
 
-/* ================= EXPAND (modal) ================= */
-let chartModal = null;
-let chartModalClose = null;
-let chartModalTitle = null;
-let chartModalReadout = null;
-let chartModalBody = null;
-
-let modalCanvas = null;
-let modalCanvasParent = null;
-let modalCanvasNext = null;
-let modalActiveChart = null;
-
-function ensureChartModal(){
-  if (chartModal) return;
-
-  chartModal = document.createElement("div");
-  chartModal.id = "chartModal";
-  chartModal.setAttribute("aria-hidden", "true");
-  chartModal.style.cssText = `
-    position: fixed; inset: 0; z-index: 9999; display: none;
-    background: rgba(0,0,0,.58); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    padding: 14px;
-  `;
-
-  const panel = document.createElement("div");
-  panel.style.cssText = `
-    width: min(980px, 96vw); height: min(78vh, 860px);
-    margin: 0 auto; border-radius: 18px; overflow: hidden;
-    background: ${isLight() ? "rgba(240,242,246,.98)" : "rgba(11,18,32,.95)"};
-    border: 1px solid ${isLight() ? "rgba(15,23,42,.12)" : "rgba(255,255,255,.10)"};
-    box-shadow: 0 26px 90px rgba(0,0,0,.55);
-    display: flex; flex-direction: column;
-  `;
-
-  const top = document.createElement("div");
-  top.style.cssText = `
-    display:flex; align-items:center; justify-content: space-between;
-    padding: 10px 12px; gap: 10px;
-    border-bottom: 1px solid ${isLight() ? "rgba(15,23,42,.10)" : "rgba(255,255,255,.10)"};
-  `;
-
-  chartModalTitle = document.createElement("div");
-  chartModalTitle.id = "chartModalTitle";
-  chartModalTitle.style.cssText = `
-    font-weight: 950; letter-spacing: .02em;
-    color: ${isLight() ? "rgba(15,23,42,.92)" : "rgba(249,250,251,.92)"};
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  `;
-  chartModalTitle.textContent = "Chart";
-
-  chartModalReadout = document.createElement("div");
-  chartModalReadout.id = "chartModalReadout";
-  chartModalReadout.style.cssText = `
-    margin-left:auto; font-variant-numeric: tabular-nums;
-    font-weight: 900; font-size: .92rem;
-    color: ${isLight() ? "rgba(15,23,42,.80)" : "rgba(249,250,251,.80)"};
-    white-space: nowrap;
-  `;
-  chartModalReadout.textContent = "";
-
-  chartModalClose = document.createElement("button");
-  chartModalClose.type = "button";
-  chartModalClose.textContent = "✕";
-  chartModalClose.style.cssText = `
-    width: 36px; height: 36px; border-radius: 12px;
-    border: 1px solid ${isLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.12)"};
-    background: ${isLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
-    color: ${isLight() ? "rgba(15,23,42,.85)" : "rgba(249,250,251,.92)"};
-    cursor: pointer; font-weight: 950;
-  `;
-
-  chartModalBody = document.createElement("div");
-  chartModalBody.id = "chartModalBody";
-  chartModalBody.style.cssText = `flex: 1 1 auto; position: relative; padding: 10px;`;
-
-  top.appendChild(chartModalClose);
-  top.appendChild(chartModalTitle);
-  top.appendChild(chartModalReadout);
-
-  panel.appendChild(top);
-  panel.appendChild(chartModalBody);
-
-  chartModal.appendChild(panel);
-  document.body.appendChild(chartModal);
-
-  chartModalClose.addEventListener("click", () => closeChartModal(), { passive: true });
-  chartModal.addEventListener("click", (e) => { if (e.target === chartModal) closeChartModal(); }, { passive: true });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeChartModal(); });
-}
-
-function openChartModal(title, canvasEl, chartInstance){
-  if (!canvasEl || !chartInstance) return;
-
-  ensureChartModal();
-
-  // move canvas into modal
-  modalCanvas = canvasEl;
-  modalActiveChart = chartInstance;
-  modalCanvasParent = canvasEl.parentNode;
-  modalCanvasNext = canvasEl.nextSibling;
-
-  chartModalTitle.textContent = title || "Chart";
-  chartModalReadout.textContent = "";
-
-  chartModal.style.display = "block";
-  chartModal.setAttribute("aria-hidden", "false");
-
-  // ensure body is empty and receives canvas
-  chartModalBody.innerHTML = "";
-  chartModalBody.appendChild(canvasEl);
-
-  // resize chart to new container
-  try { chartInstance.resize(); chartInstance.update("none"); } catch {}
-
-  // readout on move
-  const onMove = (evt) => {
-    try{
-      const pts = chartInstance.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
-      if (!pts || !pts.length) return;
-      const idx = pts[0].index;
-
-      // net worth (x/y points)
-      if (chartInstance === netWorthChart){
-        const p = chartInstance.data.datasets?.[0]?.data?.[idx];
-        if (p && Number.isFinite(p.y)) chartModalReadout.textContent = `${nwFmtX(p.x, nwTf)} • $${safe(p.y).toFixed(2)}`;
-        return;
-      }
-
-      // price chart
-      if (chartInstance === chart){
-        const lab = chartInstance.data.labels?.[idx] || "";
-        const v = safe(chartInstance.data.datasets?.[0]?.data?.[idx]);
-        if (lab && v) chartModalReadout.textContent = `${lab} • $${v.toFixed(4)}`;
-        return;
-      }
-
-      // stake/reward: show numeric
-      const lab = chartInstance.data.labels?.[idx] || "";
-      const v = safe(chartInstance.data.datasets?.[0]?.data?.[idx]);
-      if (lab && v) chartModalReadout.textContent = `${lab} • ${v.toFixed(6)}`;
-    } catch {}
-  };
-
-  const onLeave = () => { chartModalReadout.textContent = ""; };
-
-  canvasEl.__modalMove = onMove;
-  canvasEl.__modalLeave = onLeave;
-
-  canvasEl.addEventListener("mousemove", onMove, { passive: true });
-  canvasEl.addEventListener("mouseleave", onLeave, { passive: true });
-  canvasEl.addEventListener("touchstart", (e) => onMove(e), { passive: true });
-  canvasEl.addEventListener("touchmove", (e) => onMove(e), { passive: true });
-  canvasEl.addEventListener("touchend", onLeave, { passive: true });
-  canvasEl.addEventListener("touchcancel", onLeave, { passive: true });
-}
-
-function closeChartModal(){
-  if (!chartModal || !modalCanvas || !modalCanvasParent) {
-    if (chartModal) { chartModal.style.display = "none"; chartModal.setAttribute("aria-hidden","true"); }
-    return;
-  }
-
-  // remove handlers
-  try{
-    if (modalCanvas.__modalMove) modalCanvas.removeEventListener("mousemove", modalCanvas.__modalMove);
-    if (modalCanvas.__modalLeave) modalCanvas.removeEventListener("mouseleave", modalCanvas.__modalLeave);
-  } catch {}
-
-  // restore canvas
-  try{
-    if (modalCanvasNext) modalCanvasParent.insertBefore(modalCanvas, modalCanvasNext);
-    else modalCanvasParent.appendChild(modalCanvas);
-  } catch {}
-
-  // hide modal
-  chartModal.style.display = "none";
-  chartModal.setAttribute("aria-hidden","true");
-
-  // resize chart back
-  try { modalActiveChart?.resize(); modalActiveChart?.update("none"); } catch {}
-
-  modalCanvas = null;
-  modalCanvasParent = null;
-  modalCanvasNext = null;
-  modalActiveChart = null;
-}
-
-/* ✅ create small expand buttons inside cards (non invasivi) */
-function injectExpandButtons(){
-  const map = [
-    { canvasId: "netWorthChart", title: "Net Worth" },
-    { canvasId: "priceChart", title: "INJ Price (1D)" },
-    { canvasId: "stakeChart", title: "Staked" },
-    { canvasId: "rewardChart", title: "Rewards" },
-  ];
-
-  map.forEach(({canvasId, title}) => {
-    const canvas = $(canvasId);
-    if (!canvas) return;
-
-    const card = canvas.closest(".card");
-    if (!card) return;
-
-    card.style.position = card.style.position || "relative";
-
-    // avoid duplicates
-    if (card.querySelector(`[data-expand-for="${canvasId}"]`)) return;
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.expandFor = canvasId;
-    btn.setAttribute("aria-label","Expand chart");
-    btn.textContent = "⤢";
-    btn.style.cssText = `
-      position:absolute; top: 12px; right: 12px;
-      width: 30px; height: 30px;
-      border-radius: 10px;
-      border: 1px solid ${isLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.12)"};
-      background: ${isLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
-      color: ${isLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)"};
-      cursor: pointer; font-weight: 950; font-size: 14px;
-      display:grid; place-items:center;
-      z-index: 20;
-    `;
-
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const chartInstance =
-        (canvasId === "netWorthChart") ? netWorthChart :
-        (canvasId === "priceChart") ? chart :
-        (canvasId === "stakeChart") ? stakeChart :
-        (canvasId === "rewardChart") ? rewardChart : null;
-
-      if (!chartInstance) return;
-      openChartModal(title, canvas, chartInstance);
-    }, { passive:false });
-
-    card.appendChild(btn);
-
-    // ✅ net worth: sposta il toggle LIN/LOG sotto l'icona expand (solo se esiste)
-    if (canvasId === "netWorthChart"){
-      const scaleBtn = $("nwScaleToggle");
-      if (scaleBtn && scaleBtn.parentNode && scaleBtn.closest(".card") === card) {
-        // create a top-right stack
-        let stack = card.querySelector(".nw-top-stack");
-        if (!stack){
-          stack = document.createElement("div");
-          stack.className = "nw-top-stack";
-          stack.style.cssText = `
-            position:absolute; top: 12px; right: 12px;
-            display:flex; flex-direction: column; gap: 8px;
-            align-items:flex-end; z-index: 20;
-          `;
-          // move expand btn into stack too (so they don't overlap)
-          card.removeChild(btn);
-          stack.appendChild(btn);
-          card.appendChild(stack);
-        }
-        // move scaleBtn into stack, below
-        scaleBtn.style.height = "30px";
-        scaleBtn.style.padding = "0 10px";
-        scaleBtn.style.borderRadius = "999px";
-        stack.appendChild(scaleBtn);
-      }
-    }
-  });
-}
-
-/* ✅ net worth: Injective logo replace (emoji -> png) */
-function applyInjectiveLogo(){
-  const icon = document.querySelector(".nw-asset-icon");
-  if (!icon) return;
-  icon.innerHTML = `<img src="${INJ_LOGO_PNG}" alt="Injective" style="width:16px;height:16px;border-radius:4px;display:block;" />`;
-}
-
 /* ================= ADDRESS COMMIT ================= */
 async function commitAddress(newAddr) {
-  const a = (newAddr || "").trim();
+  const a = normalizeAddr(newAddr);
   if (!a) return;
 
   address = a;
-  pendingAddress = "";
   localStorage.setItem("inj_address", address);
 
-  // ✅ keep display, but clear input for next search
+  // ✅ show wallet under header, but keep input empty for next searches
   setAddressDisplay(address);
   if (addressInput) addressInput.value = "";
+  pendingAddress = "";
+  closeSearch();
 
+  // reset per-address state
   settleStart = Date.now();
 
-  // restore cached snapshot instantly (avoid 0)
-  acctCacheLoad();
+  availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
 
-  if (RESET_STAKE_FROM_NOW_ON_BOOT) {
-    clearStakeSeriesStorage();
-    resetStakeSeriesFromNow();
-  } else {
-    loadStakeSeries();
-    drawStakeChart();
-  }
+  displayed.available = 0;
+  displayed.stake = 0;
+  displayed.rewards = 0;
+  displayed.apr = 0;
+
+  displayed.availableUsd = 0;
+  displayed.stakeUsd = 0;
+  displayed.rewardsUsd = 0;
+  displayed.netWorthUsd = 0;
+
+  validatorAddress = "";
+  validatorMoniker = "";
+  setValidatorState("loading");
+
+  // Load per-address persisted data
+  loadStakeSeries();
+  drawStakeChart();
 
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
@@ -2526,14 +2866,16 @@ async function commitAddress(newAddr) {
   goRewardLive();
 
   loadNW();
-  attachNWTFHandlers();
-  attachNWScaleToggle();
+  updateTfUnlockUI();
   drawNW();
+
+  loadEvents();
+  renderEventsTable();
 
   modeLoading = true;
   refreshConnUI();
 
-  if (liveMode) await loadAccount();
+  if (liveMode) await loadAccount(true);
   else {
     refreshLoaded = false;
     refreshConnUI();
@@ -2544,11 +2886,12 @@ async function commitAddress(newAddr) {
 /* ================= ONLINE / OFFLINE listeners ================= */
 window.addEventListener("online", () => {
   refreshConnUI();
-  cloudSetState("synced");
+  cloudRender();
+
   if (liveMode) {
     startTradeWS();
     startKlineWS();
-    if (address) loadAccount();
+    if (address) loadAccount(true);
   } else {
     refreshLoadAllOnce();
   }
@@ -2561,91 +2904,86 @@ window.addEventListener("offline", () => {
   refreshLoaded = false;
   refreshLoading = false;
   modeLoading = false;
+
   refreshConnUI();
-  cloudSetState("synced");
+  cloudRender();
+
+  setValidatorState("loading");
 }, { passive: true });
 
 /* ================= BOOT ================= */
 (async function boot() {
   cloudLoad();
   cloudRender();
-  cloudSetState("synced");
+
+  // Move "Last update" to bottom (below cards/footer) if needed
+  const updated = $("updated");
+  const root = $("appRoot") || q(".container");
+  const footer = q(".pro-footer", root);
+  if (updated && root) {
+    // ensure it is near bottom
+    if (footer && updated.nextSibling !== footer) {
+      root.insertBefore(footer, null);
+      root.insertBefore(updated, footer);
+    } else {
+      root.appendChild(updated);
+    }
+  }
 
   refreshConnUI();
   setTimeout(() => setUIReady(true), 2800);
-
-  // move "Last update" to bottom (after footer) if possible
-  try{
-    const upd = $("updated");
-    const footer = document.querySelector(".pro-footer");
-    if (upd && footer && footer.parentNode) footer.parentNode.insertBefore(upd, footer.nextSibling);
-  } catch {}
 
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
   attachRewardFilterHandler();
 
-  // keep address display, but keep input empty for new searches
-  if (addressInput) addressInput.value = "";
-  setAddressDisplay(address);
+  attachPullToRefresh();
 
-  // inject UI extras
-  applyInjectiveLogo();
-
-  // drawer hint/meta (optional)
-  try{
-    const foot = document.querySelector(".drawer-foot");
-    if (foot && !foot.querySelector("#drawerMeta")){
-      const meta = document.createElement("div");
-      meta.id = "drawerMeta";
-      meta.style.cssText = "margin-top:10px;font-size:.74rem;font-weight:900;opacity:.78;text-align:right;";
-      meta.textContent = `INJ Portfolio · v${APP_VERSION}`;
-      foot.appendChild(meta);
-    }
-  } catch {}
-
-  wdMinFilter = safe($("rewardFilter")?.value || 0);
-
+  // mode UI
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // load cached snapshot to avoid zeros
-  if (address) acctCacheLoad();
-
-  if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
-    clearStakeSeriesStorage();
-    resetStakeSeriesFromNow();
-  } else {
-    if (address) loadStakeSeries();
-    drawStakeChart();
-  }
-
+  // load persisted per-address series
   if (address) {
+    setAddressDisplay(address);
+    loadStakeSeries();
+    drawStakeChart();
+
     loadWdAll();
     rebuildWdView();
     goRewardLive();
+
+    loadNW();
+    updateTfUnlockUI();
+    drawNW();
+
+    loadEvents();
+    renderEventsTable();
+  } else {
+    // no wallet set yet, still init charts if needed
+    drawStakeChart();
+    drawRewardWdChart();
+    drawNW();
   }
 
-  if (address) loadNW();
-  attachNWTFHandlers();
-  attachNWScaleToggle();
-  drawNW();
+  // ensure buttons for charts exist inside cards
+  setTimeout(ensureExpandButtons, 50);
 
-  // init charts after they exist
-  setTimeout(() => {
-    injectExpandButtons();
-  }, 200);
+  // init validator mini card
+  ensureValidatorMiniCard();
+  setValidatorState("loading");
 
   modeLoading = true;
   refreshConnUI();
 
+  // initial snapshots
   await loadCandleSnapshot(liveMode ? false : true);
   await loadChartToday(liveMode ? false : true);
 
   if (liveMode) {
     startTradeWS();
     startKlineWS();
-    if (address) await loadAccount();
+    if (address) await loadAccount(true);
     startAllTimers();
   } else {
     stopAllTimers();
@@ -2655,9 +2993,31 @@ window.addEventListener("offline", () => {
     refreshConnUI();
     await refreshLoadAllOnce();
   }
+
+  modeLoading = false;
+  refreshConnUI();
 })();
 
 /* ================= LOOP ================= */
+let lastPriceEventTs = 0;
+
+function maybePriceEvent(pct24h) {
+  // price event if abs 24h change crosses 5% and not too frequent
+  const now = Date.now();
+  if (now - lastPriceEventTs < 15 * 60 * 1000) return; // 15 min cooldown
+  const v = safe(pct24h);
+  if (Math.abs(v) < 5) return;
+
+  lastPriceEventTs = now;
+  addEvent({
+    type: "PRICE MOVE (24H)",
+    ts: now,
+    move: `${v > 0 ? "+" : ""}${v.toFixed(2)}%`,
+    status: "ok",
+    kind: v > 0 ? "up" : "down"
+  });
+}
+
 function animate() {
   // PRICE
   const op = displayed.price;
@@ -2669,64 +3029,50 @@ function animate() {
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
 
+  // ✅ arrow colors correct (by CSS classes)
   updatePerf("arrow24h", "pct24h", pD);
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
+
+  maybePriceEvent(pD);
 
   // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
-  const dUp   = "linear-gradient(90deg, rgba(34,197,94,.55), rgba(16,185,129,.32))";
+  // Bars
+  const dUp = "linear-gradient(90deg, rgba(34,197,94,.55), rgba(16,185,129,.32))";
   const dDown = "linear-gradient(270deg, rgba(239,68,68,.55), rgba(248,113,113,.30))";
 
-  const wUp   = "linear-gradient(90deg, rgba(59,130,246,.55), rgba(99,102,241,.30))";
+  const wUp = "linear-gradient(90deg, rgba(59,130,246,.55), rgba(99,102,241,.30))";
   const wDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(59,130,246,.26))";
 
-  const mUp   = "linear-gradient(90deg, rgba(249,115,22,.50), rgba(236,72,153,.28))";
+  const mUp = "linear-gradient(90deg, rgba(249,115,22,.50), rgba(236,72,153,.28))";
   const mDown = "linear-gradient(270deg, rgba(239,68,68,.40), rgba(236,72,153,.25))";
 
   renderBar($("priceBar"), $("priceLine"), targetPrice, candle.d.open, candle.d.low, candle.d.high, dUp, dDown);
-  renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
+  renderBar($("weekBar"), $("weekLine"), targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  // Values + flash extremes
-  const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
-  const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
-  const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
-
+  // Values
   if (tfReady.d) {
-    const low = safe(candle.d.low), high = safe(candle.d.high);
-    setText("priceMin", low.toFixed(3));
+    setText("priceMin", safe(candle.d.low).toFixed(3));
     setText("priceOpen", safe(candle.d.open).toFixed(3));
-    setText("priceMax", high.toFixed(3));
-    if (lastExtremes.d.low !== null && low !== lastExtremes.d.low) flash(pMinEl);
-    if (lastExtremes.d.high !== null && high !== lastExtremes.d.high) flash(pMaxEl);
-    lastExtremes.d.low = low; lastExtremes.d.high = high;
+    setText("priceMax", safe(candle.d.high).toFixed(3));
   } else {
     setText("priceMin", "--"); setText("priceOpen", "--"); setText("priceMax", "--");
   }
-
   if (tfReady.w) {
-    const low = safe(candle.w.low), high = safe(candle.w.high);
-    setText("weekMin", low.toFixed(3));
+    setText("weekMin", safe(candle.w.low).toFixed(3));
     setText("weekOpen", safe(candle.w.open).toFixed(3));
-    setText("weekMax", high.toFixed(3));
-    if (lastExtremes.w.low !== null && low !== lastExtremes.w.low) flash(wMinEl);
-    if (lastExtremes.w.high !== null && high !== lastExtremes.w.high) flash(wMaxEl);
-    lastExtremes.w.low = low; lastExtremes.w.high = high;
+    setText("weekMax", safe(candle.w.high).toFixed(3));
   } else {
     setText("weekMin", "--"); setText("weekOpen", "--"); setText("weekMax", "--");
   }
-
   if (tfReady.m) {
-    const low = safe(candle.m.low), high = safe(candle.m.high);
-    setText("monthMin", low.toFixed(3));
+    setText("monthMin", safe(candle.m.low).toFixed(3));
     setText("monthOpen", safe(candle.m.open).toFixed(3));
-    setText("monthMax", high.toFixed(3));
-    if (lastExtremes.m.low !== null && low !== lastExtremes.m.low) flash(mMinEl);
-    if (lastExtremes.m.high !== null && high !== lastExtremes.m.high) flash(mMaxEl);
-    lastExtremes.m.low = low; lastExtremes.m.high = high;
+    setText("monthMax", safe(candle.m.high).toFixed(3));
   } else {
     setText("monthMin", "--"); setText("monthOpen", "--"); setText("monthMax", "--");
   }
@@ -2735,13 +3081,19 @@ function animate() {
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
-  setText("availableUsd", `≈ $${(displayed.available * displayed.price).toFixed(2)}`);
+
+  const oau = displayed.availableUsd;
+  displayed.availableUsd = tick(displayed.availableUsd, displayed.available * displayed.price);
+  colorMoney($("availableUsd"), displayed.availableUsd, oau, 2);
 
   // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-  setText("stakeUsd", `≈ $${(displayed.stake * displayed.price).toFixed(2)}`);
+
+  const osu = displayed.stakeUsd;
+  displayed.stakeUsd = tick(displayed.stakeUsd, displayed.stake * displayed.price);
+  colorMoney($("stakeUsd"), displayed.stakeUsd, osu, 2);
 
   const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
   const stakeBar = $("stakeBar");
@@ -2759,7 +3111,10 @@ function animate() {
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
-  setText("rewardsUsd", `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`);
+
+  const oru = displayed.rewardsUsd;
+  displayed.rewardsUsd = tick(displayed.rewardsUsd, displayed.rewards * displayed.price);
+  colorMoney($("rewardsUsd"), displayed.rewardsUsd, oru, 2);
 
   const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
@@ -2775,10 +3130,10 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  // APR (same digit animation style)
+  // APR (animated digits too)
   const oapr = displayed.apr;
   displayed.apr = tick(displayed.apr, apr);
-  colorPercent($("apr"), displayed.apr, oapr, 2);
+  colorNumber($("apr"), displayed.apr, oapr, 2);
 
   // time
   setText("updated", "Last update: " + nowLabel());
@@ -2787,32 +3142,73 @@ function animate() {
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
-  // ✅ se stai interagendo sul grafico, non sovrascrivere il valore puntato
   if (!nwHoverActive) {
     const onw = displayed.netWorthUsd;
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
+
+    // keep PnL / LIVE label consistent
+    drawNW();
   }
 
-  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+  // total owned box (if exists)
+  const netWorthInjEl = $("netWorthInj");
+  if (netWorthInjEl) netWorthInjEl.textContent = `${totalInj.toFixed(4)} INJ`;
 
-  // net worth asset row (supports both ids OR classes)
-  const qtyEl = $("nwAssetQty") || document.querySelector(".nw-asset-qty");
-  const pxEl  = $("nwAssetPrice") || document.querySelector(".nw-asset-price");
-  const usdEl = $("nwAssetUsd") || document.querySelector(".nw-asset-usd");
+  // record points: in LIVE we keep collecting; in refresh mode only on account updates
+  if (address && liveMode) recordNetWorthPoint();
 
-  if (qtyEl) qtyEl.textContent = totalInj.toFixed(4);
-  if (pxEl)  pxEl.textContent  = `$${safe(displayed.price).toFixed(2)}`;
-  if (usdEl) usdEl.textContent = `≈ $${(totalInj * safe(displayed.price)).toFixed(2)}`;
+  // keep blinking dot smooth
+  if (netWorthChart) netWorthChart.draw();
 
-  // densità: registra spesso (solo live + address) ma throttled internamente
-  if (address && liveMode) recordNetWorthPoint(false);
+  // update validator dot state (live)
+  if (address) {
+    if (!hasInternet()) setValidatorState("loading");
+    else if (liveMode) setValidatorState(liveReady() ? "ok" : "loading");
+    else setValidatorState(refreshLoaded ? "ok" : "loading");
+  }
 
   refreshConnUI();
-
-  // ✅ keep blinking dot fluid
-  if (netWorthChart) netWorthChart.draw();
 
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ================= FINAL TOUCHES (layout + buttons) ================= */
+function moveMenuFooterInfo() {
+  // If your HTML has placeholders, we’ll update them; otherwise safe no-op
+  const drawerFoot = q(".drawer-foot");
+  const ver = $("drawerVersion") || q("[data-drawer-version]");
+  const cl = $("drawerCloud") || q("[data-drawer-cloud]");
+  if (drawerFoot && (ver || cl)) {
+    if (ver) ver.textContent = "App v2.0.2";
+    if (cl) cl.textContent = `Cloud Sync · ${Math.max(0, Math.floor(cloudPts))} pts`;
+  }
+}
+
+setTimeout(() => {
+  ensureExpandButtons();
+  moveMenuFooterInfo();
+}, 200);
+
+/* ================= WHAT THIS JS ADDS (quick notes) =================
+1) Net Worth:
+   - LIVE TF (2 minutes, scrolling window) + fixed TF (1D/1W/1M/1Y/ALL) unlocked only when enough history exists.
+   - LIN/LOG toggle preserved per wallet.
+   - Persistent points per wallet, never resets after refresh.
+
+2) Expand chart icon:
+   - Small ⤢ button injected inside each chart card (Net Worth / Staked / Rewards / 1D Chart).
+   - Fullscreen modal keeps pan/zoom/hover data.
+
+3) Validator mini-card:
+   - Auto-detected from first delegation validator.
+   - Dot: green active, amber loading, red offline.
+
+4) Events page:
+   - Real page (not “coming soon”) with table stored per wallet.
+   - Logs stake/unstake, reward withdraw, price events, refresh events.
+
+5) Pull-to-refresh:
+   - Mobile pull down at top triggers refresh load (works in LIVE and REFRESH modes).
+===================================================== */
