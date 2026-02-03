@@ -22,31 +22,23 @@ const REWARD_WD_LOCAL_VER = 2;
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
 /* NET WORTH persistence */
-const NW_LOCAL_VER = 2;
+const NW_LOCAL_VER = 2; // bumped: include tf + scale + live
 const NW_MAX_POINTS = 4800;
 
-/* NET WORTH LIVE */
-const NW_LIVE_WINDOW_MS = 120_000;     // ✅ 2 minuti
-const NW_LIVE_MIN_DT_MS = 900;         // campionamento live
-const NW_LIVE_MIN_DUSD  = 0.05;        // o se cambia almeno di 5 cent
-const NW_FIXED_MIN_DT_MS = 5000;       // punti “storici”
-const NW_FIXED_MIN_DUSD  = 0.25;
-
-const NW_UNLOCK_W_MS = 24 * 60 * 60 * 1000;     // mostra 1W dopo 1 giorno
-const NW_UNLOCK_M_MS = 7 * 24 * 60 * 60 * 1000; // mostra 1M dopo 1 settimana
-const NW_UNLOCK_Y_MS = 30 * 24 * 60 * 60 * 1000;// mostra 1Y dopo 1 mese
-const NW_UNLOCK_ALL_MS = 365 * 24 * 60 * 60 * 1000; // mostra ALL dopo 1 anno
-
-/* PRICE CHART cache */
-const PRICE_CACHE_VER = 1;
+/* NET WORTH live window */
+const NW_LIVE_WINDOW_MS = 5 * 60_000; // ✅ LIVE = 5min (manteniamo 5 min)
 
 /* REFRESH mode staging */
 const REFRESH_RED_MS = 220;
 let refreshLoaded = false;
 let refreshLoading = false;
 
-/* ✅ Status dot "mode loading" */
+/* ✅ Status dot "mode loading" (switch / data loading) */
 let modeLoading = false;
+
+/* Injective logo (stable PNG) */
+const INJ_LOGO_PNG =
+  "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/nativeinjective/info/logo.png";
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -55,54 +47,56 @@ const safe = (n) => (Number.isFinite(+n) ? +n : 0);
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
-function fmtHHMMSS(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; }
+function fmtDDMM(ms) { const d = new Date(ms); return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}`; }
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
 function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
+function setHTML(id, html){ const el = $(id); if (el) el.innerHTML = html; }
+
+function isLight(){
+  return document.body.dataset.theme === "light";
+}
 
 function fmtSmart(v){
   v = safe(v);
   const av = Math.abs(v);
-  if (av >= 1000) return v.toFixed(0);
-  if (av >= 100) return v.toFixed(1);
-  if (av >= 10) return v.toFixed(2);
-  if (av >= 1) return v.toFixed(3);
-  if (av >= 0.1) return v.toFixed(4);
+  if (av >= 10000) return v.toFixed(0);
+  if (av >= 1000) return v.toFixed(1);
+  if (av >= 100) return v.toFixed(2);
+  if (av >= 10) return v.toFixed(3);
+  if (av >= 1) return v.toFixed(4);
   return v.toFixed(6);
 }
 
-function axisGridColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
+/* ================= SMOOTH DISPLAY ================= */
+function scrollSpeed() {
+  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
+  const base = 0.08;
+  const maxExtra = 0.80;
+  return base + (t * t) * maxExtra;
 }
-function axisTickColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
+function tick(cur, tgt) {
+  if (!Number.isFinite(tgt)) return cur;
+  return cur + (tgt - cur) * scrollSpeed();
 }
 
-/* ================= DIGIT ANIM (same as INJ price) ================= */
+/* ================= COLORED DIGITS (same style as price) ================= */
 function colorNumber(el, n, o, d) {
   if (!el) return;
   n = safe(n); o = safe(o);
   const ns = n.toFixed(d), os = o.toFixed(d);
   if (ns === os) { el.textContent = ns; return; }
-  const base = (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
+
+  const baseCol = isLight() ? "#0f172a" : "#f9fafb";
+  const upCol = "#22c55e";
+  const dnCol = "#ef4444";
+
   el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : base;
+    const col = c !== os[i] ? (n > o ? upCol : dnCol) : baseCol;
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
 }
-function colorNumberSuffix(el, n, o, d, suffix){
-  if (!el) return;
-  n = safe(n); o = safe(o);
-  const ns = n.toFixed(d), os = o.toFixed(d);
-  if (ns === os) { el.textContent = ns + suffix; return; }
-  const base = (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
-  const out = [...ns].map((c, i) => {
-    const col = c !== os[i] ? (n > o ? "#22c55e" : "#ef4444") : base;
-    return `<span style="color:${col}">${c}</span>`;
-  });
-  out.push(`<span style="color:${base}">${suffix}</span>`);
-  el.innerHTML = out.join("");
-}
+
 function colorMoney(el, n, o, decimals = 2){
   if (!el) return;
   n = safe(n); o = safe(o);
@@ -110,7 +104,7 @@ function colorMoney(el, n, o, decimals = 2){
   const os = o.toFixed(decimals);
   if (ns === os) { el.textContent = `$${ns}`; return; }
 
-  const baseCol = (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
+  const baseCol = isLight() ? "#0f172a" : "#f9fafb";
   const upCol = "#22c55e";
   const dnCol = "#ef4444";
   const dir = (n > o) ? "up" : "down";
@@ -124,29 +118,27 @@ function colorMoney(el, n, o, decimals = 2){
   }
   el.innerHTML = out.join("");
 }
-function colorApproxMoney(el, n, o, decimals = 2){
+
+function colorPercent(el, n, o, decimals = 2){
   if (!el) return;
   n = safe(n); o = safe(o);
   const ns = n.toFixed(decimals);
   const os = o.toFixed(decimals);
+  if (ns === os) { el.textContent = `${ns}%`; return; }
 
-  const baseCol = (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
-  if (ns === os) { el.textContent = `≈ $${ns}`; return; }
-
+  const baseCol = isLight() ? "#0f172a" : "#f9fafb";
   const upCol = "#22c55e";
   const dnCol = "#ef4444";
   const dir = (n > o) ? "up" : "down";
 
-  const out = [
-    `<span style="color:${baseCol}">≈ </span>`,
-    `<span style="color:${baseCol}">$</span>`
-  ];
+  const out = [];
   for (let i = 0; i < ns.length; i++){
     const c = ns[i];
     const oc = os[i];
     const col = (c !== oc) ? (dir === "up" ? upCol : dnCol) : baseCol;
     out.push(`<span style="color:${col}">${c}</span>`);
   }
+  out.push(`<span style="color:${baseCol}">%</span>`);
   el.innerHTML = out.join("");
 }
 
@@ -166,13 +158,18 @@ window.addEventListener("unhandledrejection", (e) => {
   console.error("Promise Error:", e?.reason || e);
 });
 
-/* ================= THEME / MODE ================= */
+/* ================= THEME / MODE (storage) ================= */
 const THEME_KEY = "inj_theme";
 const MODE_KEY  = "inj_mode"; // live | refresh
-const ADDR_KEY  = "inj_address";
-
 let theme   = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
+
+function axisGridColor() {
+  return isLight() ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
+}
+function axisTickColor() {
+  return isLight() ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
+}
 
 function applyTheme(t){
   theme = (t === "light") ? "light" : "dark";
@@ -184,7 +181,7 @@ function applyTheme(t){
 }
 applyTheme(theme);
 
-/* ================= Chart.js Zoom plugin (safe) ================= */
+/* ================= CHARTJS ZOOM REGISTER (NO CRASH) ================= */
 let ZOOM_OK = false;
 function tryRegisterZoom(){
   try{
@@ -200,126 +197,7 @@ function tryRegisterZoom(){
 }
 ZOOM_OK = tryRegisterZoom();
 
-/* ================= EXTRA UI (expand overlay + HUD) ================= */
-let expandedCard = null;
-let expandedCanvasId = null;
-
-function ensureExtraUI(){
-  // small CSS fixes + expand btn positioning (even if CSS is older)
-  if (!document.getElementById("injExtraStyle")){
-    const st = document.createElement("style");
-    st.id = "injExtraStyle";
-    st.textContent = `
-      .expand-btn{ position:absolute; top:12px; right:12px; }
-      .stake-percent,.reward-percent{ background: rgba(0,0,0,0.22); }
-      body[data-theme="light"] .stake-percent,
-      body[data-theme="light"] .reward-percent{ background: rgba(255,255,255,0.55); }
-    `;
-    document.head.appendChild(st);
-  }
-
-  if (!$("cardExpandOverlay")){
-    const ov = document.createElement("div");
-    ov.id = "cardExpandOverlay";
-    ov.className = "card-expand-overlay";
-    ov.setAttribute("aria-hidden", "true");
-    document.body.appendChild(ov);
-  }
-  if (!$("chartHud")){
-    const hud = document.createElement("div");
-    hud.id = "chartHud";
-    hud.className = "chart-hud";
-    hud.textContent = "";
-    document.body.appendChild(hud);
-  }
-  if (!$("expandClose")){
-    const btn = document.createElement("button");
-    btn.id = "expandClose";
-    btn.className = "expand-close";
-    btn.type = "button";
-    btn.setAttribute("aria-label", "Close");
-    btn.textContent = "✕";
-    document.body.appendChild(btn);
-  }
-
-  $("cardExpandOverlay")?.addEventListener("click", () => closeExpandedCard(), { passive:true });
-  $("expandClose")?.addEventListener("click", (e) => { e?.preventDefault?.(); closeExpandedCard(); }, { passive:false });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && document.body.classList.contains("card-expanded")) closeExpandedCard();
-  });
-
-  // If user asked to remove “total qty px” row: hide it if present (safe)
-  const maybeRow = document.querySelector(".networth-asset");
-  if (maybeRow) maybeRow.style.display = "none";
-}
-ensureExtraUI();
-
-function setChartHud(text){
-  const hud = $("chartHud");
-  if (!hud) return;
-  hud.textContent = text || "";
-}
-
-function openExpandedCard(cardEl, canvasId){
-  if (!cardEl) return;
-  closeExpandedCard();
-
-  expandedCard = cardEl;
-  expandedCanvasId = canvasId || null;
-
-  document.body.classList.add("card-expanded", "no-scroll");
-  cardEl.classList.add("is-expanded");
-
-  // Resize charts after layout change
-  requestAnimationFrame(() => {
-    try{
-      if (canvasId === "netWorthChart" && netWorthChart) netWorthChart.resize();
-      if (canvasId === "stakeChart" && stakeChart) stakeChart.resize();
-      if (canvasId === "rewardChart" && rewardChart) rewardChart.resize();
-      if (canvasId === "priceChart" && chart) chart.resize();
-    } catch {}
-  });
-}
-
-function closeExpandedCard(){
-  document.body.classList.remove("card-expanded", "no-scroll");
-  if (expandedCard) expandedCard.classList.remove("is-expanded");
-  expandedCard = null;
-  expandedCanvasId = null;
-  setChartHud("");
-}
-
-/* Create expand buttons INSIDE cards */
-function addExpandBtnToCard(cardEl, canvasId){
-  if (!cardEl || !canvasId) return;
-  if (cardEl.querySelector(`button.expand-btn[data-canvas="${canvasId}"]`)) return;
-
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "icon-btn expand-btn";
-  btn.textContent = "⛶";
-  btn.setAttribute("aria-label", "Expand chart");
-  btn.dataset.canvas = canvasId;
-
-  btn.addEventListener("click", (e) => {
-    e?.preventDefault?.();
-    e?.stopPropagation?.();
-    openExpandedCard(cardEl, canvasId);
-  }, { passive:false });
-
-  // Put button exactly inside the card (top-right)
-  cardEl.appendChild(btn);
-}
-
-function wireExpandButtons(){
-  addExpandBtnToCard($("netWorthCard"), "netWorthChart");
-  addExpandBtnToCard(document.querySelector(".stake-card"), "stakeChart");
-  addExpandBtnToCard(document.querySelector(".reward-card"), "rewardChart");
-  addExpandBtnToCard(document.querySelector(".chart-card"), "priceChart");
-}
-wireExpandButtons();
-
-/* ================= CLOUD (footer + menu meta) ================= */
+/* ================= CLOUD (footer + points) ================= */
 const CLOUD_VER = 1;
 const CLOUD_KEY = `inj_cloud_v${CLOUD_VER}`;
 let cloudPts = 0;
@@ -343,63 +221,33 @@ function cloudSave(){
     return false;
   }
 }
-function cloudEnsureDrawerMeta(){
-  const foot = document.querySelector(".drawer-foot");
-  if (!foot) return;
 
-  if (foot.querySelector(".drawer-meta")) return;
-
-  const meta = document.createElement("div");
-  meta.className = "drawer-meta";
-  meta.innerHTML = `
-    <div class="drawer-meta-row">
-      <span class="drawer-meta-app">INJ Portfolio</span>
-      <span class="drawer-meta-dot">•</span>
-      <span class="drawer-meta-ver">v${APP_VERSION}</span>
-    </div>
-    <div class="drawer-meta-row">
-      <span class="drawer-meta-cloud" id="drawerCloudStatus">Cloud: —</span>
-      <span class="drawer-meta-dot">•</span>
-      <span class="drawer-meta-pts" id="drawerCloudPts">0 pts</span>
-    </div>
-  `;
-  foot.appendChild(meta);
-}
-cloudEnsureDrawerMeta();
+function hasInternet() { return navigator.onLine === true; }
 
 function cloudSetState(state){
   const root = $("appRoot");
   const st = $("cloudStatus");
-  const dst = $("drawerCloudStatus");
-  if (!root) return;
+  if (!root || !st) return;
 
   root.classList.remove("cloud-synced","cloud-saving","cloud-error");
 
-  const isOn = hasInternet();
-
   if (state === "saving"){
     root.classList.add("cloud-saving");
-    if (st) st.textContent = isOn ? "Cloud: Saving" : "Cloud: Offline cache";
-    if (dst) dst.textContent = isOn ? "Cloud: Saving" : "Cloud: Offline cache";
+    st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
     return;
   }
   if (state === "error"){
     root.classList.add("cloud-error");
-    if (st) st.textContent = "Cloud: Error";
-    if (dst) dst.textContent = "Cloud: Error";
+    st.textContent = "Cloud: Error";
     return;
   }
   root.classList.add("cloud-synced");
-  if (st) st.textContent = isOn ? "Cloud: Synced" : "Cloud: Offline cache";
-  if (dst) dst.textContent = isOn ? "Cloud: Synced" : "Cloud: Offline cache";
+  st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
 }
 
 function cloudRender(){
   const hist = $("cloudHistory");
-  const dpts = $("drawerCloudPts");
-  const txt = `${Math.max(0, Math.floor(cloudPts))} pts`;
-  if (hist) hist.textContent = `· ${txt}`;
-  if (dpts) dpts.textContent = txt;
+  if (hist) hist.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
 }
 
 function cloudBump(points = 1){
@@ -429,17 +277,18 @@ let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
 
-function hasInternet() { return navigator.onLine === true; }
-
-/* ✅ Determine if LIVE is truly "ready" */
 function liveReady(){
   const socketsOk = wsTradeOnline && wsKlineOnline;
   const accountOk = !address || accountOnline;
   return socketsOk && accountOk;
 }
 
-/* ✅ Status dot logic */
+let lastConnPaint = 0;
 function refreshConnUI() {
+  const now = Date.now();
+  if (now - lastConnPaint < 140) return; // throttle
+  lastConnPaint = now;
+
   if (!statusDot || !statusText) return;
 
   if (!hasInternet()) {
@@ -465,7 +314,6 @@ function refreshConnUI() {
 }
 
 /* ================= UI READY FAILSAFE ================= */
-const tfReady = { d: false, w: false, m: false };
 function setUIReady(force=false){
   const root = $("appRoot");
   if (!root) return;
@@ -481,21 +329,9 @@ async function fetchJSON(url) {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
-  } catch {
+  } catch (e) {
     return null;
   }
-}
-
-/* ================= SMOOTH DISPLAY ================= */
-function scrollSpeed() {
-  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
-  const base = 0.08;
-  const maxExtra = 0.80;
-  return base + (t * t) * maxExtra;
-}
-function tick(cur, tgt) {
-  if (!Number.isFinite(tgt)) return cur;
-  return cur + (tgt - cur) * scrollSpeed();
 }
 
 /* ================= PERF ================= */
@@ -566,7 +402,7 @@ const addressInput = $("addressInput");
 const addressDisplay = $("addressDisplay");
 const menuBtn = $("menuBtn");
 
-let address = localStorage.getItem(ADDR_KEY) || "";
+let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = address || "";
 
 function setAddressDisplay(addr) {
@@ -588,31 +424,38 @@ function closeSearch() {
   document.body.classList.remove("search-open");
   addressInput?.blur();
 }
-if (addressInput) addressInput.value = pendingAddress;
 
-searchBtn?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  e?.stopPropagation?.();
-  if (!searchWrap.classList.contains("open")) openSearch();
-  else addressInput?.focus();
-}, { passive: false });
+if (addressInput) addressInput.value = "";
 
-addressInput?.addEventListener("focus", () => openSearch(), { passive: true });
-addressInput?.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
+if (searchBtn) {
+  searchBtn.addEventListener("click", (e) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    if (!searchWrap.classList.contains("open")) openSearch();
+    else addressInput?.focus();
+  }, { passive: false });
+}
 
-addressInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    commitAddress(pendingAddress);
-    closeSearch();
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    addressInput.value = address || "";
-    pendingAddress = address || "";
-    closeSearch();
-  }
-});
+if (addressInput) {
+  addressInput.addEventListener("focus", () => openSearch(), { passive: true });
 
+  addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
+
+  addressInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitAddress(pendingAddress);
+      closeSearch();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      addressInput.value = "";
+      pendingAddress = "";
+      closeSearch();
+    }
+  });
+}
+
+/* ✅ non rompere la lente: chiudi solo se clicchi DAVVERO fuori */
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
@@ -658,7 +501,7 @@ themeToggle?.addEventListener("click", (e) => {
   applyTheme(theme === "dark" ? "light" : "dark");
 }, { passive:false });
 
-/* ================= COMING SOON ================= */
+/* ================= COMING SOON overlay ================= */
 const comingSoon = $("comingSoon");
 const comingTitle = $("comingTitle");
 const comingSub = $("comingSub");
@@ -790,14 +633,14 @@ liveToggle?.addEventListener("click", (e) => {
 }, { passive:false });
 
 /* ================= STATE ================= */
-let targetPrice = 0;
+let targetPrice = safe(localStorage.getItem("inj_last_price") || 0);
 let displayed = {
-  price: 0,
-  available: 0, stake: 0, rewards: 0,
+  price: targetPrice || 0,
+  available: 0,
+  stake: 0,
+  rewards: 0,
   apr: 0,
-  availableUsd: 0, stakeUsd: 0, rewardsUsd: 0,
-  netWorthUsd: 0,
-  netWorthInj: 0
+  netWorthUsd: 0
 };
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
@@ -807,6 +650,45 @@ const candle = {
   w: { t: 0, open: 0, high: 0, low: 0 },
   m: { t: 0, open: 0, high: 0, low: 0 },
 };
+const tfReady = { d: false, w: false, m: false };
+
+/* ================= ACCOUNT CACHE (avoid 0 after refresh) ================= */
+const ACCT_CACHE_VER = 1;
+function acctCacheKey(addr){
+  const a = (addr || "").trim();
+  return a ? `inj_acct_cache_v${ACCT_CACHE_VER}_${a}` : null;
+}
+function acctCacheLoad(){
+  const key = acctCacheKey(address);
+  if (!key) return;
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (!obj) return;
+    availableInj = safe(obj.available);
+    stakeInj     = safe(obj.stake);
+    rewardsInj   = safe(obj.rewards);
+    apr          = safe(obj.apr);
+    displayed.available = availableInj;
+    displayed.stake     = stakeInj;
+    displayed.rewards   = rewardsInj;
+    displayed.apr       = apr;
+  } catch {}
+}
+function acctCacheSave(){
+  const key = acctCacheKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({
+      t: Date.now(),
+      available: safe(availableInj),
+      stake: safe(stakeInj),
+      rewards: safe(rewardsInj),
+      apr: safe(apr),
+    }));
+  } catch {}
+}
 
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
@@ -822,7 +704,9 @@ function stopAllSockets(){
   if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
 }
 
-function clearTradeRetry() { if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; } }
+function clearTradeRetry() {
+  if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
+}
 function scheduleTradeRetry() {
   clearTradeRetry();
   tradeRetryTimer = setTimeout(() => { if (liveMode) startTradeWS(); }, 1200);
@@ -854,6 +738,7 @@ function startTradeWS() {
     if (!p) return;
 
     targetPrice = p;
+    try { localStorage.setItem("inj_last_price", String(p)); } catch {}
 
     if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
     if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
@@ -861,7 +746,9 @@ function startTradeWS() {
   };
 }
 
-function clearKlineRetry() { if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; } }
+function clearKlineRetry() {
+  if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
+}
 function scheduleKlineRetry() {
   clearKlineRetry();
   klineRetryTimer = setTimeout(() => { if (liveMode) startKlineWS(); }, 1200);
@@ -910,7 +797,7 @@ function startKlineWS() {
   wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
   wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
 
-  wsKline.onmessage = (e) => {
+  wsKline.onmessage = async (e) => {
     let payload;
     try { payload = JSON.parse(e.data); } catch { return; }
     const data = payload?.data;
@@ -969,11 +856,13 @@ async function loadAccount(isRefresh=false) {
 
   apr = safe(i.inflation) * 100;
 
+  acctCacheSave();
+
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
 
-  // ✅ NW (fixed point) once per account update
-  recordNetWorthFixedPoint();
+  /* ✅ NET WORTH: record point once account updates */
+  recordNetWorthPoint(true);
 
   setUIReady(true);
 }
@@ -1014,7 +903,7 @@ async function loadCandleSnapshot(isRefresh=false) {
   setUIReady(true);
 }
 
-/* ================= PRICE CHART (1D) + CACHE ================= */
+/* ================= PRICE CHART (1D) ================= */
 let chart = null;
 let chartLabels = [];
 let chartData = [];
@@ -1025,55 +914,6 @@ let hoverActive = false;
 let hoverIndex = null;
 let pinnedIndex = null;
 let isPanning = false;
-
-function priceCacheKeyForToday(){
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = pad2(d.getMonth() + 1);
-  const day = pad2(d.getDate());
-  return `inj_price_1m_v${PRICE_CACHE_VER}_${y}-${m}-${day}`;
-}
-let priceCacheSaveTimer = null;
-function priceCacheSave(){
-  try{
-    const key = priceCacheKeyForToday();
-    localStorage.setItem(key, JSON.stringify({
-      v: PRICE_CACHE_VER,
-      t: Date.now(),
-      labels: chartLabels,
-      data: chartData,
-      lastMinute: lastChartMinuteStart
-    }));
-  } catch {}
-}
-function priceCacheSaveSoon(){
-  if (priceCacheSaveTimer) return;
-  priceCacheSaveTimer = setTimeout(() => {
-    priceCacheSaveTimer = null;
-    priceCacheSave();
-  }, 1200);
-}
-function priceCacheLoad(){
-  try{
-    const key = priceCacheKeyForToday();
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== PRICE_CACHE_VER) return false;
-
-    const lbs = Array.isArray(obj.labels) ? obj.labels : [];
-    const dat = Array.isArray(obj.data) ? obj.data.map(Number) : [];
-    const n = Math.min(lbs.length, dat.length);
-    if (n < 5) return false;
-
-    chartLabels = lbs.slice(-DAY_MINUTES);
-    chartData = dat.slice(-DAY_MINUTES);
-    lastChartMinuteStart = safe(obj.lastMinute) || 0;
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
@@ -1147,14 +987,8 @@ function updatePinnedOverlay() {
     return;
   }
 
-  const text = `${label} • $${price.toFixed(4)}`;
-  chartEl.textContent = text;
+  chartEl.textContent = `${label} • $${price.toFixed(4)}`;
   overlay.classList.add("show");
-
-  // HUD when expanded
-  if (document.body.classList.contains("card-expanded") && expandedCanvasId === "priceChart"){
-    setChartHud(text);
-  }
 }
 
 async function fetchKlines1mRange(startTime, endTime) {
@@ -1273,7 +1107,6 @@ async function loadChartToday(isRefresh=false) {
   }
 
   chartBootstrappedToday = true;
-  priceCacheSaveSoon();
   setUIReady(true);
 }
 
@@ -1308,9 +1141,6 @@ function setupChartInteractions() {
     pinnedIndex = null;
     updatePinnedOverlay();
     if (chart) chart.update("none");
-    if (document.body.classList.contains("card-expanded") && expandedCanvasId === "priceChart"){
-      setChartHud("");
-    }
   };
 
   canvas.addEventListener("mousemove", handleMove, { passive: true });
@@ -1343,7 +1173,6 @@ function updateChartFrom1mKline(k) {
     if (idx >= 0) {
       chart.data.datasets[0].data[idx] = close;
       chart.update("none");
-      priceCacheSaveSoon();
     }
     return;
   }
@@ -1356,7 +1185,6 @@ function updateChartFrom1mKline(k) {
   while (chart.data.datasets[0].data.length > DAY_MINUTES) chart.data.datasets[0].data.shift();
 
   chart.update("none");
-  priceCacheSaveSoon();
 }
 
 /* ================= STAKE CHART (persist) ================= */
@@ -1480,18 +1308,6 @@ function initStakeChart() {
       }
     }
   });
-
-  attachHudForCanvas("stakeChart", () => {
-    // show last point if nothing hovered
-    const n = stakeData.length;
-    if (!n) return "";
-    return `Stake • ${safe(stakeData[n-1]).toFixed(6)} INJ`;
-  }, (idx) => {
-    idx = clamp(idx, 0, stakeData.length - 1);
-    const v = safe(stakeData[idx]);
-    const lab = stakeLabels[idx] || "";
-    return `${lab} • ${v.toFixed(6)} INJ`;
-  });
 }
 function drawStakeChart() {
   if (!stakeChart) initStakeChart();
@@ -1554,7 +1370,7 @@ function saveWdAll() {
   if (!key) return;
   try {
     localStorage.setItem(key, JSON.stringify({
-      v: Orange = REWARD_WD_LOCAL_VER, t: Date.now(),
+      v: REWARD_WD_LOCAL_VER, t: Date.now(),
       labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
     cloudBump(1);
@@ -1625,7 +1441,7 @@ const rewardPointLabelPlugin = {
     const ctx = ch.ctx;
     ctx.save();
     ctx.font = "800 11px Inter, sans-serif";
-    ctx.fillStyle = (document.body.dataset.theme === "light")
+    ctx.fillStyle = isLight()
       ? "rgba(15,23,42,0.88)"
       : "rgba(249,250,251,0.92)";
     ctx.textAlign = "center";
@@ -1711,17 +1527,6 @@ function initRewardWdChart() {
       }
     },
     plugins: [rewardPointLabelPlugin]
-  });
-
-  attachHudForCanvas("rewardChart", () => {
-    const n = wdValues.length;
-    if (!n) return "";
-    return `Rewards • last +${safe(wdValues[n-1]).toFixed(6)} INJ`;
-  }, (idx) => {
-    idx = clamp(idx, 0, wdValues.length - 1);
-    const v = safe(wdValues[idx]);
-    const lab = wdLabels[idx] || "";
-    return `${lab} • +${v.toFixed(6)} INJ`;
   });
 }
 
@@ -1810,53 +1615,42 @@ function maybeRecordRewardWithdrawal(newRewards) {
   wdLastRewardsSeen = r;
 }
 
-/* ================= NET WORTH (LIVE + fixed calendar TF) ================= */
-let nwTf = "live"; // live | 1d | 1w | 1m | 1y | all
-let nwScale = "lin"; // lin | log
-
-let nwFixedT = [];
-let nwFixedUsd = [];
-let nwFixedInj = [];
-
-let nwLiveT = [];
-let nwLiveUsd = [];
-let nwLiveInj = [];
+/* ================= NET WORTH (persist + chart) ================= */
+let nwTf = "live";          // ✅ live | 1d | 1w | 1m | 1y | all
+let nwScale = "linear";     // linear | log
+let nwTAll = [];
+let nwUsdAll = [];
+let nwInjAll = [];
 
 let netWorthChart = null;
+
 let nwHoverActive = false;
 let nwHoverIndex = null;
 
-let nwSaveTimer = null;
 function nwStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
 }
-function nwSaveSoon(bumpCloud=false){
-  if (!address) return;
-  if (nwSaveTimer) return;
-  nwSaveTimer = setTimeout(() => {
-    nwSaveTimer = null;
-    nwSave(bumpCloud);
-  }, 1200);
-}
-function nwSave(bumpCloud=false){
+
+function saveNW(){
   const key = nwStoreKey(address);
   if (!key) return;
   try{
     localStorage.setItem(key, JSON.stringify({
-      v: NW_LOCAL_VER,
-      t: Date.now(),
+      v: NW_LOCAL_VER, t: Date.now(),
+      tAll: nwTAll,
+      usdAll: nwUsdAll,
+      injAll: nwInjAll,
       tf: nwTf,
-      scale: nwScale,
-      fixed: { t: nwFixedT, usd: nwFixedUsd, inj: nwFixedInj },
-      live:  { t: nwLiveT,  usd: nwLiveUsd,  inj: nwLiveInj  }
+      scale: nwScale
     }));
-    if (bumpCloud) cloudBump(1);
+    cloudBump(1);
   } catch {
     cloudSetState("error");
   }
 }
-function nwLoad(){
+
+function loadNW(){
   const key = nwStoreKey(address);
   if (!key) return false;
   try{
@@ -1865,202 +1659,98 @@ function nwLoad(){
     const obj = JSON.parse(raw);
     if (!obj || obj.v !== NW_LOCAL_VER) return false;
 
-    nwTf = String(obj.tf || "live");
-    if (!["live","1d","1w","1m","1y","all"].includes(nwTf)) nwTf = "live";
+    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
+    nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
+    nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
 
-    nwScale = (obj.scale === "log") ? "log" : "lin";
+    const tf = String(obj.tf || "live");
+    nwTf = (["live","1d","1w","1m","1y","all"].includes(tf)) ? tf : "live";
+    const sc = String(obj.scale || "linear");
+    nwScale = (sc === "log") ? "log" : "linear";
 
-    const f = obj.fixed || {};
-    nwFixedT = Array.isArray(f.t) ? f.t.map(Number) : [];
-    nwFixedUsd = Array.isArray(f.usd) ? f.usd.map(Number) : [];
-    nwFixedInj = Array.isArray(f.inj) ? f.inj.map(Number) : [];
-
-    const l = obj.live || {};
-    nwLiveT = Array.isArray(l.t) ? l.t.map(Number) : [];
-    nwLiveUsd = Array.isArray(l.usd) ? l.usd.map(Number) : [];
-    nwLiveInj = Array.isArray(l.inj) ? l.inj.map(Number) : [];
-
-    nwClampAll();
-    nwTrimLiveWindow(); // keep only recent 2 min at load
+    clampNWArrays();
     return true;
   } catch {
     return false;
   }
 }
-function nwClampAll(){
-  const n = Math.min(nwFixedT.length, nwFixedUsd.length, nwFixedInj.length);
-  nwFixedT = nwFixedT.slice(-n);
-  nwFixedUsd = nwFixedUsd.slice(-n);
-  nwFixedInj = nwFixedInj.slice(-n);
-  if (nwFixedT.length > NW_MAX_POINTS){
-    nwFixedT = nwFixedT.slice(-NW_MAX_POINTS);
-    nwFixedUsd = nwFixedUsd.slice(-NW_MAX_POINTS);
-    nwFixedInj = nwFixedInj.slice(-NW_MAX_POINTS);
-  }
 
-  const n2 = Math.min(nwLiveT.length, nwLiveUsd.length, nwLiveInj.length);
-  nwLiveT = nwLiveT.slice(-n2);
-  nwLiveUsd = nwLiveUsd.slice(-n2);
-  nwLiveInj = nwLiveInj.slice(-n2);
-}
-function nwTrimLiveWindow(){
-  const now = Date.now();
-  const minT = now - NW_LIVE_WINDOW_MS - 10_000;
-  while (nwLiveT.length && safe(nwLiveT[0]) < minT){
-    nwLiveT.shift(); nwLiveUsd.shift(); nwLiveInj.shift();
+function clampNWArrays(){
+  const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
+  nwTAll = nwTAll.slice(-n);
+  nwUsdAll = nwUsdAll.slice(-n);
+  nwInjAll = nwInjAll.slice(-n);
+  if (nwTAll.length > NW_MAX_POINTS){
+    nwTAll = nwTAll.slice(-NW_MAX_POINTS);
+    nwUsdAll = nwUsdAll.slice(-NW_MAX_POINTS);
+    nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
   }
 }
-function nwSpanMs(){
-  if (nwFixedT.length < 2) return 0;
-  return safe(nwFixedT[nwFixedT.length - 1]) - safe(nwFixedT[0]);
-}
-function nwEnsureLiveButton(){
-  const wrap = $("nwTfSwitch");
-  if (!wrap) return;
-  if (wrap.querySelector('.tf-btn[data-tf="live"]')) return;
 
-  const b = document.createElement("button");
-  b.className = "tf-btn";
-  b.dataset.tf = "live";
-  b.type = "button";
-  b.textContent = "LIVE";
-  wrap.insertBefore(b, wrap.firstChild);
-}
-function nwUpdateTFVisibility(){
-  const wrap = $("nwTfSwitch");
-  if (!wrap) return;
-
-  nwEnsureLiveButton();
-
-  const span = nwSpanMs();
-
-  const mapShow = {
-    live: true,
-    "1d": true,
-    "1w": span >= NW_UNLOCK_W_MS,
-    "1m": span >= NW_UNLOCK_M_MS,
-    "1y": span >= NW_UNLOCK_Y_MS,
-    "all": span >= NW_UNLOCK_ALL_MS
-  };
-
-  wrap.querySelectorAll(".tf-btn").forEach(btn => {
-    const tf = btn.dataset.tf || "";
-    const show = !!mapShow[tf];
-    btn.style.display = show ? "" : "none";
-  });
-
-  // if current is hidden, fallback
-  const curBtn = wrap.querySelector(`.tf-btn[data-tf="${nwTf}"]`);
-  if (!curBtn || curBtn.style.display === "none"){
-    nwTf = "live";
-  }
-
-  // active state
-  wrap.querySelectorAll(".tf-btn").forEach(btn => {
-    btn.classList.toggle("active", (btn.dataset.tf || "") === nwTf);
-  });
-}
-function nwSetScale(next){
-  nwScale = (next === "log") ? "log" : "lin";
-  const btn = $("nwScaleToggle");
-  if (btn) btn.textContent = (nwScale === "log") ? "LOG" : "LIN";
-  if (netWorthChart){
-    netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
-    netWorthChart.update("none");
-  }
-  nwSaveSoon(false);
-}
-$("nwScaleToggle")?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  nwSetScale(nwScale === "lin" ? "log" : "lin");
-}, { passive:false });
-
-function startOfDayMs(now){
-  const d = new Date(now);
-  d.setHours(0,0,0,0);
-  return d.getTime();
-}
-function startOfWeekMs(now){
-  const d = new Date(now);
-  d.setHours(0,0,0,0);
-  // monday start
-  const day = (d.getDay() + 6) % 7; // monday=0
-  d.setDate(d.getDate() - day);
-  return d.getTime();
-}
-function startOfMonthMs(now){
-  const d = new Date(now);
-  return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-}
-function startOfYearMs(now){
-  const d = new Date(now);
-  return new Date(d.getFullYear(), 0, 1).getTime();
-}
-function endOfMonthMs(now){
-  const d = new Date(now);
-  return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
-}
-function endOfYearMs(now){
-  const d = new Date(now);
-  return new Date(d.getFullYear() + 1, 0, 1).getTime();
+function nwWindowMs(tf){
+  if (tf === "live") return NW_LIVE_WINDOW_MS;
+  if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
+  if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
+  if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
+  if (tf === "1d") return 24 * 60 * 60 * 1000;
+  return Infinity;
 }
 
-function nwBounds(tf){
-  const now = Date.now();
-  if (tf === "live") return [now - NW_LIVE_WINDOW_MS, now];
-  if (tf === "1d")  return [startOfDayMs(now), startOfDayMs(now) + 24*60*60*1000];
-  if (tf === "1w")  return [startOfWeekMs(now), startOfWeekMs(now) + 7*24*60*60*1000];
-  if (tf === "1m")  return [startOfMonthMs(now), endOfMonthMs(now)];
-  if (tf === "1y")  return [startOfYearMs(now), endOfYearMs(now)];
-  // all
-  const a = nwFixedT.length ? safe(nwFixedT[0]) : now;
-  const b = nwFixedT.length ? safe(nwFixedT[nwFixedT.length - 1]) : now;
-  return [Math.min(a,b), Math.max(a,b)];
+function nwDataSpan(){
+  if (nwTAll.length < 2) return 0;
+  const first = safe(nwTAll[0]);
+  const last = safe(nwTAll[nwTAll.length - 1]);
+  return Math.max(0, last - first);
 }
 
-function nwFormatTick(v){
-  const tf = nwTf;
-  const ms = safe(v);
-  if (!ms) return "";
-  if (tf === "live") return fmtHHMMSS(ms);
-  if (tf === "1d") return fmtHHMM(ms);
-  if (tf === "1w") {
-    const d = new Date(ms);
-    return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)} ${pad2(d.getHours())}:00`;
-  }
-  if (tf === "1m") {
-    const d = new Date(ms);
-    return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}`;
-  }
-  if (tf === "1y") {
-    const d = new Date(ms);
-    return `${pad2(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)}`;
-  }
-  // all
-  return fmtHHMM(ms);
+function nwFmtX(ts, tf){
+  const w = nwWindowMs(tf);
+  if (tf === "1y" || w >= 7 * 24 * 60 * 60 * 1000) return fmtDDMM(ts);
+  return fmtHHMM(ts);
 }
 
-function nwBuildView(){
-  const [minX, maxX] = nwBounds(nwTf);
-  const pts = [];
+/* ✅ Build view:
+   - LIVE: scorre sempre (ultimi 5min, ancora a destra)
+   - TF fissi: parte da sinistra e "riempie" finché non completa la finestra,
+     poi diventa rolling (last window) per restare utile.
+*/
+function nwBuildView(tf){
+  const n = nwTAll.length;
+  const points = [];
+  if (!n) return { points, xMin: 0, xMax: 0, tf };
 
-  if (nwTf === "live"){
-    for (let i = 0; i < nwLiveT.length; i++){
-      const t = safe(nwLiveT[i]);
-      const u = safe(nwLiveUsd[i]);
-      if (t >= minX && t <= maxX && u > 0) pts.push({ x: t, y: u });
-    }
+  const firstAll = safe(nwTAll[0]);
+  const lastAll  = safe(nwTAll[n - 1]);
+  const w = nwWindowMs(tf);
+
+  let xMin, xMax;
+
+  if (tf === "all") {
+    xMin = firstAll;
+    xMax = lastAll || (firstAll + 1);
+  } else if (tf === "live") {
+    xMax = Date.now();
+    xMin = xMax - w;
   } else {
-    for (let i = 0; i < nwFixedT.length; i++){
-      const t = safe(nwFixedT[i]);
-      const u = safe(nwFixedUsd[i]);
-      if (t >= minX && t <= maxX && u > 0) pts.push({ x: t, y: u });
+    const span = Math.max(0, lastAll - firstAll);
+    if (span < w) {
+      xMin = firstAll;
+      xMax = firstAll + w; // ✅ costruzione da sinistra: "spazio vuoto" a destra
+    } else {
+      xMax = lastAll;
+      xMin = xMax - w;     // rolling dopo che è pieno
     }
   }
 
-  // always sorted by time
-  pts.sort((a,b) => a.x - b.x);
-  return { minX, maxX, pts };
+  for (let i = 0; i < n; i++){
+    const t = safe(nwTAll[i]);
+    const u = safe(nwUsdAll[i]);
+    if (!Number.isFinite(t) || !Number.isFinite(u) || u <= 0) continue;
+    if (t < xMin || t > xMax) continue;
+    points.push({ x: t, y: u });
+  }
+
+  return { points, xMin, xMax, tf };
 }
 
 /* ✅ Pro: vertical line while interacting */
@@ -2083,19 +1773,31 @@ const nwVerticalLinePlugin = {
   }
 };
 
-/* ✅ Blinking yellow dot at last point */
+/* ✅ Blinking yellow dot at last visible point */
 const nwLastDotPlugin = {
   id: "nwLastDotPlugin",
   afterDatasetsDraw(ch) {
     const ds = ch.data.datasets?.[0];
-    if (!ds || !Array.isArray(ds.data) || !ds.data.length) return;
-
-    const meta = ch.getDatasetMeta(0);
-    const pts = meta?.data || [];
+    if (!ds) return;
+    const pts = ds.data || [];
     if (!pts.length) return;
 
-    const lastIdx = pts.length - 1;
-    const el = pts[lastIdx];
+    const meta = ch.getDatasetMeta(0);
+    const els = meta?.data || [];
+    if (!els.length) return;
+
+    const xScale = ch.scales?.x;
+    const xMax = Number.isFinite(xScale?.max) ? xScale.max : null;
+
+    let lastIdx = els.length - 1;
+    if (xMax != null) {
+      for (let i = els.length - 1; i >= 0; i--){
+        const p = pts[i];
+        if (p && Number.isFinite(p.x) && p.x <= xMax) { lastIdx = i; break; }
+      }
+    }
+
+    const el = els[lastIdx];
     if (!el) return;
 
     const t = Date.now();
@@ -2122,28 +1824,73 @@ const nwLastDotPlugin = {
   }
 };
 
+function nwApplySignStyling(pnl){
+  if (!netWorthChart) return;
+  const ds = netWorthChart.data.datasets?.[0];
+  if (!ds) return;
+
+  if (pnl > 0){
+    ds.borderColor = "#22c55e";
+    ds.backgroundColor = "rgba(34,197,94,.16)";
+  } else if (pnl < 0){
+    ds.borderColor = "#ef4444";
+    ds.backgroundColor = "rgba(239,68,68,.14)";
+  } else {
+    ds.borderColor = "#3b82f6";
+    ds.backgroundColor = "rgba(59,130,246,.12)";
+  }
+}
+
+function nwUpdatePnLFromPoints(points){
+  const pnlEl = $("netWorthPnl");
+  if (!pnlEl) return;
+
+  if (!points || points.length < 2){
+    pnlEl.classList.remove("good","bad");
+    pnlEl.classList.add("flat");
+    pnlEl.textContent = "PnL: —";
+    nwApplySignStyling(0);
+    return;
+  }
+
+  const first = safe(points[0]?.y);
+  const last  = safe(points[points.length - 1]?.y);
+  const pnl = last - first;
+  const pnlPct = first ? (pnl / first) * 100 : 0;
+
+  pnlEl.classList.remove("good","bad","flat");
+  pnlEl.classList.add(pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat"));
+  const sign = pnl > 0 ? "+" : "";
+  pnlEl.textContent = `PnL: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
+
+  nwApplySignStyling(pnl);
+}
+
 function initNWChart(){
   const canvas = $("netWorthChart");
   if (!canvas || !window.Chart) return;
 
-  const view = nwBuildView();
+  const view = nwBuildView(nwTf);
 
   netWorthChart = new Chart(canvas, {
     type: "line",
     data: {
       datasets: [{
-        data: view.pts,
         parsing: false,
+        data: view.points,
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.12)",
         borderWidth: 2,
         fill: true,
+
         tension: 0.35,
         cubicInterpolationMode: "monotone",
+
         pointRadius: 0,
         pointHitRadius: 18,
+
+        clip: { left: 0, top: 0, right: 22, bottom: 0 },
         spanGaps: true,
-        clip: { left: 0, top: 0, right: 26, bottom: 0 }
       }]
     },
     options: {
@@ -2152,9 +1899,11 @@ function initNWChart(){
       animation: false,
       normalized: true,
       layout: { padding: { left: 8, right: 34, top: 8, bottom: 12 } },
+
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
+
         ...(ZOOM_OK ? {
           zoom: {
             pan: { enabled: true, mode: "x", threshold: 2 },
@@ -2162,18 +1911,21 @@ function initNWChart(){
           }
         } : {})
       },
-      interaction: { mode: "nearest", intersect: false },
+
+      interaction: { mode: "index", intersect: false },
+
       scales: {
         x: {
           type: "linear",
-          min: view.minX,
-          max: view.maxX,
+          min: view.xMin,
+          max: view.xMax,
           ticks: {
             color: axisTickColor(),
             maxRotation: 0,
             autoSkip: true,
             maxTicksLimit: 6,
-            callback: (v) => nwFormatTick(v)
+            padding: 8,
+            callback: (val) => nwFmtX(val, nwTf)
           },
           grid: { display: false },
           border: { display: false }
@@ -2196,106 +1948,65 @@ function initNWChart(){
   });
 
   attachNWInteractions();
-  nwUpdateTFVisibility();
-  nwSetScale(nwScale);
-  nwRedraw(true);
+  nwUpdatePnLFromPoints(view.points);
 }
 
-function nwUpdatePnlFromView(view){
-  const pnlEl = $("netWorthPnl");
-  if (!pnlEl) return;
-
-  const pts = view?.pts || [];
-  if (pts.length >= 2){
-    const first = safe(pts[0].y);
-    const last  = safe(pts[pts.length - 1].y);
-    const pnl = last - first;
-    const pnlPct = first ? (pnl / first) * 100 : 0;
-
-    pnlEl.classList.remove("good","bad","flat");
-    const cls = pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat");
-    pnlEl.classList.add(cls);
-
-    const sign = pnl > 0 ? "+" : "";
-    const label = (nwTf === "live") ? "PnL (LIVE)" : `PnL (${nwTf.toUpperCase()})`;
-    pnlEl.textContent = `${label}: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
-  } else {
-    pnlEl.classList.remove("good","bad");
-    pnlEl.classList.add("flat");
-    pnlEl.textContent = "PnL: —";
-  }
-}
-
-function nwRedraw(force=false){
+function drawNW(){
   if (!netWorthChart) initNWChart();
   if (!netWorthChart) return;
 
-  const view = nwBuildView();
+  const view = nwBuildView(nwTf);
 
-  netWorthChart.data.datasets[0].data = view.pts;
-  netWorthChart.options.scales.x.min = view.minX;
-  netWorthChart.options.scales.x.max = view.maxX;
+  netWorthChart.data.datasets[0].data = view.points;
+  netWorthChart.options.scales.x.min = view.xMin;
+  netWorthChart.options.scales.x.max = view.xMax;
 
-  // more ticks in expanded mode
-  const expanded = document.body.classList.contains("card-expanded") && expandedCanvasId === "netWorthChart";
-  netWorthChart.options.scales.x.ticks.maxTicksLimit = expanded ? 10 : 6;
+  // scale
+  netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
+
+  // theme ticks
+  netWorthChart.options.scales.x.ticks.color = axisTickColor();
+  netWorthChart.options.scales.y.ticks.color = axisTickColor();
+  netWorthChart.options.scales.y.grid.color  = axisGridColor();
 
   netWorthChart.update("none");
-  if (force) netWorthChart.draw();
+  nwUpdatePnLFromPoints(view.points);
 
-  nwUpdateTFVisibility();
-  nwUpdatePnlFromView(view);
+  // update TF buttons visibility
+  nwRefreshTFButtons();
 }
 
-/* ✅ Interaction: hover/touch shows point value (and HUD when expanded) */
+/* ✅ Interaction: hover/touch shows point value in Net Worth metrics */
 function nwGetIndexFromEvent(evt){
   if (!netWorthChart) return null;
-  const pts = netWorthChart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, false);
+  const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
   if (!pts || !pts.length) return null;
   return pts[0].index;
 }
 
 function nwShowHoverValue(idx){
   if (!netWorthChart) return;
-  const ds = netWorthChart.data.datasets?.[0]?.data || [];
-  idx = clamp(idx, 0, ds.length - 1);
-  const p = ds[idx];
-  if (!p) return;
 
-  const v = safe(p.y);
-  const t = safe(p.x);
+  const data = netWorthChart.data.datasets?.[0]?.data || [];
+  idx = clamp(idx, 0, data.length - 1);
 
-  const lab = (nwTf === "live") ? fmtHHMMSS(t) : fmtHHMM(t);
-  const text = `${lab} • $${v.toFixed(2)}`;
+  const p = data[idx];
+  if (!p || !Number.isFinite(p.y)) return;
 
-  // if not expanded, temporarily override the top value
   const el = $("netWorthUsd");
-  if (el && !(document.body.classList.contains("card-expanded") && expandedCanvasId === "netWorthChart")){
-    el.textContent = `$${v.toFixed(2)}`;
-  }
+  if (el) el.textContent = `$${safe(p.y).toFixed(2)}`;
 
-  // HUD in expanded
-  if (document.body.classList.contains("card-expanded") && expandedCanvasId === "netWorthChart"){
-    setChartHud(text);
-  }
-
-  // show point label in pnl line
   const pnlEl = $("netWorthPnl");
   if (pnlEl){
     pnlEl.classList.remove("good","bad","flat");
     pnlEl.classList.add("flat");
-    pnlEl.textContent = `Point: ${text}`;
+    pnlEl.textContent = `Point: ${nwFmtX(p.x, nwTf)} • $${safe(p.y).toFixed(2)}`;
   }
 }
 
-function nwRestoreRealtimeLabel(){
+function nwRestoreRealtimeValue(){
   nwHoverActive = false;
   nwHoverIndex = null;
-  if (document.body.classList.contains("card-expanded") && expandedCanvasId === "netWorthChart"){
-    setChartHud("");
-  }
-  // restore pnl line
-  nwUpdatePnlFromView(nwBuildView());
 }
 
 function attachNWInteractions(){
@@ -2312,7 +2023,10 @@ function attachNWInteractions(){
   };
 
   const onLeave = () => {
-    nwRestoreRealtimeLabel();
+    nwRestoreRealtimeValue();
+    // restore pnl immediately
+    const view = nwBuildView(nwTf);
+    nwUpdatePnLFromPoints(view.points);
     netWorthChart.update("none");
   };
 
@@ -2325,33 +2039,122 @@ function attachNWInteractions(){
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
 
-/* TF buttons */
+/* ✅ TF buttons: inject LIVE + ALL if missing, unlock progressively */
+function nwEnsureTFButtons(){
+  const wrap = $("nwTfSwitch");
+  if (!wrap) return;
+
+  const ensureBtn = (tf, label) => {
+    let b = wrap.querySelector(`.tf-btn[data-tf="${tf}"]`);
+    if (b) return b;
+    b = document.createElement("button");
+    b.className = "tf-btn";
+    b.type = "button";
+    b.dataset.tf = tf;
+    b.textContent = label;
+    wrap.appendChild(b);
+    return b;
+  };
+
+  // keep order: LIVE, 1D, 1W, 1M, 1Y, ALL
+  const desired = [
+    ["live", "LIVE"],
+    ["1d", "1D"],
+    ["1w", "1W"],
+    ["1m", "1M"],
+    ["1y", "1Y"],
+    ["all", "ALL"]
+  ];
+
+  // create missing
+  desired.forEach(([tf, lab]) => ensureBtn(tf, lab));
+
+  // reorder in DOM
+  const btns = Array.from(wrap.querySelectorAll(".tf-btn"));
+  desired.forEach(([tf]) => {
+    const b = btns.find(x => x.dataset.tf === tf);
+    if (b) wrap.appendChild(b);
+  });
+}
+
+function nwRefreshTFButtons(){
+  const wrap = $("nwTfSwitch");
+  if (!wrap) return;
+
+  const span = nwDataSpan();
+
+  // unlock rules
+  const unlock = {
+    live: true,
+    "1d": true,
+    "1w": span >= (24 * 60 * 60 * 1000),           // unlock after 24h span
+    "1m": span >= (7 * 24 * 60 * 60 * 1000),       // unlock after 7d
+    "1y": span >= (30 * 24 * 60 * 60 * 1000),      // unlock after 30d
+    all:  span >= (24 * 60 * 60 * 1000)            // unlock ALL after 24h
+  };
+
+  const btns = Array.from(wrap.querySelectorAll(".tf-btn"));
+  btns.forEach(b => {
+    const tf = b.dataset.tf || "";
+    const ok = !!unlock[tf];
+    b.style.display = ok ? "" : "none";
+  });
+
+  // if current selection is hidden, fallback
+  const curBtn = wrap.querySelector(`.tf-btn[data-tf="${nwTf}"]`);
+  if (!curBtn || curBtn.style.display === "none"){
+    nwTf = "live";
+  }
+
+  // active styles
+  btns.forEach(b => b.classList.toggle("active", (b.dataset.tf || "") === nwTf));
+}
+
 function attachNWTFHandlers(){
   const wrap = $("nwTfSwitch");
   if (!wrap) return;
 
-  nwEnsureLiveButton();
-  nwUpdateTFVisibility();
+  nwEnsureTFButtons();
+  nwRefreshTFButtons();
 
   wrap.addEventListener("click", (e) => {
     const btn = e.target?.closest(".tf-btn");
     if (!btn) return;
+
     const tf = btn.dataset.tf || "live";
     if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
+    if (btn.style.display === "none") return;
 
     nwTf = tf;
-    wrap.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", (b.dataset.tf || "") === tf));
-    nwSaveSoon(false);
-    nwRedraw(true);
+    saveNW();
+    drawNW();
   }, { passive:true });
 }
 
-/* Record points */
-let nwLastFixedT = 0;
-let nwLastFixedUsd = 0;
+/* ✅ scale toggle (linear/log) */
+function attachNWScaleToggle(){
+  const btn = $("nwScaleToggle");
+  if (!btn) return;
 
-function recordNetWorthFixedPoint(){
+  // initialize label
+  btn.textContent = (nwScale === "log") ? "LOG" : "LIN";
+
+  btn.addEventListener("click", (e) => {
+    e?.preventDefault?.();
+    nwScale = (nwScale === "log") ? "linear" : "log";
+    btn.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    saveNW();
+    drawNW();
+  }, { passive:false });
+}
+
+/* ✅ Record point throttled */
+let nwLastRecordT = 0;
+let nwLastRecordUsd = 0;
+
+function recordNetWorthPoint(force=false){
   if (!address) return;
+
   const px = safe(targetPrice || displayed.price);
   if (!Number.isFinite(px) || px <= 0) return;
 
@@ -2361,102 +2164,333 @@ function recordNetWorthFixedPoint(){
   if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
 
   const now = Date.now();
-  const dt = now - safe(nwLastFixedT);
-  const dUsd = Math.abs(totalUsd - safe(nwLastFixedUsd));
 
-  if (nwLastFixedT && dt < NW_FIXED_MIN_DT_MS && dUsd < NW_FIXED_MIN_DUSD) return;
+  const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
+  const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwUsdAll.length - 1]) : 0;
 
-  nwFixedT.push(now);
-  nwFixedUsd.push(totalUsd);
-  nwFixedInj.push(totalInj);
-  nwClampAll();
+  const dt = now - lastT;
+  const dUsd = Math.abs(totalUsd - lastUsd);
 
-  nwLastFixedT = now;
-  nwLastFixedUsd = totalUsd;
+  // ✅ densità: ogni 5s o se cambia di $0.25
+  if (!force && lastT && dt < 5_000 && dUsd < 0.25) return;
 
-  nwSaveSoon(true);
-  if (nwTf !== "live") nwRedraw(false);
-  nwUpdateTFVisibility();
+  nwTAll.push(now);
+  nwUsdAll.push(totalUsd);
+  nwInjAll.push(totalInj);
+  clampNWArrays();
+  saveNW();
+
+  // update record stamps for extra safety
+  nwLastRecordT = now;
+  nwLastRecordUsd = totalUsd;
+
+  drawNW();
 }
 
-let nwLastLiveT = 0;
-let nwLastLiveUsd = 0;
-
-function recordNetWorthLivePoint(){
-  if (!address) return;
-  const px = safe(targetPrice || displayed.price);
-  if (!Number.isFinite(px) || px <= 0) return;
-
-  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
-  const totalUsd = totalInj * px;
-  if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
-
-  const now = Date.now();
-  const dt = now - safe(nwLastLiveT);
-  const dUsd = Math.abs(totalUsd - safe(nwLastLiveUsd));
-
-  if (nwLastLiveT && dt < NW_LIVE_MIN_DT_MS && dUsd < NW_LIVE_MIN_DUSD) return;
-
-  nwLiveT.push(now);
-  nwLiveUsd.push(totalUsd);
-  nwLiveInj.push(totalInj);
-  nwTrimLiveWindow();
-  nwClampAll();
-
-  nwLastLiveT = now;
-  nwLastLiveUsd = totalUsd;
-
-  // save live less aggressively (no cloud bump)
-  nwSaveSoon(false);
-
-  if (nwTf === "live") nwRedraw(false);
-}
-
-/* ================= HUD wiring for charts in expanded mode ================= */
-function attachHudForCanvas(canvasId, fallbackTextFn, fmtByIndexFn){
-  const canvas = $(canvasId);
-  if (!canvas) return;
-
-  const getChart = () => {
-    if (canvasId === "stakeChart") return stakeChart;
-    if (canvasId === "rewardChart") return rewardChart;
-    if (canvasId === "netWorthChart") return netWorthChart;
-    if (canvasId === "priceChart") return chart;
-    return null;
-  };
-
-  const getIndex = (ch, evt) => {
-    if (!ch) return null;
-    const pts = ch.getElementsAtEventForMode(evt, "nearest", { intersect: false }, false);
-    if (!pts || !pts.length) return null;
-    return pts[0].index;
-  };
-
-  const onMove = (evt) => {
-    if (!(document.body.classList.contains("card-expanded") && expandedCanvasId === canvasId)) return;
-    const ch = getChart();
-    if (!ch) return;
-    const idx = getIndex(ch, evt);
-    if (idx == null) {
-      const fb = fallbackTextFn ? fallbackTextFn() : "";
-      if (fb) setChartHud(fb);
-      return;
+/* ================= CHART THEME REFRESH ================= */
+function refreshChartsTheme(){
+  try{
+    if (stakeChart) {
+      stakeChart.options.scales.y.grid.color = axisGridColor();
+      stakeChart.options.scales.y.ticks.color = axisTickColor();
+      stakeChart.update("none");
     }
-    const txt = fmtByIndexFn ? fmtByIndexFn(idx) : "";
-    if (txt) setChartHud(txt);
+    if (rewardChart) {
+      rewardChart.options.scales.x.grid.color = axisGridColor();
+      rewardChart.options.scales.y.grid.color = axisGridColor();
+      rewardChart.options.scales.x.ticks.color = axisTickColor();
+      rewardChart.options.scales.y.ticks.color = axisTickColor();
+      rewardChart.update("none");
+    }
+    if (chart) {
+      chart.options.scales.y.grid.color = axisGridColor();
+      chart.options.scales.y.ticks.color = axisTickColor();
+      chart.update("none");
+    }
+    if (netWorthChart) {
+      netWorthChart.options.scales.y.grid.color = axisGridColor();
+      netWorthChart.options.scales.y.ticks.color = axisTickColor();
+      netWorthChart.options.scales.x.ticks.color = axisTickColor();
+      netWorthChart.update("none");
+    }
+  } catch {}
+}
+
+/* ================= EXPAND (modal) ================= */
+let chartModal = null;
+let chartModalClose = null;
+let chartModalTitle = null;
+let chartModalReadout = null;
+let chartModalBody = null;
+
+let modalCanvas = null;
+let modalCanvasParent = null;
+let modalCanvasNext = null;
+let modalActiveChart = null;
+
+function ensureChartModal(){
+  if (chartModal) return;
+
+  chartModal = document.createElement("div");
+  chartModal.id = "chartModal";
+  chartModal.setAttribute("aria-hidden", "true");
+  chartModal.style.cssText = `
+    position: fixed; inset: 0; z-index: 9999; display: none;
+    background: rgba(0,0,0,.58); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    padding: 14px;
+  `;
+
+  const panel = document.createElement("div");
+  panel.style.cssText = `
+    width: min(980px, 96vw); height: min(78vh, 860px);
+    margin: 0 auto; border-radius: 18px; overflow: hidden;
+    background: ${isLight() ? "rgba(240,242,246,.98)" : "rgba(11,18,32,.95)"};
+    border: 1px solid ${isLight() ? "rgba(15,23,42,.12)" : "rgba(255,255,255,.10)"};
+    box-shadow: 0 26px 90px rgba(0,0,0,.55);
+    display: flex; flex-direction: column;
+  `;
+
+  const top = document.createElement("div");
+  top.style.cssText = `
+    display:flex; align-items:center; justify-content: space-between;
+    padding: 10px 12px; gap: 10px;
+    border-bottom: 1px solid ${isLight() ? "rgba(15,23,42,.10)" : "rgba(255,255,255,.10)"};
+  `;
+
+  chartModalTitle = document.createElement("div");
+  chartModalTitle.id = "chartModalTitle";
+  chartModalTitle.style.cssText = `
+    font-weight: 950; letter-spacing: .02em;
+    color: ${isLight() ? "rgba(15,23,42,.92)" : "rgba(249,250,251,.92)"};
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  `;
+  chartModalTitle.textContent = "Chart";
+
+  chartModalReadout = document.createElement("div");
+  chartModalReadout.id = "chartModalReadout";
+  chartModalReadout.style.cssText = `
+    margin-left:auto; font-variant-numeric: tabular-nums;
+    font-weight: 900; font-size: .92rem;
+    color: ${isLight() ? "rgba(15,23,42,.80)" : "rgba(249,250,251,.80)"};
+    white-space: nowrap;
+  `;
+  chartModalReadout.textContent = "";
+
+  chartModalClose = document.createElement("button");
+  chartModalClose.type = "button";
+  chartModalClose.textContent = "✕";
+  chartModalClose.style.cssText = `
+    width: 36px; height: 36px; border-radius: 12px;
+    border: 1px solid ${isLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.12)"};
+    background: ${isLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
+    color: ${isLight() ? "rgba(15,23,42,.85)" : "rgba(249,250,251,.92)"};
+    cursor: pointer; font-weight: 950;
+  `;
+
+  chartModalBody = document.createElement("div");
+  chartModalBody.id = "chartModalBody";
+  chartModalBody.style.cssText = `flex: 1 1 auto; position: relative; padding: 10px;`;
+
+  top.appendChild(chartModalClose);
+  top.appendChild(chartModalTitle);
+  top.appendChild(chartModalReadout);
+
+  panel.appendChild(top);
+  panel.appendChild(chartModalBody);
+
+  chartModal.appendChild(panel);
+  document.body.appendChild(chartModal);
+
+  chartModalClose.addEventListener("click", () => closeChartModal(), { passive: true });
+  chartModal.addEventListener("click", (e) => { if (e.target === chartModal) closeChartModal(); }, { passive: true });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeChartModal(); });
+}
+
+function openChartModal(title, canvasEl, chartInstance){
+  if (!canvasEl || !chartInstance) return;
+
+  ensureChartModal();
+
+  // move canvas into modal
+  modalCanvas = canvasEl;
+  modalActiveChart = chartInstance;
+  modalCanvasParent = canvasEl.parentNode;
+  modalCanvasNext = canvasEl.nextSibling;
+
+  chartModalTitle.textContent = title || "Chart";
+  chartModalReadout.textContent = "";
+
+  chartModal.style.display = "block";
+  chartModal.setAttribute("aria-hidden", "false");
+
+  // ensure body is empty and receives canvas
+  chartModalBody.innerHTML = "";
+  chartModalBody.appendChild(canvasEl);
+
+  // resize chart to new container
+  try { chartInstance.resize(); chartInstance.update("none"); } catch {}
+
+  // readout on move
+  const onMove = (evt) => {
+    try{
+      const pts = chartInstance.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
+      if (!pts || !pts.length) return;
+      const idx = pts[0].index;
+
+      // net worth (x/y points)
+      if (chartInstance === netWorthChart){
+        const p = chartInstance.data.datasets?.[0]?.data?.[idx];
+        if (p && Number.isFinite(p.y)) chartModalReadout.textContent = `${nwFmtX(p.x, nwTf)} • $${safe(p.y).toFixed(2)}`;
+        return;
+      }
+
+      // price chart
+      if (chartInstance === chart){
+        const lab = chartInstance.data.labels?.[idx] || "";
+        const v = safe(chartInstance.data.datasets?.[0]?.data?.[idx]);
+        if (lab && v) chartModalReadout.textContent = `${lab} • $${v.toFixed(4)}`;
+        return;
+      }
+
+      // stake/reward: show numeric
+      const lab = chartInstance.data.labels?.[idx] || "";
+      const v = safe(chartInstance.data.datasets?.[0]?.data?.[idx]);
+      if (lab && v) chartModalReadout.textContent = `${lab} • ${v.toFixed(6)}`;
+    } catch {}
   };
 
-  const onLeave = () => {
-    if (!(document.body.classList.contains("card-expanded") && expandedCanvasId === canvasId)) return;
-    setChartHud("");
-  };
+  const onLeave = () => { chartModalReadout.textContent = ""; };
 
-  canvas.addEventListener("mousemove", onMove, { passive:true });
-  canvas.addEventListener("touchmove", onMove, { passive:true });
-  canvas.addEventListener("touchstart", onMove, { passive:true });
-  canvas.addEventListener("mouseleave", onLeave, { passive:true });
-  canvas.addEventListener("touchend", onLeave, { passive:true });
-  canvas.addEventListener("touchcancel", onLeave, { passive:true });
+  canvasEl.__modalMove = onMove;
+  canvasEl.__modalLeave = onLeave;
+
+  canvasEl.addEventListener("mousemove", onMove, { passive: true });
+  canvasEl.addEventListener("mouseleave", onLeave, { passive: true });
+  canvasEl.addEventListener("touchstart", (e) => onMove(e), { passive: true });
+  canvasEl.addEventListener("touchmove", (e) => onMove(e), { passive: true });
+  canvasEl.addEventListener("touchend", onLeave, { passive: true });
+  canvasEl.addEventListener("touchcancel", onLeave, { passive: true });
+}
+
+function closeChartModal(){
+  if (!chartModal || !modalCanvas || !modalCanvasParent) {
+    if (chartModal) { chartModal.style.display = "none"; chartModal.setAttribute("aria-hidden","true"); }
+    return;
+  }
+
+  // remove handlers
+  try{
+    if (modalCanvas.__modalMove) modalCanvas.removeEventListener("mousemove", modalCanvas.__modalMove);
+    if (modalCanvas.__modalLeave) modalCanvas.removeEventListener("mouseleave", modalCanvas.__modalLeave);
+  } catch {}
+
+  // restore canvas
+  try{
+    if (modalCanvasNext) modalCanvasParent.insertBefore(modalCanvas, modalCanvasNext);
+    else modalCanvasParent.appendChild(modalCanvas);
+  } catch {}
+
+  // hide modal
+  chartModal.style.display = "none";
+  chartModal.setAttribute("aria-hidden","true");
+
+  // resize chart back
+  try { modalActiveChart?.resize(); modalActiveChart?.update("none"); } catch {}
+
+  modalCanvas = null;
+  modalCanvasParent = null;
+  modalCanvasNext = null;
+  modalActiveChart = null;
+}
+
+/* ✅ create small expand buttons inside cards (non invasivi) */
+function injectExpandButtons(){
+  const map = [
+    { canvasId: "netWorthChart", title: "Net Worth" },
+    { canvasId: "priceChart", title: "INJ Price (1D)" },
+    { canvasId: "stakeChart", title: "Staked" },
+    { canvasId: "rewardChart", title: "Rewards" },
+  ];
+
+  map.forEach(({canvasId, title}) => {
+    const canvas = $(canvasId);
+    if (!canvas) return;
+
+    const card = canvas.closest(".card");
+    if (!card) return;
+
+    card.style.position = card.style.position || "relative";
+
+    // avoid duplicates
+    if (card.querySelector(`[data-expand-for="${canvasId}"]`)) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.expandFor = canvasId;
+    btn.setAttribute("aria-label","Expand chart");
+    btn.textContent = "⤢";
+    btn.style.cssText = `
+      position:absolute; top: 12px; right: 12px;
+      width: 30px; height: 30px;
+      border-radius: 10px;
+      border: 1px solid ${isLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.12)"};
+      background: ${isLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
+      color: ${isLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)"};
+      cursor: pointer; font-weight: 950; font-size: 14px;
+      display:grid; place-items:center;
+      z-index: 20;
+    `;
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const chartInstance =
+        (canvasId === "netWorthChart") ? netWorthChart :
+        (canvasId === "priceChart") ? chart :
+        (canvasId === "stakeChart") ? stakeChart :
+        (canvasId === "rewardChart") ? rewardChart : null;
+
+      if (!chartInstance) return;
+      openChartModal(title, canvas, chartInstance);
+    }, { passive:false });
+
+    card.appendChild(btn);
+
+    // ✅ net worth: sposta il toggle LIN/LOG sotto l'icona expand (solo se esiste)
+    if (canvasId === "netWorthChart"){
+      const scaleBtn = $("nwScaleToggle");
+      if (scaleBtn && scaleBtn.parentNode && scaleBtn.closest(".card") === card) {
+        // create a top-right stack
+        let stack = card.querySelector(".nw-top-stack");
+        if (!stack){
+          stack = document.createElement("div");
+          stack.className = "nw-top-stack";
+          stack.style.cssText = `
+            position:absolute; top: 12px; right: 12px;
+            display:flex; flex-direction: column; gap: 8px;
+            align-items:flex-end; z-index: 20;
+          `;
+          // move expand btn into stack too (so they don't overlap)
+          card.removeChild(btn);
+          stack.appendChild(btn);
+          card.appendChild(stack);
+        }
+        // move scaleBtn into stack, below
+        scaleBtn.style.height = "30px";
+        scaleBtn.style.padding = "0 10px";
+        scaleBtn.style.borderRadius = "999px";
+        stack.appendChild(scaleBtn);
+      }
+    }
+  });
+}
+
+/* ✅ net worth: Injective logo replace (emoji -> png) */
+function applyInjectiveLogo(){
+  const icon = document.querySelector(".nw-asset-icon");
+  if (!icon) return;
+  icon.innerHTML = `<img src="${INJ_LOGO_PNG}" alt="Injective" style="width:16px;height:16px;border-radius:4px;display:block;" />`;
 }
 
 /* ================= ADDRESS COMMIT ================= */
@@ -2465,50 +2499,36 @@ async function commitAddress(newAddr) {
   if (!a) return;
 
   address = a;
-  pendingAddress = a;
-  localStorage.setItem(ADDR_KEY, address);
+  pendingAddress = "";
+  localStorage.setItem("inj_address", address);
 
+  // ✅ keep display, but clear input for next search
   setAddressDisplay(address);
+  if (addressInput) addressInput.value = "";
+
   settleStart = Date.now();
 
-  // reset runtime values (but charts reload from storage)
-  availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
-  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0;
-  displayed.availableUsd = 0; displayed.stakeUsd = 0; displayed.rewardsUsd = 0;
-  displayed.netWorthUsd = 0; displayed.netWorthInj = 0;
-  displayed.apr = 0;
+  // restore cached snapshot instantly (avoid 0)
+  acctCacheLoad();
 
-  // stake series
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
   } else {
-    stakeLabels = []; stakeData = []; stakeMoves = []; stakeTypes = [];
-    stakeBaselineCaptured = false;
-    lastStakeRecordedRounded = null;
     loadStakeSeries();
     drawStakeChart();
   }
 
-  // reward series
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
-  wdLabelsAll = []; wdValuesAll = []; wdTimesAll = [];
   loadWdAll();
   rebuildWdView();
   goRewardLive();
 
-  // net worth series
-  nwFixedT = []; nwFixedUsd = []; nwFixedInj = [];
-  nwLiveT = [];  nwLiveUsd = [];  nwLiveInj = [];
-  nwLastFixedT = 0; nwLastFixedUsd = 0;
-  nwLastLiveT = 0;  nwLastLiveUsd = 0;
-
-  nwLoad();
+  loadNW();
   attachNWTFHandlers();
-  nwSetScale(nwScale);
-  nwUpdateTFVisibility();
-  nwRedraw(true);
+  attachNWScaleToggle();
+  drawNW();
 
   modeLoading = true;
   refreshConnUI();
@@ -2545,78 +2565,58 @@ window.addEventListener("offline", () => {
   cloudSetState("synced");
 }, { passive: true });
 
-/* ================= CHART THEME REFRESH ================= */
-function refreshChartsTheme(){
-  try{
-    if (stakeChart) {
-      stakeChart.options.scales.y.grid.color = axisGridColor();
-      stakeChart.options.scales.y.ticks.color = axisTickColor();
-      stakeChart.update("none");
-    }
-    if (rewardChart) {
-      rewardChart.options.scales.x.grid.color = axisGridColor();
-      rewardChart.options.scales.y.grid.color = axisGridColor();
-      rewardChart.options.scales.x.ticks.color = axisTickColor();
-      rewardChart.options.scales.y.ticks.color = axisTickColor();
-      rewardChart.update("none");
-    }
-    if (chart) {
-      chart.options.scales.y.grid.color = axisGridColor();
-      chart.options.scales.y.ticks.color = axisTickColor();
-      chart.update("none");
-    }
-    if (netWorthChart) {
-      netWorthChart.options.scales.y.grid.color = axisGridColor();
-      netWorthChart.options.scales.y.ticks.color = axisTickColor();
-      netWorthChart.options.scales.x.ticks.color = axisTickColor();
-      netWorthChart.update("none");
-    }
-  } catch {}
-}
-
 /* ================= BOOT ================= */
 (async function boot() {
   cloudLoad();
   cloudRender();
   cloudSetState("synced");
-  cloudEnsureDrawerMeta();
 
   refreshConnUI();
   setTimeout(() => setUIReady(true), 2800);
 
+  // move "Last update" to bottom (after footer) if possible
+  try{
+    const upd = $("updated");
+    const footer = document.querySelector(".pro-footer");
+    if (upd && footer && footer.parentNode) footer.parentNode.insertBefore(upd, footer.nextSibling);
+  } catch {}
+
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
   attachRewardFilterHandler();
-  attachNWTFHandlers();
 
-  pendingAddress = address || "";
-  if (addressInput) addressInput.value = pendingAddress;
+  // keep address display, but keep input empty for new searches
+  if (addressInput) addressInput.value = "";
   setAddressDisplay(address);
+
+  // inject UI extras
+  applyInjectiveLogo();
+
+  // drawer hint/meta (optional)
+  try{
+    const foot = document.querySelector(".drawer-foot");
+    if (foot && !foot.querySelector("#drawerMeta")){
+      const meta = document.createElement("div");
+      meta.id = "drawerMeta";
+      meta.style.cssText = "margin-top:10px;font-size:.74rem;font-weight:900;opacity:.78;text-align:right;";
+      meta.textContent = `INJ Portfolio · v${APP_VERSION}`;
+      foot.appendChild(meta);
+    }
+  } catch {}
 
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // load cached price chart first (so it never starts from 0)
-  if (priceCacheLoad()){
-    if (!chart) initChartToday();
-    if (chart) {
-      chart.data.labels = chartLabels;
-      chart.data.datasets[0].data = chartData;
-      chart.update("none");
-      chartBootstrappedToday = true;
-      const last = safe(chartData[chartData.length - 1]);
-      if (!targetPrice && last) targetPrice = last;
-    }
-  }
+  // load cached snapshot to avoid zeros
+  if (address) acctCacheLoad();
 
-  // stake/reward/networth from storage
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
   } else {
-    loadStakeSeries();
+    if (address) loadStakeSeries();
     drawStakeChart();
   }
 
@@ -2626,10 +2626,15 @@ function refreshChartsTheme(){
     goRewardLive();
   }
 
-  if (address) nwLoad();
-  nwUpdateTFVisibility();
-  nwSetScale(nwScale);
-  nwRedraw(true);
+  if (address) loadNW();
+  attachNWTFHandlers();
+  attachNWScaleToggle();
+  drawNW();
+
+  // init charts after they exist
+  setTimeout(() => {
+    injectExpandButtons();
+  }, 200);
 
   modeLoading = true;
   refreshConnUI();
@@ -2730,21 +2735,13 @@ function animate() {
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
-
-  const aUsd = displayed.available * displayed.price;
-  const oaUsd = displayed.availableUsd;
-  displayed.availableUsd = tick(displayed.availableUsd, aUsd);
-  colorApproxMoney($("availableUsd"), displayed.availableUsd, oaUsd, 2);
+  setText("availableUsd", `≈ $${(displayed.available * displayed.price).toFixed(2)}`);
 
   // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
-
-  const sUsd = displayed.stake * displayed.price;
-  const osUsd = displayed.stakeUsd;
-  displayed.stakeUsd = tick(displayed.stakeUsd, sUsd);
-  colorApproxMoney($("stakeUsd"), displayed.stakeUsd, osUsd, 2);
+  setText("stakeUsd", `≈ $${(displayed.stake * displayed.price).toFixed(2)}`);
 
   const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
   const stakeBar = $("stakeBar");
@@ -2762,11 +2759,7 @@ function animate() {
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
-
-  const rUsd = displayed.rewards * displayed.price;
-  const orUsd = displayed.rewardsUsd;
-  displayed.rewardsUsd = tick(displayed.rewardsUsd, rUsd);
-  colorApproxMoney($("rewardsUsd"), displayed.rewardsUsd, orUsd, 2);
+  setText("rewardsUsd", `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`);
 
   const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
@@ -2782,38 +2775,44 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  // APR (digit anim)
+  // APR (same digit animation style)
   const oapr = displayed.apr;
   displayed.apr = tick(displayed.apr, apr);
-  colorNumberSuffix($("apr"), displayed.apr, oapr, 2, "%");
+  colorPercent($("apr"), displayed.apr, oapr, 2);
 
-  // Last update bottom
+  // time
   setText("updated", "Last update: " + nowLabel());
 
-  /* ================= NET WORTH ================= */
+  /* ================= NET WORTH UI ================= */
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
-  // top value (only if not hovering the chart)
+  // ✅ se stai interagendo sul grafico, non sovrascrivere il valore puntato
   if (!nwHoverActive) {
     const onw = displayed.netWorthUsd;
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
   }
 
-  // total INJ (animated)
-  const onwInj = displayed.netWorthInj;
-  displayed.netWorthInj = tick(displayed.netWorthInj, totalInj);
-  const injEl = $("netWorthInj");
-  if (injEl) colorNumberSuffix(injEl, displayed.netWorthInj, onwInj, 4, " INJ");
+  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
 
-  // LIVE series (always collected per address) + redraw only when LIVE selected
-  recordNetWorthLivePoint();
+  // net worth asset row (supports both ids OR classes)
+  const qtyEl = $("nwAssetQty") || document.querySelector(".nw-asset-qty");
+  const pxEl  = $("nwAssetPrice") || document.querySelector(".nw-asset-price");
+  const usdEl = $("nwAssetUsd") || document.querySelector(".nw-asset-usd");
 
-  // keep blinking dot fluid
-  if (netWorthChart) netWorthChart.draw();
+  if (qtyEl) qtyEl.textContent = totalInj.toFixed(4);
+  if (pxEl)  pxEl.textContent  = `$${safe(displayed.price).toFixed(2)}`;
+  if (usdEl) usdEl.textContent = `≈ $${(totalInj * safe(displayed.price)).toFixed(2)}`;
+
+  // densità: registra spesso (solo live + address) ma throttled internamente
+  if (address && liveMode) recordNetWorthPoint(false);
 
   refreshConnUI();
+
+  // ✅ keep blinking dot fluid
+  if (netWorthChart) netWorthChart.draw();
+
   requestAnimationFrame(animate);
 }
 animate();
