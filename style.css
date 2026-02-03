@@ -583,17 +583,19 @@ body[data-theme="light"] .reward-timeline input[type="range"]{ background: rgba(
 }
 body[data-theme="light"] .reward-timeline-meta{ color: rgba(15,23,42,.68); }
 
-/* ================= NET WORTH CARD (IMPROVED) ================= */
+/* ================= NET WORTH (UNIFIED + MORE SPACE + PAN/TOUCH) ================= */
+
 .networth-card{
-  display:flex;
+  display: flex;
   flex-direction: column;
   gap: .55rem;
 }
 
 .networth-head{
-  display:flex;
+  display: flex;
   flex-direction: column;
-  gap: .22rem;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
 .networth-usd{
@@ -613,18 +615,31 @@ body[data-theme="light"] .reward-timeline-meta{ color: rgba(15,23,42,.68); }
 .networth-pnl.flat{ color: #9ca3af; }
 body[data-theme="light"] .networth-pnl{ color: var(--muted-light); }
 
-/* chart block: finisce sotto pnl e parte sopra row */
+/* ✅ più spazio al grafico + panel */
 .networth-chartwrap{
-  height: 190px;
-  margin-top: .10rem;
+  position: relative;
+  width: 100%;
+  height: clamp(190px, 28vh, 280px);
+  margin: 6px 0 10px 0;
+  padding: 6px 8px;
+
   border-radius: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+
   overflow: hidden;
-  background: rgba(255,255,255,.03);
-  border: 1px solid rgba(255,255,255,.06);
 }
 body[data-theme="light"] .networth-chartwrap{
-  background: rgba(15,23,42,.03);
-  border-color: rgba(15,23,42,.08);
+  background: rgba(15,23,42,0.04);
+  border: 1px solid rgba(15,23,42,0.08);
+}
+
+/* ✅ importantissimo per pan/zoom su mobile */
+#netWorthChart{
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  touch-action: none;
 }
 
 /* TF centrali */
@@ -661,14 +676,20 @@ body[data-theme="light"] .tf-btn.active{
   color: rgba(15,23,42,.92);
 }
 
-.networth-tf{ margin-top: .10rem; }
+.networth-tf{
+  margin-top: 2px;
+  margin-bottom: 8px;
+}
 
 .nw-divider{
+  width: 100%;
   height: 1px;
-  background: rgba(255,255,255,.10);
-  margin: 2px 0;
+  margin: 10px 0;
+  background: rgba(255,255,255,0.08);
 }
-body[data-theme="light"] .nw-divider{ background: rgba(15,23,42,.10); }
+body[data-theme="light"] .nw-divider{
+  background: rgba(15,23,42,0.10);
+}
 
 /* coin row */
 .nw-row{
@@ -684,6 +705,13 @@ body[data-theme="light"] .nw-divider{ background: rgba(15,23,42,.10); }
 body[data-theme="light"] .nw-row{
   border-color: rgba(15,23,42,.10);
   background: rgba(15,23,42,.04);
+}
+
+.nw-row-clean{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .nw-row-left{
@@ -718,7 +746,10 @@ body[data-theme="light"] .nw-row-right{ color: rgba(15,23,42,.72); }
 
 @media (max-width: 520px){
   .networth-usd{ font-size: 1.75rem; }
-  .networth-chartwrap{ height: 205px; }
+  .networth-chartwrap{
+    height: clamp(200px, 32vh, 300px);
+    padding: 6px 6px;
+  }
 }
 
 /* ================= LOADING shimmer ================= */
@@ -1051,90 +1082,3 @@ body[data-theme="light"] .pro-pill{
   50%{ opacity: 1; }
   100%{ opacity: .55; }
 }
-
-/* ================= NET WORTH: MORE SPACE + PAN/TOUCH ================= */
-
-/* Card: un po’ più “importante” ma senza stravolgere layout */
-.networth-card{
-  display: flex;
-  flex-direction: column;
-}
-
-/* Head sempre sopra */
-.networth-head{
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-/* ✅ più spazio al grafico */
-.networth-chartwrap{
-  position: relative;
-  width: 100%;
-  /* più alto e “pro”: cresce su schermi grandi ma resta ok su mobile */
-  height: clamp(190px, 28vh, 280px);
-  margin: 6px 0 10px 0;
-  padding: 6px 8px;
-
-  border-radius: 16px;
-
-  /* leggero “panel” per staccare */
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.06);
-
-  overflow: hidden; /* evita che il canvas sfori */
-}
-
-/* Tema chiaro: panel più soft */
-body[data-theme="light"] .networth-chartwrap{
-  background: rgba(15,23,42,0.04);
-  border: 1px solid rgba(15,23,42,0.08);
-}
-
-/* ✅ canvas deve occupare tutto lo spazio */
-#netWorthChart{
-  width: 100% !important;
-  height: 100% !important;
-  display: block;
-
-  /* IMPORTANTISSIMO:
-     - permette al plugin zoom/pan di prendere i gesti
-     - evita scroll della pagina mentre trascini il grafico
-  */
-  touch-action: none;
-}
-
-/* Bottoni timeframe: stabili e più “compatti” sotto al grafico */
-.networth-tf{
-  margin-top: 2px;
-  margin-bottom: 8px;
-}
-
-/* Divider sottile */
-.nw-divider{
-  width: 100%;
-  height: 1px;
-  margin: 10px 0;
-  background: rgba(255,255,255,0.08);
-}
-body[data-theme="light"] .nw-divider{
-  background: rgba(15,23,42,0.10);
-}
-
-/* Riga coin pulita e allineata */
-.nw-row-clean{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-/* Se vuoi più “aria” tra testo e chart su mobile */
-@media (max-width: 520px){
-  .networth-chartwrap{
-    height: clamp(200px, 32vh, 300px);
-    padding: 6px 6px;
-  }
-}
-
