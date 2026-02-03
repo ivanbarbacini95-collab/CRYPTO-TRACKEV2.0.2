@@ -25,9 +25,8 @@
   --blue: #3b82f6;
   --cyan: #38bdf8;
 
-  /* spacing */
-  --gap-cards: 1.25rem;   /* more space between cards */
-  --pad-card: 1.15rem;    /* more space inside cards */
+  /* ✅ Injective logo (stable PNG) */
+  --inj-logo-url: url("https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/nativeinjective/info/logo.png");
 }
 
 * { box-sizing: border-box; }
@@ -38,7 +37,7 @@ body {
   background: var(--bg-dark);
   color: var(--fg-dark);
   margin: 0;
-  padding: 1rem;
+  padding: 1.25rem; /* ✅ more air */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -52,16 +51,12 @@ body[data-theme="light"]{
   color: var(--fg-light);
 }
 
-/* prevent scroll-jank when fullscreen card open */
-body.no-scroll { overflow: hidden; }
-
-/* ================= LAYOUT ================= */
 .container {
   max-width: 900px;
   margin: auto;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.15rem; /* ✅ more air */
 }
 
 /* ================= HEADER ================= */
@@ -76,11 +71,10 @@ body.no-scroll { overflow: hidden; }
   display: grid;
   grid-template-columns: 56px minmax(0,1fr) auto;
   align-items: center;
-  gap: .75rem;
+  gap: .7rem;
 }
 
 .header-left { display: flex; align-items: center; justify-content:flex-start; }
-
 .menu-btn {
   width: 44px;
   height: 44px;
@@ -92,7 +86,6 @@ body.no-scroll { overflow: hidden; }
   color: rgba(249,250,251,.95);
   cursor: pointer;
   outline: none;
-  transition: transform 120ms ease, background 160ms ease, border-color 160ms ease;
 }
 body[data-theme="light"] .menu-btn{
   border-color: rgba(15,23,42,.12);
@@ -144,7 +137,7 @@ body[data-theme="light"] .subtitle{ color: var(--muted-light); }
 .search-wrap{
   display:flex;
   align-items:center;
-  gap:.5rem;
+  gap:.45rem;
   justify-content:flex-end;
   max-width: min(520px, 58vw);
   min-width: 0;
@@ -162,7 +155,6 @@ body[data-theme="light"] .subtitle{ color: var(--muted-light); }
   place-items: center;
   cursor: pointer;
   outline: none;
-  transition: transform 120ms ease, background 160ms ease, border-color 160ms ease;
 }
 body[data-theme="light"] .icon-btn{
   border-color: rgba(15,23,42,.12);
@@ -226,26 +218,41 @@ body.search-open #subtitle{ display:none; }
   .search-wrap.open input{ width: min(360px, 60vw); }
 }
 
+/* ✅ Address left + clearer */
 .header-meta-right {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between; /* was flex-end */
   align-items: center;
-  gap: .65rem;
+  gap: .7rem;
 }
 
+.address-display{
+  flex: 1 1 auto;
+  min-width: 0;
+  display:flex;
+  justify-content:flex-start;
+  align-items:center;
+}
 .address-display .tag {
-  font-size: 0.74rem;
-  color: rgba(249,250,251,.82);
+  font-size: 0.80rem; /* was 0.74 */
+  color: rgba(249,250,251,.90);
   background: rgba(255,255,255,0.06);
   border-radius: 999px;
-  padding: .22rem .55rem;
+  padding: .30rem .65rem;
   display: inline-flex;
   align-items: center;
-  gap: .35rem;
+  gap: .45rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.address-display .tag strong{
+  letter-spacing: .02em;
 }
 body[data-theme="light"] .address-display .tag{
   background: rgba(15,23,42,0.06);
-  color: rgba(15,23,42,.80);
+  color: rgba(15,23,42,.86);
 }
 
 .connection-status {
@@ -253,6 +260,7 @@ body[data-theme="light"] .address-display .tag{
   align-items: center;
   gap: .35rem;
   opacity: .95;
+  flex: 0 0 auto;
 }
 .status-dot {
   width: 8px;
@@ -278,17 +286,17 @@ body[data-theme="light"] .status-text{
 .cards-wrapper {
   display: flex;
   flex-direction: column;
-  gap: var(--gap-cards);
-  margin-top: .55rem;
+  gap: 1.25rem; /* ✅ more space between cards */
+  margin-top: .45rem;
 }
 
 .card {
   background: linear-gradient(135deg, var(--card-dark-a), var(--card-dark-b));
-  border-radius: 0.9rem;
-  padding: var(--pad-card);
+  border-radius: 0.8rem;
+  padding: 1.15rem; /* ✅ more internal air */
   box-shadow: 0 20px 70px rgba(0,0,0,.35);
   border: 1px solid rgba(255,255,255,.08);
-  position: relative;
+  position: relative; /* ✅ for expand button */
 }
 body[data-theme="light"] .card{
   background: linear-gradient(135deg, var(--card-light-a), var(--card-light-b));
@@ -297,81 +305,79 @@ body[data-theme="light"] .card{
 }
 
 .label {
-  font-size: 1.1rem;
+  font-size: 1.12rem;
   font-weight: 900;
-  letter-spacing: .2px;
 }
 
 .value-row {
-  font-size: 1.4rem;
+  margin-top: .35rem; /* ✅ air */
+  font-size: 1.45rem;
   font-weight: 900;
   text-align: right;
-  margin-top: .35rem;
 }
 
 .sub-row {
-  font-size: 0.9rem;
+  margin-top: .18rem; /* ✅ air */
+  font-size: 0.92rem;
   color: #9ca3af;
   text-align: right;
-  margin-top: .15rem;
 }
 body[data-theme="light"] .sub-row{ color: var(--muted-light); }
 
-.card-head-row{
-  display:flex;
-  align-items:center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-/* top-right tools in cards */
-.card-tools{
-  display:flex;
-  align-items:center;
-  gap: .45rem;
-}
-
-/* expand button inside cards */
-.expand-btn{
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  font-size: 17px;
-}
-
-/* ================= PERF arrows/colors ================= */
 .perf {
   display: flex;
   justify-content: flex-end;
-  gap: 0.4rem;
+  gap: 0.35rem;
   align-items: center;
-  margin-top: .4rem;
 }
 
-.arrow{
-  font-weight: 1000;
-  font-size: 1.0rem;
-}
 .arrow.up { color: var(--green); }
 .arrow.down { color: var(--red); }
 .arrow.flat { color: #9ca3af; }
 
-.pct{
-  font-weight: 950;
-}
 .pct.up { color: var(--green); }
 .pct.down { color: var(--red); }
 .pct.flat { color: #9ca3af; }
+
+/* ================= EXPAND BUTTON (inside card) ================= */
+/* JS will add .has-expand to cards with charts */
+.card.has-expand{
+  padding-top: 3.35rem; /* ✅ reserve space so button doesn't overlap */
+}
+
+.expand-card-btn{
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 30px;   /* ✅ smaller */
+  height: 30px;  /* ✅ smaller */
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.92);
+  cursor: pointer;
+  display:grid;
+  place-items:center;
+  font-size: 14px;
+  font-weight: 900;
+  z-index: 6;
+}
+.expand-card-btn:active{ transform: translateY(1px); }
+body[data-theme="light"] .expand-card-btn{
+  border-color: rgba(15,23,42,.14);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.88);
+}
 
 /* ================= BARS ================= */
 .bar-container {
   position: relative;
   height: 24px;
   background: var(--bar-dark);
-  border-radius: 0.6rem;
+  border-radius: 0.55rem;
   overflow: hidden;
   margin-top: 1.05rem;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.2rem;
 }
 body[data-theme="light"] .bar-container{ background: var(--bar-light); }
 
@@ -441,7 +447,7 @@ body[data-theme="light"] .bar-label{
   letter-spacing: .04em;
   padding: .14rem .55rem;
   border-radius: 999px;
-  Remember: background: rgba(0,0,0,0.22);
+  background: rgba(0,0,0,0.22);
   color: rgba(249,250,251,0.92);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -471,7 +477,7 @@ body[data-theme="light"] .bar-values{ color: var(--muted-light); }
 .bar-values .right { position: absolute; right: 0; }
 
 .price-card .perf { margin-top: 0.45rem; }
-.price-card .bar-values { margin-bottom: 0.85rem; }
+.price-card .bar-values { margin-bottom: 0.75rem; }
 
 /* stake/reward gradients */
 .stake-container{ height: 26px; }
@@ -488,8 +494,8 @@ body[data-theme="light"] .bar-values{ color: var(--muted-light); }
 }
 
 /* ================= CHARTS ================= */
-.stake-chart-wrap { height: 165px; margin-top: 1.05rem; position: relative; }
-.reward-chart-wrap{ height: 190px; margin-top: 1.05rem; position: relative; }
+.stake-chart-wrap { height: 165px; margin-top: 1.0rem; position: relative; }
+.reward-chart-wrap{ height: 190px; margin-top: 1.0rem; position: relative; }
 
 #stakeChart, #rewardChart, #priceChart, #netWorthChart{
   width: 100% !important;
@@ -497,7 +503,6 @@ body[data-theme="light"] .bar-values{ color: var(--muted-light); }
 }
 
 .chart-card{ height: 320px; position: relative; }
-
 .chart-overlay{
   position: absolute;
   top: 12px;
@@ -520,11 +525,11 @@ body[data-theme="light"] .chart-overlay{
 
 /* ================= REWARD tools ================= */
 .reward-tools{
-  margin-top: .95rem;
+  margin-top: .85rem;
   display:flex;
   align-items:center;
   justify-content: space-between;
-  gap:.8rem;
+  gap:.6rem;
 }
 
 .mini-btn{
@@ -548,7 +553,7 @@ body[data-theme="light"] .mini-btn{
 .mini-select-wrap{
   display:flex;
   align-items:center;
-  gap:.5rem;
+  gap:.4rem;
 }
 .mini-select-label{
   font-size:.72rem;
@@ -562,7 +567,7 @@ body[data-theme="light"] .mini-select-label{ color: rgba(15,23,42,.60); }
   border: 1px solid rgba(255,255,255,0.14);
   background: rgba(255,255,255,0.06);
   color: rgba(249,250,251,0.9);
-  padding: 0 .65rem;
+  padding: 0 .55rem;
   font-size: .75rem;
   outline:none;
 }
@@ -573,7 +578,7 @@ body[data-theme="light"] .mini-select{
 }
 
 .reward-timeline{
-  margin-top: .95rem;
+  margin-top: .85rem;
   display:flex;
   flex-direction: column;
   gap:.45rem;
@@ -607,26 +612,33 @@ body[data-theme="light"] .reward-timeline input[type="range"]{ background: rgba(
 }
 body[data-theme="light"] .reward-timeline-meta{ color: rgba(15,23,42,.68); }
 
-/* ================= NET WORTH ================= */
+/* ================= NET WORTH (PRO LAYOUT) ================= */
 .networth-card{
   position: relative;
   overflow: hidden;
 }
 
+/* ✅ In Net Worth we reserve more space: expand + scale stacked */
+.networth-card.has-expand{
+  padding-top: 4.35rem; /* more space than normal cards */
+}
+
+/* top row: title */
 .networth-top{
   display:flex;
   align-items:center;
-  justify-content: space-between;
+  justify-content: flex-start; /* ✅ avoid empty space when scale becomes absolute */
   gap: 10px;
 }
 
 .networth-title{
-  font-size: 1.1rem;
+  font-size: 1.12rem;
   font-weight: 950;
 }
 
+/* small scale toggle */
 .nw-scale-btn{
-  height: 32px;
+  height: 30px;
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.14);
@@ -643,19 +655,28 @@ body[data-theme="light"] .nw-scale-btn{
 }
 .nw-scale-btn:active{ transform: translateY(1px); }
 
+/* ✅ Put LIN/LOG under expand icon (absolute) */
+.networth-card #nwScaleToggle{
+  position: absolute;
+  top: 52px;   /* below expand button */
+  right: 12px;
+  z-index: 6;
+}
+
+/* metrics spacing */
 .networth-metrics{
   margin-top: 12px;
 }
 
 .networth-usd{
-  font-size: 2.15rem;
+  font-size: 2.10rem;
   font-weight: 950;
   line-height: 1.05;
   text-align: left;
 }
 
 .networth-pnl{
-  margin-top: 10px;
+  margin-top: 9px;
   font-size: .92rem;
   font-weight: 900;
   color: #9ca3af;
@@ -665,12 +686,14 @@ body[data-theme="light"] .nw-scale-btn{
 .networth-pnl.flat{ color: #9ca3af; }
 body[data-theme="light"] .networth-pnl{ color: var(--muted-light); }
 
+/* chart */
 .networth-chart{
   margin-top: 14px;
   height: 250px;
   position: relative;
 }
 
+/* TF + mini zone */
 .networth-tf{
   margin-top: 12px;
 }
@@ -681,9 +704,8 @@ body[data-theme="light"] .networth-pnl{ color: var(--muted-light); }
   gap: 8px;
   flex-wrap: wrap;
 }
-
 .tf-btn{
-  height: 34px;
+  height: 32px;
   padding: 0 12px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,.12);
@@ -692,15 +714,12 @@ body[data-theme="light"] .networth-pnl{ color: var(--muted-light); }
   font-weight: 950;
   font-size: .75rem;
   cursor: pointer;
-  transition: transform 120ms ease, background 160ms ease, border-color 160ms ease;
 }
 body[data-theme="light"] .tf-btn{
   border-color: rgba(15,23,42,.12);
   background: rgba(15,23,42,.05);
   color: rgba(15,23,42,.80);
 }
-.tf-btn:active{ transform: translateY(1px); }
-
 .tf-btn.active{
   background: rgba(59,130,246,.18);
   border-color: rgba(59,130,246,.35);
@@ -712,15 +731,64 @@ body[data-theme="light"] .tf-btn.active{
   color: rgba(15,23,42,.92);
 }
 
-/* networth mini block */
-.networth-foot{ margin-top: 14px; }
+/* mini injective zone */
+.networth-asset{
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,.10);
+
+  display:flex;
+  align-items:center;
+  gap: 8px;
+
+  font-size: .78rem;
+  font-weight: 900;
+  color: rgba(249,250,251,.80);
+}
+body[data-theme="light"] .networth-asset{
+  border-top-color: rgba(15,23,42,.12);
+  color: rgba(15,23,42,.78);
+}
+
+/* ✅ Injective logo in place of emoji */
+.nw-asset-icon{
+  width: 18px;
+  height: 18px;
+  display:inline-grid;
+  place-items:center;
+}
+.nw-asset-icon img,
+.inj-logo{
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  display:block;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.nw-asset-name{ letter-spacing:.02em; opacity:.95; }
+.nw-asset-qty{
+  margin-left:auto;
+  font-variant-numeric: tabular-nums;
+  color: rgba(56,189,248,.95);
+}
+body[data-theme="light"] .nw-asset-qty{ color: rgba(59,130,246,.86); }
+.nw-asset-mid{ opacity:.9; }
+.nw-asset-price,
+.nw-asset-usd{
+  font-variant-numeric: tabular-nums;
+}
+.nw-asset-sep{ opacity:.55; }
+
+/* foot mini block (kept) */
+.networth-foot{ margin-top: 12px; }
 
 .nw-mini{
   display:flex;
   align-items:center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 12px;
+  padding: 12px 12px;
   border-radius: 16px;
   border: 1px solid rgba(255,255,255,.10);
   background: rgba(255,255,255,.05);
@@ -736,8 +804,8 @@ body[data-theme="light"] .nw-mini{
   gap: 10px;
 }
 .nw-coin-logo{
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 12px;
   display:grid;
   place-items:center;
@@ -760,10 +828,8 @@ body[data-theme="light"] .nw-mini-sub{ color: rgba(15,23,42,.60); }
 
 /* responsive */
 @media (max-width: 520px){
-  :root{ --gap-cards: 1.15rem; --pad-card: 1.05rem; }
   .networth-usd{ font-size: 1.80rem; }
-  .networth-chart{ height: 265px; }
-  .chart-card{ height: 330px; }
+  .networth-chart{ height: 270px; }
 }
 
 /* ================= LOADING shimmer ================= */
@@ -945,13 +1011,7 @@ body[data-theme="light"] .nav-item.active{
   text-transform: none;
 }
 
-.drawer-foot{
-  margin-top: auto;
-  padding: 10px 8px 0 8px;
-  display:flex;
-  flex-direction: column;
-  gap: .75rem;
-}
+.drawer-foot{ margin-top: auto; padding: 10px 8px 0 8px; }
 
 .drawer-hint{
   font-size: .78rem;
@@ -959,31 +1019,6 @@ body[data-theme="light"] .nav-item.active{
   text-align: right;
 }
 body[data-theme="light"] .drawer-hint{ color: rgba(15,23,42,.62); }
-
-.drawer-meta{
-  border-top: 1px solid rgba(255,255,255,.10);
-  padding-top: .7rem;
-}
-body[data-theme="light"] .drawer-meta{
-  border-top-color: rgba(15,23,42,.12);
-}
-.drawer-meta-row{
-  display:flex;
-  align-items:center;
-  justify-content: flex-end;
-  gap: .35rem;
-  font-size: .74rem;
-  color: rgba(249,250,251,.65);
-}
-body[data-theme="light"] .drawer-meta-row{
-  color: rgba(15,23,42,.62);
-}
-.drawer-meta-app{ font-weight: 950; color: rgba(249,250,251,.82); }
-body[data-theme="light"] .drawer-meta-app{ color: rgba(15,23,42,.84); }
-.drawer-meta-ver{ font-weight: 900; opacity:.9; }
-.drawer-meta-cloud{ font-weight: 900; }
-.drawer-meta-pts{ font-weight: 950; color: rgba(56,189,248,.95); }
-.drawer-meta-dot{ opacity:.55; }
 
 body.drawer-open .backdrop{ opacity: 1; pointer-events: auto; }
 body.drawer-open .drawer{ transform: translateX(0); }
@@ -1060,16 +1095,17 @@ body[data-theme="light"] .coming-close{
 .coming-close:active{ transform: translateY(1px); }
 
 /* ================= FOOTER ================= */
+/* ✅ last update should feel like bottom info */
 .last-update {
-  margin-top: .4rem;
   font-size: 0.8rem;
   text-align: center;
   color: #9ca3af;
+  margin-top: 1.2rem;
 }
 body[data-theme="light"] .last-update{ color: var(--muted-light); }
 
 .pro-footer{
-  margin-top: .4rem;
+  margin-top: .55rem;
   display:flex;
   justify-content:center;
   align-items:center;
@@ -1105,96 +1141,89 @@ body[data-theme="light"] .pro-pill{
 .cloud-points{ color: rgba(56,189,248,.95); font-weight: 900; }
 @keyframes cloudBlink{ 0%{opacity:.55;} 50%{opacity:1;} 100%{opacity:.55;} }
 
-/* ================= FULLSCREEN EXPANDED CARD (overlay) ================= */
-/* JS will toggle: body.card-expanded + .card.is-expanded */
-.card-expand-overlay{
+/* ================= FULLSCREEN CHART MODAL (prepared for JS) ================= */
+.chart-modal{
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 999;
   display: none;
   background: rgba(0,0,0,.55);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 16px;
 }
-body.card-expanded .card-expand-overlay{ display: block; }
+.chart-modal.show{ display:block; }
 
-.card.is-expanded{
-  position: fixed !important;
-  inset: 14px !important;
-  z-index: 210 !important;
-  padding: 14px !important;
-  border-radius: 20px !important;
-  overflow: hidden;
-}
-
-.card.is-expanded .label,
-.card.is-expanded .value-row,
-.card.is-expanded .sub-row,
-.card.is-expanded .bar-container,
-.card.is-expanded .bar-values,
-.card.is-expanded .reward-tools,
-.card.is-expanded .reward-timeline,
-.card.is-expanded .networth-foot,
-.card.is-expanded .networth-tf,
-.card.is-expanded .networth-metrics{
-  display: none !important; /* expanded = only chart */
-}
-
-/* expanded chart takes full size */
-.card.is-expanded .networth-chart,
-.card.is-expanded .stake-chart-wrap,
-.card.is-expanded .reward-chart-wrap,
-.card.is-expanded canvas{
-  height: 100% !important;
-  max-height: none !important;
-}
-
-/* HUD shown while interacting (JS will update text) */
-.chart-hud{
-  position: fixed;
-  left: 50%;
-  top: 16px;
-  transform: translateX(-50%);
-  z-index: 230;
-  display: none;
-  pointer-events: none;
-  padding: .45rem .7rem;
-  border-radius: 999px;
-  background: rgba(0,0,0,.35);
-  color: rgba(249,250,251,.92);
-  font-weight: 950;
-  font-size: .85rem;
-  letter-spacing: .02em;
-  text-shadow: 0 10px 28px rgba(0,0,0,.45);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-body[data-theme="light"] .chart-hud{
-  background: rgba(255,255,255,.62);
-  color: rgba(15,23,42,.92);
-  text-shadow: none;
-}
-body.card-expanded .chart-hud{ display: block; }
-
-/* close button for expanded mode (JS will show) */
-.expand-close{
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 240;
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+.chart-modal-card{
+  height: calc(100vh - 32px);
+  width: min(980px, 100%);
+  margin: 0 auto;
+  border-radius: 22px;
   border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.08);
-  color: rgba(249,250,251,.95);
-  cursor: pointer;
-  display: none;
+  background: linear-gradient(135deg, rgba(11,18,32,.96), rgba(17,28,47,.92));
+  box-shadow: 0 30px 120px rgba(0,0,0,.60);
+  position: relative;
+  overflow: hidden;
+  display:flex;
+  flex-direction: column;
 }
-body[data-theme="light"] .expand-close{
+body[data-theme="light"] .chart-modal-card{
+  background: linear-gradient(135deg, rgba(240,242,246,.98), rgba(230,234,242,.96));
   border-color: rgba(15,23,42,.12);
-  background: rgba(15,23,42,.06);
-  color: rgba(15,23,42,.92);
+  box-shadow: 0 24px 90px rgba(2,6,23,.12);
 }
-body.card-expanded .expand-close{ display: grid; place-items: center; }
-.expand-close:active{ transform: translateY(1px); }
+
+.chart-modal-top{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 12px 10px 12px;
+}
+.chart-modal-title{
+  font-weight: 950;
+  letter-spacing: .02em;
+  font-size: .95rem;
+  color: rgba(249,250,251,.92);
+}
+body[data-theme="light"] .chart-modal-title{
+  color: rgba(15,23,42,.90);
+}
+.chart-modal-close{
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.92);
+  cursor:pointer;
+  display:grid;
+  place-items:center;
+  font-weight: 950;
+}
+body[data-theme="light"] .chart-modal-close{
+  border-color: rgba(15,23,42,.14);
+  background: rgba(15,23,42,.06);
+  color: rgba(15,23,42,.90);
+}
+
+.chart-modal-readout{
+  padding: 0 12px 10px 12px;
+  font-size: .82rem;
+  color: rgba(249,250,251,.76);
+  font-weight: 900;
+}
+body[data-theme="light"] .chart-modal-readout{
+  color: rgba(15,23,42,.72);
+}
+
+.chart-modal-body{
+  flex: 1 1 auto;
+  padding: 0 12px 12px 12px;
+  position: relative;
+}
+
+.chart-modal-body canvas{
+  width: 100% !important;
+  height: 100% !important;
+}
