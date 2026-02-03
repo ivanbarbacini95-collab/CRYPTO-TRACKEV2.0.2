@@ -1611,6 +1611,7 @@ function nwStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
 }
+
 function saveNW(){
   const key = nwStoreKey(address);
   if (!key) return;
@@ -1637,7 +1638,7 @@ function loadNW(){
     const obj = JSON.parse(raw);
     if (!obj || obj.v !== NW_LOCAL_VER) return false;
 
-    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
+    nwTAll   = Array.isArray(obj.tAll)   ? obj.tAll.map(Number)   : [];
     nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
     nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
     nwTf = (obj.tf === "1w" || obj.tf === "1m" || obj.tf === "1y") ? obj.tf : "1d";
@@ -1648,40 +1649,46 @@ function loadNW(){
     return false;
   }
 }
+
 function clampNWArrays(){
   const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
   nwTAll = nwTAll.slice(-n);
   nwUsdAll = nwUsdAll.slice(-n);
   nwInjAll = nwInjAll.slice(-n);
+
   if (nwTAll.length > NW_MAX_POINTS){
     nwTAll = nwTAll.slice(-NW_MAX_POINTS);
     nwUsdAll = nwUsdAll.slice(-NW_MAX_POINTS);
     nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
   }
 }
+
 function nwWindowMs(tf){
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
 }
+
+/* ✅ Build view as XY points (prevents "barcode/bars" effect) */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
   const minT = now - w;
 
-  const labels = [];
-  const data = [];
-
+  const pts = [];
   for (let i = 0; i < nwTAll.length; i++){
     const t = safe(nwTAll[i]);
-    if (t >= minT){
-      labels.push(fmtHHMM(t));
-      data.push(safe(nwUsdAll[i]));
+    const y = safe(nwUsdAll[i]);
+    if (t >= minT && Number.isFinite(t) && Number.isFinite(y)){
+      pts.push({ x: t, y });
     }
   }
 
-  return { labels, data };
+  // keep chronological order (safety)
+  pts.sort((a,b) => a.x - b.x);
+
+  return { pts };
 }
 
 function nwApplySignStyling(sign){
@@ -1711,14 +1718,14 @@ function initNWChart(){
   netWorthChart = new Chart(canvas, {
     type: "line",
     data: {
-      labels: view.labels,
       datasets: [{
-        data: view.data,
+        data: view.pts,              // ✅ XY points
+        parsing: false,              // ✅ don't parse labels
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         pointRadius: 0,
-        tension: 0.25,
+        tension: 0.28,               // smooth but not rubber
         cubicInterpolationMode: "monotone",
         spanGaps: true
       }]
@@ -1727,8 +1734,22 @@ function initNWChart(){
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      scales: { x: { display: false }, y: { display: false } }
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false }
+      },
+      elements: {
+        line: { borderWidth: 2 }
+      },
+      scales: {
+        x: {
+          type: "linear",            // ✅ time as number → no duplicate label issue
+          display: false
+        },
+        y: {
+          display: false
+        }
+      }
     }
   });
 }
@@ -1738,13 +1759,13 @@ function drawNW(){
   if (!netWorthChart) return;
 
   const view = nwBuildView(nwTf);
-  netWorthChart.data.labels = view.labels;
-  netWorthChart.data.datasets[0].data = view.data;
+  netWorthChart.data.datasets[0].data = view.pts;
   netWorthChart.update("none");
 
-  if (view.data.length >= 2){
-    const first = safe(view.data[0]);
-    const last = safe(view.data[view.data.length - 1]);
+  // PnL computed on visible window (what you see)
+  if (view.pts.length >= 2){
+    const first = safe(view.pts[0].y);
+    const last  = safe(view.pts[view.pts.length - 1].y);
     const pnl = last - first;
     const pnlPct = first ? (pnl / first) * 100 : 0;
 
@@ -1784,11 +1805,13 @@ function recordNetWorthPoint(){
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
 
+  // same logic as before: no spam points
   if (lastT && dt < 30_000 && dUsd < 1) return;
 
   nwTAll.push(now);
   nwUsdAll.push(totalUsd);
   nwInjAll.push(totalInj);
+
   clampNWArrays();
   saveNW();
   drawNW();
