@@ -955,7 +955,6 @@ function initChartToday() {
     }
   } : {};
 
-  // ✅ MOD: grafico più largo + prezzi “mirror” a destra dentro il grafico
   chart = new Chart(canvas, {
     type: "line",
     data: {
@@ -1540,6 +1539,12 @@ let nwUsdAll = [];
 let nwInjAll = [];
 let netWorthChart = null;
 
+/* ✅ realtime smoothing / scrolling */
+let nwLastCommitTs = 0;
+const NW_COMMIT_EVERY_MS = 12_000;  // aggiunge un punto “vero” ogni 12s
+const NW_UPDATE_MIN_MS   = 700;     // aggiorna l’ultimo punto live (max ~1.4Hz)
+let nwLastLiveUpdateTs   = 0;
+
 function nwStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
@@ -1560,7 +1565,6 @@ function saveNW(){
     cloudSetState("error");
   }
 }
-
 function loadNW(){
   const key = nwStoreKey(address);
   if (!key) return false;
@@ -1598,8 +1602,7 @@ function nwWindowMs(tf){
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
 }
-
-/* ✅ MOD: per usare x linear “vero” -> ritorno points {x,y} */
+/* ✅ MOD: points {x,y} */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
@@ -1613,7 +1616,6 @@ function nwBuildView(tf){
       points.push({ x: t, y });
     }
   }
-
   return { points };
 }
 
@@ -1635,23 +1637,60 @@ function nwApplySignStyling(sign){
   netWorthChart.update("none");
 }
 
+/* ✅ autoscale Y “stretto” -> livelli verticali vicini */
+function nwAutoscaleY(points){
+  if (!netWorthChart) return;
+  if (!points || points.length < 2) {
+    netWorthChart.options.scales.y.min = undefined;
+    netWorthChart.options.scales.y.max = undefined;
+    return;
+  }
+
+  let mn = Infinity, mx = -Infinity;
+  for (const p of points){
+    const y = safe(p.y);
+    if (!Number.isFinite(y)) continue;
+    if (y < mn) mn = y;
+    if (y > mx) mx = y;
+  }
+  if (!Number.isFinite(mn) || !Number.isFinite(mx) || mn === mx) {
+    netWorthChart.options.scales.y.min = undefined;
+    netWorthChart.options.scales.y.max = undefined;
+    return;
+  }
+
+  const range = mx - mn;
+  const pad = Math.max(range * 0.12, 2);
+  netWorthChart.options.scales.y.min = mn - pad;
+  netWorthChart.options.scales.y.max = mx + pad;
+}
+
 function initNWChart(){
   const canvas = $("netWorthChart");
   if (!canvas || !window.Chart) return;
 
   const view = nwBuildView(nwTf);
 
-  // ✅ MOD: line “pulita” e più spazio utile orizzontale
+  const zoomBlock = ZOOM_OK ? {
+    zoom: {
+      pan: { enabled: true, mode: "x", threshold: 2 },
+      zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+    }
+  } : {};
+
   netWorthChart = new Chart(canvas, {
     type: "line",
     data: {
       datasets: [{
         data: view.points,
+        parsing: false,
+        normalized: true,
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         pointRadius: 0,
-        tension: 0.25,
+        tension: 0.28,
+        cubicInterpolationMode: "monotone",
         spanGaps: true
       }]
     },
@@ -1660,8 +1699,8 @@ function initNWChart(){
       maintainAspectRatio: false,
       animation: false,
 
-      // ✅ più spazio “lunghezza”, tick dentro a destra
-      layout: { padding: { left: 6, right: 16, top: 6, bottom: 8 } },
+      layout: { padding: { left: 8, right: 22, top: 8, bottom: 10 } },
+      clip: { left: 0, top: 8, right: 0, bottom: 0 },
 
       plugins: {
         legend: { display: false },
@@ -1676,38 +1715,28 @@ function initNWChart(){
             label: (item) => fmtUsd(item?.parsed?.y)
           }
         },
-        decimation: { enabled: true, algorithm: "min-max" },
-        ...(ZOOM_OK ? {
-          zoom: {
-            pan: { enabled: true, mode: "x", threshold: 2 },
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
-          }
-        } : {})
+        decimation: { enabled: true, algorithm: "lttb", samples: 300 },
+        ...zoomBlock
       },
 
       interaction: { mode: "nearest", intersect: false },
-      clip: { left: 0, top: 6, right: 0, bottom: 0 },
 
       scales: {
         x: {
           type: "linear",
           grid: { color: axisGridColor() },
-          ticks: {
-            color: axisTickColor(),
-            maxTicksLimit: 5,
-            callback: (v) => fmtHHMM(v)
-          }
+          ticks: { color: axisTickColor(), maxTicksLimit: 6, callback: (v) => fmtHHMM(v) }
         },
         y: {
           position: "right",
+          grid: { color: axisGridColor() },
           ticks: {
             color: axisTickColor(),
-            mirror: true,      // ✅ “schiaccia” i prezzi verso la fine senza rubare spazio
+            mirror: true,
             padding: 6,
-            maxTicksLimit: 5,
+            maxTicksLimit: 7,
             callback: (v) => fmtUsd(v)
-          },
-          grid: { color: axisGridColor() }
+          }
         }
       }
     }
@@ -1723,12 +1752,11 @@ function drawNW(){
 
   netWorthChart.data.datasets[0].data = pts;
 
-  // ✅ MOD: “respiro” a destra così la linea non muore sul bordo
+  // ✅ respiro a destra
   if (pts.length >= 2){
     const xMin = pts[0].x;
     const xMax = pts[pts.length - 1].x;
-    const rightPadMs = 25_000;
-
+    const rightPadMs = 35_000;
     netWorthChart.options.scales.x.min = xMin;
     netWorthChart.options.scales.x.max = xMax + rightPadMs;
   } else {
@@ -1736,6 +1764,7 @@ function drawNW(){
     netWorthChart.options.scales.x.max = undefined;
   }
 
+  nwAutoscaleY(pts);
   netWorthChart.update("none");
 
   if (pts.length >= 2){
@@ -1764,6 +1793,7 @@ function drawNW(){
   }
 }
 
+/* ✅ Realtime: aggiorna l’ultimo punto + commit periodico */
 function recordNetWorthPoint(){
   if (!address) return;
   if (!Number.isFinite(targetPrice) || targetPrice <= 0) return;
@@ -1774,20 +1804,46 @@ function recordNetWorthPoint(){
 
   const now = Date.now();
 
-  const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
-  const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwUsdAll.length - 1]) : 0;
+  // 1) update live ultimo punto (se “vicino” all’ultimo commit)
+  const canLiveUpdate = (now - nwLastLiveUpdateTs) >= NW_UPDATE_MIN_MS;
+  if (canLiveUpdate && nwTAll.length) {
+    const lastT = safe(nwTAll[nwTAll.length - 1]);
+    if (lastT && (now - lastT) < NW_COMMIT_EVERY_MS) {
+      nwLastLiveUpdateTs = now;
+      nwTAll[nwTAll.length - 1] = now;
+      nwUsdAll[nwUsdAll.length - 1] = totalUsd;
+      nwInjAll[nwInjAll.length - 1] = totalInj;
 
-  const dt = now - lastT;
-  const dUsd = Math.abs(totalUsd - lastUsd);
+      if (netWorthChart) {
+        const view = nwBuildView(nwTf);
+        const pts = view.points || [];
+        netWorthChart.data.datasets[0].data = pts;
+        nwAutoscaleY(pts);
 
-  if (lastT && dt < 30_000 && dUsd < 1) return;
+        if (pts.length >= 2) {
+          const xMin = pts[0].x;
+          const xMax = pts[pts.length - 1].x;
+          netWorthChart.options.scales.x.min = xMin;
+          netWorthChart.options.scales.x.max = xMax + 35_000;
+        }
+        netWorthChart.update("none");
+      }
+      return;
+    }
+  }
 
-  nwTAll.push(now);
-  nwUsdAll.push(totalUsd);
-  nwInjAll.push(totalInj);
-  clampNWArrays();
-  saveNW();
-  drawNW();
+  // 2) commit punto “vero” ogni NW_COMMIT_EVERY_MS (o se primo)
+  if (!nwTAll.length || (now - nwLastCommitTs) >= NW_COMMIT_EVERY_MS) {
+    nwLastCommitTs = now;
+
+    nwTAll.push(now);
+    nwUsdAll.push(totalUsd);
+    nwInjAll.push(totalInj);
+
+    clampNWArrays();
+    saveNW();
+    drawNW();
+  }
 }
 
 function attachNWTFHandlers(){
