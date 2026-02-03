@@ -925,39 +925,6 @@ async function fetchKlines1mRange(startTime, endTime) {
   return out.slice(0, DAY_MINUTES);
 }
 
-function initChartToday() {
-  const canvas = $("priceChart");
-  if (!canvas || !window.Chart) return;
-
-  const zoomBlock = ZOOM_OK ? {
-    zoom: {
-      pan: {
-        enabled: true,
-        mode: "x",
-        threshold: 2,
-        onPanStart: () => { isPanning = true; },
-        onPanComplete: ({ chart }) => {
-          isPanning = false;
-          const xScale = chart.scales.x;
-          const center = (chart.chartArea.left + chart.chartArea.right) / 2;
-          pinnedIndex = xScale.getValueForPixel(center);
-          updatePinnedOverlay();
-        }
-      },
-      zoom: {
-        wheel: { enabled: true },
-        pinch: { enabled: true },
-        mode: "x",
-        onZoomComplete: ({ chart }) => {
-          const xScale = chart.scales.x;
-          const center = (chart.chartArea.left + chart.chartArea.right) / 2;
-          pinnedIndex = xScale.getValueForPixel(center);
-          updatePinnedOverlay();
-        }
-      }
-    }
-  } : {};
-
   chart = new Chart(canvas, {
     type: "line",
     data: {
@@ -968,23 +935,45 @@ function initChartToday() {
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         pointRadius: 0,
-        tension: 0.3
+        tension: 0.3,
+        spanGaps: true
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      // ✅ usa più area orizzontale
+      layout: { padding: { left: 6, right: 10, top: 6, bottom: 6 } },
+
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
+
+        // ✅ performance/linea più “pulita” (se disponibile)
+        decimation: { enabled: true, algorithm: "min-max" },
+
         ...zoomBlock
       },
+
+      // ✅ evita “tagli” strani vicino ai bordi
+      clip: { left: 0, top: 6, right: 0, bottom: 0 },
+
       interaction: { mode: "index", intersect: false },
       scales: {
-        x: { display: false },
+        x: {
+          display: false,
+          grid: { display: false }
+        },
         y: {
-          ticks: { color: axisTickColor() },
+          position: "right",
+          // ✅ tick “dentro” al grafico -> più spazio
+          ticks: {
+            color: axisTickColor(),
+            mirror: true,
+            padding: 6,
+            callback: (v) => `$${safe(v).toFixed(2)}`
+          },
           grid: { color: axisGridColor() }
         }
       }
