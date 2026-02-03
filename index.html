@@ -60,7 +60,6 @@
 
   <div class="container loading" id="appRoot">
 
-    <!-- HEADER -->
     <div class="header">
       <div class="header-grid">
 
@@ -94,18 +93,21 @@
       </div>
     </div>
 
-    <!-- ================= CARDS ================= -->
     <div class="cards-wrapper">
 
-      <!-- 1. NET WORTH -->
+      <!-- 1) NET WORTH (NEW: spacing + realtime chart + TF + ALL + LIN/LOG + mini INJ zone) -->
       <div class="card networth-card" id="netWorthCard">
 
-        <div class="networth-head">
-          <div class="networth-left">
-            <div class="label">Net Worth</div>
-            <div class="networth-usd" id="netWorthUsd">$0.00</div>
-            <div class="networth-delta flat" id="netWorthDelta">—</div>
-          </div>
+        <div class="networth-top">
+          <div class="label networth-title">Net Worth</div>
+
+          <!-- NEW: small scale toggle top-right -->
+          <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
+        </div>
+
+        <div class="networth-metrics">
+          <div class="networth-usd" id="netWorthUsd">$0.00</div>
+          <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
         </div>
 
         <div class="networth-chart">
@@ -118,6 +120,20 @@
             <button class="tf-btn" data-tf="1w" type="button">1W</button>
             <button class="tf-btn" data-tf="1m" type="button">1M</button>
             <button class="tf-btn" data-tf="1y" type="button">1Y</button>
+            <button class="tf-btn" data-tf="all" type="button">ALL</button>
+          </div>
+
+          <!-- NEW: mini zone under TF -->
+          <div class="networth-asset">
+            <span class="nw-asset-icon">🟣</span>
+            <span class="nw-asset-name">Injective</span>
+
+            <span class="nw-asset-qty" id="nwAssetQty">0.0000</span>
+            <span class="nw-asset-mid">INJ</span>
+            <span class="nw-asset-sep">·</span>
+            <span class="nw-asset-price" id="nwAssetPrice">$0.00</span>
+            <span class="nw-asset-sep">→</span>
+            <span class="nw-asset-usd" id="nwAssetUsd">$0.00</span>
           </div>
         </div>
 
@@ -138,14 +154,14 @@
 
       </div>
 
-      <!-- 2. AVAILABLE -->
+      <!-- 2) AVAILABLE -->
       <div class="card">
         <div class="label">Available</div>
         <div class="value-row"><span id="available">0.000000</span></div>
         <div class="sub-row" id="availableUsd">≈ $0.00</div>
       </div>
 
-      <!-- 3. STAKED -->
+      <!-- 3) STAKED -->
       <div class="card stake-card">
         <div class="label">Staked</div>
         <div class="value-row"><span id="stake">0.0000</span></div>
@@ -167,7 +183,7 @@
         </div>
       </div>
 
-      <!-- 4. REWARDS -->
+      <!-- 4) REWARDS -->
       <div class="card reward-card">
         <div class="label">Rewards</div>
         <div class="value-row"><span id="rewards">0.0000000</span></div>
@@ -209,13 +225,13 @@
         </div>
       </div>
 
-      <!-- 5. APR -->
+      <!-- 5) APR -->
       <div class="card">
         <div class="label">APR</div>
         <div class="value-row"><span id="apr">0%</span></div>
       </div>
 
-      <!-- 6. 1D PRICE CHART -->
+      <!-- 6) 1D PRICE CHART -->
       <div class="card chart-card">
         <div class="label">1D Price Chart</div>
 
@@ -226,9 +242,58 @@
         <canvas id="priceChart"></canvas>
       </div>
 
-      <!-- 7. INJ PRICE -->
+      <!-- 7) INJ PRICE -->
       <div class="card price-card">
-        <!-- CONTENUTO IDENTICO AL TUO -->
+        <div class="label">INJ Price</div>
+        <div class="value-row"><span id="price">0.0000</span></div>
+
+        <div class="sub-row perf">
+          <span class="arrow" id="arrow24h">►</span>
+          <span class="pct" id="pct24h">0.00%</span>
+        </div>
+        <div class="price-bar-container bar-container">
+          <span class="bar-label">1D</span>
+          <div id="priceBar" class="bar-fill"></div>
+          <div class="open-marker" aria-hidden="true"></div>
+          <div id="priceLine" class="bar-line"></div>
+        </div>
+        <div class="bar-values">
+          <span id="priceMin" class="left">--</span>
+          <span id="priceOpen" class="center">--</span>
+          <span id="priceMax" class="right">--</span>
+        </div>
+
+        <div class="sub-row perf">
+          <span class="arrow" id="arrowWeek">►</span>
+          <span class="pct" id="pctWeek">0.00%</span>
+        </div>
+        <div class="week-bar-container bar-container">
+          <span class="bar-label">1W</span>
+          <div id="weekBar" class="bar-fill"></div>
+          <div class="open-marker" aria-hidden="true"></div>
+          <div id="weekLine" class="bar-line"></div>
+        </div>
+        <div class="bar-values">
+          <span id="weekMin" class="left">--</span>
+          <span id="weekOpen" class="center">--</span>
+          <span id="weekMax" class="right">--</span>
+        </div>
+
+        <div class="sub-row perf">
+          <span class="arrow" id="arrowMonth">►</span>
+          <span class="pct" id="pctMonth">0.00%</span>
+        </div>
+        <div class="month-bar-container bar-container">
+          <span class="bar-label">1M</span>
+          <div id="monthBar" class="bar-fill"></div>
+          <div class="open-marker" aria-hidden="true"></div>
+          <div id="monthLine" class="bar-line"></div>
+        </div>
+        <div class="bar-values">
+          <span id="monthMin" class="left">--</span>
+          <span id="monthOpen" class="center">--</span>
+          <span id="monthMax" class="right">--</span>
+        </div>
       </div>
 
     </div>
