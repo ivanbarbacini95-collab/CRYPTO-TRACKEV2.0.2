@@ -1100,6 +1100,68 @@ let stakeTypes = [];
 let lastStakeRecordedRounded = null;
 let stakeBaselineCaptured = false;
 
+function stakeStoreKey(addr) {
+  const a = (addr || "").trim();
+  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
+}
+function saveStakeSeries() {
+  const key = stakeStoreKey(address);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      v: STAKE_LOCAL_VER, t: Date.now(),
+      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
+    }));
+    cloudBump(1); /* ✅ */
+  } catch {
+    cloudSetState("error");
+  }
+}
+function loadStakeSeries() {
+  const key = stakeStoreKey(address);
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
+
+    stakeLabels = Array.isArray(obj.labels) ? obj.labels : [];
+    stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
+    stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
+    stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
+
+    const n = stakeData.length;
+    stakeLabels = stakeLabels.slice(0, n);
+    stakeMoves  = stakeMoves.slice(0, n);
+    stakeTypes  = stakeTypes.slice(0, n);
+
+    while (stakeMoves.length < n) stakeMoves.push(0);
+    while (stakeTypes.length < n) stakeTypes.push("Stake update");
+
+    stakeBaselineCaptured = stakeData.length > 0;
+    lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
+    return true;
+  } catch {
+    return false;
+  }
+}
+function clearStakeSeriesStorage() {
+  const key = stakeStoreKey(address);
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch {}
+}
+function resetStakeSeriesFromNow() {
+  stakeLabels = [nowLabel()];
+  stakeData = [0];
+  stakeMoves = [0];
+  stakeTypes = ["Reset start"];
+  lastStakeRecordedRounded = 0;
+  stakeBaselineCaptured = false;
+  saveStakeSeries();
+  drawStakeChart();
+}
+
 /* ================= STAKE: % label over points (NEW) ================= */
 const stakePointPctPlugin = {
   id: "stakePointPctPlugin",
@@ -1171,72 +1233,9 @@ const stakePointPctPlugin = {
 
       drawn++;
     }
-
     ctx.restore();
   }
 };
-
-function stakeStoreKey(addr) {
-  const a = (addr || "").trim();
-  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
-}
-function saveStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-  try {
-    localStorage.setItem(key, JSON.stringify({
-      v: STAKE_LOCAL_VER, t: Date.now(),
-      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
-    }));
-    cloudBump(1); /* ✅ */
-  } catch {
-    cloudSetState("error");
-  }
-}
-function loadStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return false;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
-
-    stakeLabels = Array.isArray(obj.labels) ? obj.labels : [];
-    stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
-    stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
-    stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
-
-    const n = stakeData.length;
-    stakeLabels = stakeLabels.slice(0, n);
-    stakeMoves  = stakeMoves.slice(0, n);
-    stakeTypes  = stakeTypes.slice(0, n);
-
-    while (stakeMoves.length < n) stakeMoves.push(0);
-    while (stakeTypes.length < n) stakeTypes.push("Stake update");
-
-    stakeBaselineCaptured = stakeData.length > 0;
-    lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
-    return true;
-  } catch {
-    return false;
-  }
-}
-function clearStakeSeriesStorage() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-  try { localStorage.removeItem(key); } catch {}
-}
-function resetStakeSeriesFromNow() {
-  stakeLabels = [nowLabel()];
-  stakeData = [0];
-  stakeMoves = [0];
-  stakeTypes = ["Reset start"];
-  lastStakeRecordedRounded = 0;
-  stakeBaselineCaptured = false;
-  saveStakeSeries();
-  drawStakeChart();
-}
 
 function initStakeChart() {
   const canvas = $("stakeChart");
@@ -1265,7 +1264,7 @@ function initStakeChart() {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: { padding: { left: 12, right: 12, top: 10, bottom: 6 } }, // ✅ spazio per label %
+      layout: { padding: { left: 12, right: 12, top: 10, bottom: 6 } },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1292,9 +1291,10 @@ function initStakeChart() {
         y: { ticks: { color: axisTickColor() }, grid: { color: axisGridColor() } }
       }
     },
-    plugins: [stakePointPctPlugin] // ✅ NEW plugin
+    plugins: [stakePointPctPlugin]
   });
 }
+
 function drawStakeChart() {
   if (!stakeChart) initStakeChart();
   if (stakeChart) {
@@ -1402,7 +1402,6 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* --- reward chart code identico al tuo (non lo taglio ulteriormente) --- */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1433,7 +1432,6 @@ const rewardPointLabelPlugin = {
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
 
-    // area utile (dove non si deve uscire)
     const leftBound  = ch.chartArea.left + 6;
     const rightBound = ch.chartArea.right - 6;
 
@@ -1448,12 +1446,10 @@ const rewardPointLabelPlugin = {
       const v = safe(ds.data[i]);
       const text = `+${v.toFixed(6)} INJ`;
 
-      // ✅ clamp X per non tagliare testo a sinistra/destra
       const halfW = ctx.measureText(text).width / 2;
       let x = el.x;
       x = Math.max(leftBound + halfW, Math.min(rightBound - halfW, x));
 
-      // y un filo sopra il punto, ma senza uscire dal top
       let y = el.y - 10;
       y = Math.max(ch.chartArea.top + 12, y);
 
@@ -1480,6 +1476,8 @@ function initRewardWdChart() {
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         tension: 0.25,
+        cubicInterpolationMode: "monotone",
+        spanGaps: true,
         pointRadius: 4,
         pointHoverRadius: 6,
         pointBackgroundColor: "#3b82f6",
@@ -1630,7 +1628,6 @@ function saveNW(){
   }
 }
 
-/* --- resto networth identico al tuo --- */
 function loadNW(){
   const key = nwStoreKey(address);
   if (!key) return false;
@@ -1721,7 +1718,9 @@ function initNWChart(){
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         pointRadius: 0,
-        tension: 0.25
+        tension: 0.25,
+        cubicInterpolationMode: "monotone",
+        spanGaps: true
       }]
     },
     options: {
