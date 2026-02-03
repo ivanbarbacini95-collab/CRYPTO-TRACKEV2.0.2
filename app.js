@@ -1,6 +1,10 @@
+/* =========================================================
+   Injective Portfolio • v2.0.2
+   app.js — FULL FILE (no cuts)
+   ========================================================= */
+
 /* ================= CONFIG ================= */
 const INITIAL_SETTLE_TIME = 4200;
-let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
 const REST_SYNC_MS = 60000;
@@ -10,29 +14,27 @@ const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
-
-/* persistence */
-const STAKE_LOCAL_VER = 2;
-/* ✅ non resettare più ad ogni refresh: mantieni punti anche se ricarichi pagina */
-const RESET_STAKE_FROM_NOW_ON_BOOT = false;
-
-const REWARD_WD_LOCAL_VER = 2;
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
-/* NET WORTH persistence */
-const NW_LOCAL_VER = 1;
+/* persistence versions */
+const STAKE_LOCAL_VER = 3; // bumped: labels store timestamps for cross-device merge
+const REWARD_WD_LOCAL_VER = 2;
+const NW_LOCAL_VER = 2;    // bumped: allow live window state + scale
+const EV_LOCAL_VER = 1;
+
+/* net worth limits */
 const NW_MAX_POINTS = 4800;
 
-/* Validator cache (moniker) */
-const VALIDATOR_CACHE_VER = 1;
+/* Net Worth live window */
+const NW_LIVE_WINDOW_MS = 2 * 60 * 1000; // ✅ 2 minutes (as requested)
 
-/* REFRESH mode staging */
+/* cloud */
+const CLOUD_API = "/api/point";
+const CLOUD_PUSH_DEBOUNCE_MS = 1200;
+const CLOUD_PULL_INTERVAL_MS = 45_000;
+
+/* refresh mode staging */
 const REFRESH_RED_MS = 220;
-let refreshLoaded = false;
-let refreshLoading = false;
-
-/* ✅ Status dot "mode loading" (switch / data loading) */
-let modeLoading = false;
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -40,21 +42,30 @@ const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
 
 function pad2(n) { return String(n).padStart(2, "0"); }
-function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+
+function fmtHHMM(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function fmtHHMMSS(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/* storage-label (timestamp) helpers */
+function tsLabel(ms = Date.now()) { return String(Math.floor(ms)); }
+function labelToTs(lbl) {
+  if (lbl == null) return 0;
+  const s = String(lbl).trim();
+  if (/^\d{10,13}$/.test(s)) return safe(s);
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/* UI labels */
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
-function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
-function setTextMulti(ids, txt){
-  (ids || []).forEach((id) => {
-    const el = $(id);
-    if (el) el.textContent = txt;
-  });
-}
-function setTextAll(sel, txt){
-  try{
-    document.querySelectorAll(sel).forEach(el => { el.textContent = txt; });
-  } catch {}
-}
+function setText(id, txt) { const el = $(id); if (el) el.textContent = txt; }
 
 function fmtSmart(v){
   v = safe(v);
@@ -67,28 +78,7 @@ function fmtSmart(v){
   return v.toFixed(6);
 }
 
-/* money + digit coloring */
-function colorMoney(el, n, o, decimals = 2){
-  if (!el) return;
-  n = safe(n); o = safe(o);
-  const ns = n.toFixed(decimals);
-  const os = o.toFixed(decimals);
-  if (ns === os) { el.textContent = `$${ns}`; return; }
-
-  const baseCol = (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
-  const upCol = "#22c55e";
-  const dnCol = "#ef4444";
-  const dir = (n > o) ? "up" : "down";
-
-  const out = [`<span style="color:${baseCol}">$</span>`];
-  for (let i = 0; i < ns.length; i++){
-    const c = ns[i];
-    const oc = os[i];
-    const col = (c !== oc) ? (dir === "up" ? upCol : dnCol) : baseCol;
-    out.push(`<span style="color:${col}">${c}</span>`);
-  }
-  el.innerHTML = out.join("");
-}
+function hasInternet() { return navigator.onLine === true; }
 
 /* ================= GLOBAL ERROR GUARDS ================= */
 function setStatusError(msg){
@@ -102,16 +92,16 @@ window.addEventListener("error", (e) => {
   setStatusError("JS Error");
   console.error("JS Error:", e?.error || e);
 });
-
 window.addEventListener("unhandledrejection", (e) => {
   setStatusError("Promise Error");
   console.error("Promise Error:", e?.reason || e);
 });
 
-/* ================= THEME / MODE (storage) ================= */
+/* ================= THEME / MODE ================= */
 const THEME_KEY = "inj_theme";
 const MODE_KEY  = "inj_mode"; // live | refresh
-let theme   = localStorage.getItem(THEME_KEY) || "dark";
+
+let theme = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
 function axisGridColor() {
@@ -129,7 +119,6 @@ function applyTheme(t){
   if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
   refreshChartsTheme();
 }
-applyTheme(theme);
 
 /* ================= CHARTJS ZOOM REGISTER (NO CRASH) ================= */
 let ZOOM_OK = false;
@@ -145,87 +134,6 @@ function tryRegisterZoom(){
     return false;
   }
 }
-ZOOM_OK = tryRegisterZoom();
-
-/* ================= CLOUD (footer + menu + points) ================= */
-const CLOUD_VER = 1;
-const CLOUD_KEY = `inj_cloud_v${CLOUD_VER}`;
-let cloudPts = 0;
-let cloudLastSync = 0;
-
-function cloudLoad(){
-  try{
-    const raw = localStorage.getItem(CLOUD_KEY);
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    if (!obj) return;
-    cloudPts = safe(obj.pts);
-    cloudLastSync = safe(obj.lastSync);
-  } catch {}
-}
-function cloudSave(){
-  try{
-    localStorage.setItem(CLOUD_KEY, JSON.stringify({ v: CLOUD_VER, pts: cloudPts, lastSync: cloudLastSync }));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* Aggiorna testo cloud sia in footer che nel menu (se presente) */
-function cloudSetTextEverywhere(txt){
-  setTextMulti(["cloudStatus","menuCloudStatus","drawerCloudStatus","cloudStatusText"], txt);
-  // Supporta data-attribute (se nel menu hai <span data-cloud-status>)
-  setTextAll("[data-cloud-status]", txt);
-}
-function cloudRender(){
-  const ptsTxt = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
-  setTextMulti(["cloudHistory","menuCloudHistory","drawerCloudHistory"], ptsTxt);
-  setTextAll("[data-cloud-points]", ptsTxt);
-
-  const ls = cloudLastSync ? fmtHHMM(cloudLastSync) : "—";
-  setTextMulti(["menuCloudLastSync","drawerCloudLastSync"], `Last sync ${ls}`);
-  setTextAll("[data-cloud-last-sync]", `Last sync ${ls}`);
-}
-
-function cloudSetState(state){
-  const root = $("appRoot");
-  // Footer (root class) resta utile
-  if (root) root.classList.remove("cloud-synced","cloud-saving","cloud-error");
-
-  if (state === "saving"){
-    if (root) root.classList.add("cloud-saving");
-    cloudSetTextEverywhere(hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache");
-    return;
-  }
-  if (state === "error"){
-    if (root) root.classList.add("cloud-error");
-    cloudSetTextEverywhere("Cloud: Error");
-    return;
-  }
-  // synced/default
-  if (root) root.classList.add("cloud-synced");
-  cloudSetTextEverywhere(hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache");
-}
-
-function cloudBump(points = 1){
-  cloudPts = safe(cloudPts) + safe(points);
-  cloudLastSync = Date.now();
-
-  cloudSetState("saving");
-  const ok = cloudSave();
-  cloudRender();
-
-  if (!ok) {
-    cloudSetState("error");
-    return;
-  }
-
-  setTimeout(() => {
-    cloudSetState("synced");
-    cloudRender();
-  }, 450);
-}
 
 /* ================= CONNECTION UI ================= */
 const statusDot  = $("statusDot");
@@ -235,20 +143,16 @@ let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
 
-function hasInternet() { return navigator.onLine === true; }
+let refreshLoaded = false;
+let refreshLoading = false;
+let modeLoading = false;
 
-/* ✅ Determine if LIVE is truly "ready" */
 function liveReady(){
   const socketsOk = wsTradeOnline && wsKlineOnline;
-  const accountOk = !address || accountOnline; // if no wallet set, don't block green
+  const accountOk = !address || accountOnline;
   return socketsOk && accountOk;
 }
 
-/* ✅ Status dot logic:
-   - No internet => red
-   - Loading (switching / fetching) => orange
-   - Ready => green
-*/
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
 
@@ -266,12 +170,12 @@ function refreshConnUI() {
 
   if (loadingNow) {
     statusText.textContent = "Loading...";
-    statusDot.style.background = "#f59e0b"; // orange
+    statusDot.style.background = "#f59e0b";
     return;
   }
 
   statusText.textContent = "Online";
-  statusDot.style.background = "#22c55e"; // green
+  statusDot.style.background = "#22c55e";
 }
 
 /* ================= UI READY FAILSAFE ================= */
@@ -285,9 +189,9 @@ function setUIReady(force=false){
 }
 
 /* ================= SAFE FETCH ================= */
-async function fetchJSON(url) {
+async function fetchJSON(url, opts = {}) {
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store", ...opts });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
   } catch (e) {
@@ -296,6 +200,7 @@ async function fetchJSON(url) {
 }
 
 /* ================= SMOOTH DISPLAY ================= */
+let settleStart = Date.now();
 function scrollSpeed() {
   const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
   const base = 0.08;
@@ -319,6 +224,29 @@ function colorNumber(el, n, o, d) {
       : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
+}
+
+/* money with digit coloring */
+function colorMoney(el, n, o, decimals = 2){
+  if (!el) return;
+  n = safe(n); o = safe(o);
+  const ns = n.toFixed(decimals);
+  const os = o.toFixed(decimals);
+  if (ns === os) { el.textContent = `$${ns}`; return; }
+
+  const baseCol = (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
+  const upCol = "#22c55e";
+  const dnCol = "#ef4444";
+  const dir = (n > o) ? "up" : "down";
+
+  const out = [`<span style="color:${baseCol}">$</span>`];
+  for (let i = 0; i < ns.length; i++){
+    const c = ns[i];
+    const oc = os[i];
+    const col = (c !== oc) ? (dir === "up" ? upCol : dnCol) : baseCol;
+    out.push(`<span style="color:${col}">${c}</span>`);
+  }
+  el.innerHTML = out.join("");
 }
 
 /* ================= PERF ================= */
@@ -382,7 +310,7 @@ function flash(el) {
   el.classList.add("flash-yellow");
 }
 
-/* ================= HEADER SEARCH UI ================= */
+/* ================= ADDRESS / SEARCH ================= */
 const searchWrap = $("searchWrap");
 const searchBtn = $("searchBtn");
 const addressInput = $("addressInput");
@@ -412,7 +340,7 @@ function closeSearch() {
   addressInput?.blur();
 }
 
-if (addressInput) addressInput.value = pendingAddress;
+if (addressInput) addressInput.value = ""; // ✅ start empty (we show wallet in display)
 
 if (searchBtn) {
   searchBtn.addEventListener("click", (e) => {
@@ -428,21 +356,25 @@ if (addressInput) {
 
   addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
 
-  addressInput.addEventListener("keydown", (e) => {
+  addressInput.addEventListener("keydown", async (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      commitAddress(pendingAddress);
+      const v = pendingAddress;
+      await commitAddress(v);
+      // ✅ keep wallet displayed, but clear input for next search
+      addressInput.value = "";
+      pendingAddress = "";
       closeSearch();
     } else if (e.key === "Escape") {
       e.preventDefault();
-      addressInput.value = address || "";
-      pendingAddress = address || "";
+      addressInput.value = "";
+      pendingAddress = "";
       closeSearch();
     }
   });
 }
 
-/* ✅ non rompere la lente: chiudi solo se clicchi DAVVERO fuori */
+/* close search only if clicking outside */
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
@@ -457,6 +389,11 @@ const themeToggle = $("themeToggle");
 const liveToggle = $("liveToggle");
 const liveIcon = $("liveIcon");
 const modeHint = $("modeHint");
+
+/* cloud status in menu */
+const cloudDotMenu = $("cloudDotMenu");
+const cloudTextMenu = $("cloudTextMenu");
+const cloudPtsMenu = $("cloudPtsMenu");
 
 let isDrawerOpen = false;
 
@@ -483,7 +420,11 @@ menuBtn?.addEventListener("click", (e) => {
 backdrop?.addEventListener("click", () => closeDrawer(), { passive:true });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDrawer();
+  if (e.key === "Escape") {
+    closeDrawer();
+    closeComingSoon();
+    exitFullscreenCard();
+  }
 });
 
 themeToggle?.addEventListener("click", (e) => {
@@ -491,7 +432,7 @@ themeToggle?.addEventListener("click", (e) => {
   applyTheme(theme === "dark" ? "light" : "dark");
 }, { passive:false });
 
-/* ================= COMING SOON overlay (FIX CLOSE ALWAYS) ================= */
+/* ================= COMING SOON overlay (FIX CLOSE) ================= */
 const comingSoon = $("comingSoon");
 const comingTitle = $("comingTitle");
 const comingSub = $("comingSub");
@@ -500,10 +441,10 @@ const comingClose = $("comingClose");
 function pageLabel(key){
   if (key === "home") return "HOME";
   if (key === "market") return "MARKET";
-  if (key === "event") return "EVENT";
   if (key === "settings") return "SETTINGS";
   return "PAGE";
 }
+
 function openComingSoon(pageKey){
   if (!comingSoon) return;
   if (comingTitle) comingTitle.textContent = `COMING SOON 🚀`;
@@ -517,46 +458,36 @@ function closeComingSoon(){
   comingSoon.setAttribute("aria-hidden", "true");
 }
 
-/* ✅ Fix: chiudi SEMPRE, anche se overlay/blur interferiscono */
-function attachComingSoonCloseFix(){
-  // 1) click sul bottone (se id corretto)
-  comingClose?.addEventListener("click", (e) => {
-    e?.preventDefault?.();
-    e?.stopPropagation?.();
-    closeComingSoon();
-  }, { passive: false });
+/* ✅ close always works: stop propagation, and also close if click outside card */
+comingClose?.addEventListener("click", (e) => {
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  closeComingSoon();
+}, { passive:false });
 
-  // 2) click sul backdrop (fuori dalla card)
-  comingSoon?.addEventListener("click", (e) => {
-    if (e.target === comingSoon) closeComingSoon();
-  }, { passive: true });
+comingSoon?.addEventListener("click", (e) => {
+  if (e.target === comingSoon) closeComingSoon();
+}, { passive:true });
 
-  // 3) fallback globale in capture (se il bottone esiste ma listener non si attacca per timing/overlay)
-  document.addEventListener("click", (e) => {
-    const t = e.target;
-    const isClose =
-      t?.id === "comingClose" ||
-      t?.closest?.("#comingClose") ||
-      t?.getAttribute?.("data-close") === "comingSoon" ||
-      t?.closest?.('[data-close="comingSoon"]');
-    if (isClose) {
-      e.preventDefault?.();
-      e.stopPropagation?.();
-      closeComingSoon();
-    }
-  }, true);
+/* ================= PAGES (Dashboard / Events) ================= */
+const pageDashboard = $("pageDashboard");
+const pageEvents = $("pageEvents");
 
-  // 4) ESC
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeComingSoon();
-  }, { passive: true });
+function showPage(key){
+  // hide all
+  pageDashboard?.classList.remove("active");
+  pageEvents?.classList.remove("active");
+
+  if (key === "events") pageEvents?.classList.add("active");
+  else pageDashboard?.classList.add("active");
 }
-attachComingSoonCloseFix();
 
+/* nav active */
 function setActivePage(pageKey){
   const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
 }
+
 drawerNav?.addEventListener("click", (e) => {
   const btn = e.target?.closest(".nav-item");
   if (!btn) return;
@@ -564,22 +495,265 @@ drawerNav?.addEventListener("click", (e) => {
   setActivePage(page);
   closeDrawer();
 
-  // Se non è dashboard -> coming soon (event incluso, come da setup attuale)
-  if (page !== "dashboard") openComingSoon(page);
-  else closeComingSoon();
+  if (page === "dashboard") {
+    closeComingSoon();
+    showPage("dashboard");
+  } else if (page === "event" || page === "events") {
+    closeComingSoon();
+    showPage("events");
+    renderEvents();
+  } else {
+    showPage("dashboard"); // keep dashboard under overlay
+    openComingSoon(page);
+  }
 }, { passive:true });
 
-/* ================= MODE SWITCH ================= */
+/* ================= FULLSCREEN CARD (expand icon) ================= */
+let expandedCard = null;
+let expandedBackdrop = null;
+const expandedHiddenMap = new Map();
+
+function buildExpandedBackdrop(){
+  if (expandedBackdrop) return;
+  const bd = document.createElement("div");
+  bd.style.position = "fixed";
+  bd.style.inset = "0";
+  bd.style.background = "rgba(0,0,0,0.50)";
+  bd.style.backdropFilter = "blur(10px)";
+  bd.style.zIndex = "190";
+  bd.addEventListener("click", () => exitFullscreenCard(), { passive:true });
+  document.body.appendChild(bd);
+  expandedBackdrop = bd;
+}
+
+function hideNonChartContent(card){
+  const hidden = [];
+  // keep: card-tools + any element that contains a canvas
+  const keepSet = new Set();
+  const tools = card.querySelector(".card-tools");
+  if (tools) keepSet.add(tools);
+
+  const canvases = card.querySelectorAll("canvas");
+  canvases.forEach(cv => {
+    keepSet.add(cv);
+    let p = cv.parentElement;
+    while (p && p !== card) { keepSet.add(p); p = p.parentElement; }
+  });
+
+  // hide direct children not in keep chain
+  [...card.children].forEach(ch => {
+    if (keepSet.has(ch)) return;
+    // if any kept ancestor contains this, don't hide it
+    let ok = false;
+    for (const k of keepSet) {
+      if (k && k !== ch && k.contains && k.contains(ch)) { ok = true; break; }
+    }
+    if (ok) return;
+
+    hidden.push([ch, ch.style.display]);
+    ch.style.display = "none";
+  });
+
+  expandedHiddenMap.set(card, hidden);
+}
+
+function restoreNonChartContent(card){
+  const hidden = expandedHiddenMap.get(card) || [];
+  hidden.forEach(([el, disp]) => { el.style.display = disp || ""; });
+  expandedHiddenMap.delete(card);
+}
+
+function enterFullscreenCard(card){
+  if (!card) return;
+  if (expandedCard) exitFullscreenCard();
+  expandedCard = card;
+
+  buildExpandedBackdrop();
+  expandedBackdrop.style.display = "block";
+
+  document.body.classList.add("card-expanded");
+  card.classList.add("fullscreen");
+  hideNonChartContent(card);
+
+  // ensure charts resize properly
+  setTimeout(() => {
+    try { chart?.resize?.(); } catch {}
+    try { stakeChart?.resize?.(); } catch {}
+    try { rewardChart?.resize?.(); } catch {}
+    try { netWorthChart?.resize?.(); } catch {}
+  }, 120);
+}
+
+function exitFullscreenCard(){
+  if (!expandedCard) return;
+  restoreNonChartContent(expandedCard);
+  expandedCard.classList.remove("fullscreen");
+  document.body.classList.remove("card-expanded");
+  expandedBackdrop && (expandedBackdrop.style.display = "none");
+  expandedCard = null;
+
+  setTimeout(() => {
+    try { chart?.resize?.(); } catch {}
+    try { stakeChart?.resize?.(); } catch {}
+    try { rewardChart?.resize?.(); } catch {}
+    try { netWorthChart?.resize?.(); } catch {}
+  }, 120);
+}
+
+function bindExpandButtons(){
+  const btns = document.querySelectorAll(".card-expand");
+  btns.forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = btn.closest(".card");
+      if (!card) return;
+      if (card === expandedCard) exitFullscreenCard();
+      else enterFullscreenCard(card);
+    }, { passive:false });
+  });
+}
+
+/* ================= EVENTS SYSTEM ================= */
+let eventsAll = [];
+
+function evStoreKey(addr){
+  const a = (addr || "").trim();
+  return a ? `inj_events_v${EV_LOCAL_VER}_${a}` : null;
+}
+
+function loadEvents(){
+  const key = evStoreKey(address);
+  if (!key) { eventsAll = []; return; }
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) { eventsAll = []; return; }
+    const obj = JSON.parse(raw);
+    if (!Array.isArray(obj?.events)) { eventsAll = []; return; }
+    eventsAll = obj.events.slice(0, 1200);
+  } catch {
+    eventsAll = [];
+  }
+}
+
+function saveEvents(){
+  const key = evStoreKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({ v: EV_LOCAL_VER, t: Date.now(), events: eventsAll.slice(0, 1200) }));
+  } catch {}
+}
+
+function showToast(ev){
+  const host = $("toastHost");
+  if (!host) return;
+
+  const el = document.createElement("div");
+  el.className = "toast";
+
+  const when = fmtHHMMSS(ev.ts || Date.now());
+  const title = ev.title || "Event";
+  const sub = ev.detail || "";
+
+  el.innerHTML = `
+    <div class="toast-row">
+      <div class="toast-title">${title}</div>
+      <div style="font-weight:900;opacity:.82;font-size:.82rem">${when}</div>
+    </div>
+    <div class="toast-sub">${sub}</div>
+  `;
+
+  host.appendChild(el);
+
+  setTimeout(() => {
+    try { host.removeChild(el); } catch {}
+  }, 2600);
+}
+
+function pushEvent(ev){
+  if (!address) return;
+  const obj = {
+    id: ev.id || (String(Date.now()) + "_" + Math.random().toString(16).slice(2)),
+    ts: ev.ts || Date.now(),
+    kind: ev.kind || "info",
+    title: ev.title || "Event",
+    detail: ev.detail || "",
+    amount: ev.amount ?? null,
+    dir: ev.dir || null, // up|down|null
+    status: ev.status || "pending" // pending|ok|err
+  };
+  eventsAll.unshift(obj);
+  eventsAll = eventsAll.slice(0, 1200);
+  saveEvents();
+  renderEvents();
+  showToast(obj);
+
+  // simulate “pending → ok” for tx-like events
+  if (obj.status === "pending" && obj.kind !== "price") {
+    setTimeout(() => {
+      const idx = eventsAll.findIndex(x => x.id === obj.id);
+      if (idx >= 0) {
+        eventsAll[idx].status = hasInternet() ? "ok" : "err";
+        saveEvents();
+        renderEvents();
+      }
+    }, 1500);
+  }
+}
+
+function renderEvents(){
+  const body = $("eventsTableBody");
+  const empty = $("eventsEmpty");
+  if (!body) return;
+
+  body.innerHTML = "";
+  const list = eventsAll || [];
+
+  if (empty) empty.style.display = list.length ? "none" : "block";
+  if (!list.length) return;
+
+  for (const ev of list){
+    const tr = document.createElement("tr");
+
+    const dt = new Date(ev.ts || Date.now());
+    const when = `${dt.toLocaleDateString()} ${fmtHHMMSS(ev.ts || Date.now())}`;
+
+    const pillDotClass = (ev.status === "ok") ? "ev-dot ok" : (ev.status === "err") ? "ev-dot err" : "ev-dot";
+    const arrow = ev.dir === "up" ? `<span class="ev-arrow up">▲</span>` : ev.dir === "down" ? `<span class="ev-arrow down">▼</span>` : "";
+    const kind = (ev.kind || "info").toUpperCase();
+
+    tr.innerHTML = `
+      <td>
+        <span class="ev-pill"><span class="${pillDotClass}"></span>${kind}</span>
+      </td>
+      <td>${ev.title || "Event"}</td>
+      <td style="white-space:nowrap">${when}</td>
+      <td>${arrow} ${ev.detail || ""}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+$("eventsClearBtn")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  eventsAll = [];
+  saveEvents();
+  renderEvents();
+}, { passive:false });
+
+/* ================= MODE SWITCH + PULL TO REFRESH ================= */
 let accountPollTimer = null;
 let restSyncTimer = null;
 let chartSyncTimer = null;
 let ensureChartTimer = null;
+let cloudPullTimer = null;
 
 function stopAllTimers(){
   if (accountPollTimer) { clearInterval(accountPollTimer); accountPollTimer = null; }
   if (restSyncTimer) { clearInterval(restSyncTimer); restSyncTimer = null; }
   if (chartSyncTimer) { clearInterval(chartSyncTimer); chartSyncTimer = null; }
   if (ensureChartTimer) { clearInterval(ensureChartTimer); ensureChartTimer = null; }
+  if (cloudPullTimer) { clearInterval(cloudPullTimer); cloudPullTimer = null; }
 }
 function startAllTimers(){
   stopAllTimers();
@@ -587,6 +761,7 @@ function startAllTimers(){
   restSyncTimer = setInterval(loadCandleSnapshot, REST_SYNC_MS);
   chartSyncTimer = setInterval(loadChartToday, CHART_SYNC_MS);
   ensureChartTimer = setInterval(ensureChartBootstrapped, 1500);
+  cloudPullTimer = setInterval(() => { if (address) cloudPull(); }, CLOUD_PULL_INTERVAL_MS);
 }
 
 async function refreshLoadAllOnce(){
@@ -657,16 +832,100 @@ liveToggle?.addEventListener("click", (e) => {
   setMode(!liveMode);
 }, { passive:false });
 
+/* ✅ Pull-to-refresh only in REFRESH mode */
+let ptr = { startY: 0, pulling: false, shown: false };
+let ptrEl = null;
+
+function ensurePullSpinner(){
+  if (ptrEl) return ptrEl;
+  const el = document.createElement("div");
+  el.id = "pullSpinner";
+  el.style.position = "fixed";
+  el.style.top = "10px";
+  el.style.left = "50%";
+  el.style.transform = "translateX(-50%)";
+  el.style.zIndex = "160";
+  el.style.width = "38px";
+  el.style.height = "38px";
+  el.style.borderRadius = "999px";
+  el.style.border = "3px solid rgba(250,204,21,.25)";
+  el.style.borderTopColor = "rgba(250,204,21,.95)";
+  el.style.display = "none";
+  el.style.boxShadow = "0 16px 70px rgba(0,0,0,.45)";
+  el.style.background = "rgba(17,28,47,.65)";
+  el.style.backdropFilter = "blur(8px)";
+  el.style.animation = "spin 1s linear infinite";
+  const st = document.createElement("style");
+  st.textContent = `@keyframes spin{to{transform:translateX(-50%) rotate(360deg)}}`;
+  document.head.appendChild(st);
+  document.body.appendChild(el);
+  ptrEl = el;
+  return el;
+}
+
+function showPullSpinner(on){
+  const el = ensurePullSpinner();
+  el.style.display = on ? "block" : "none";
+}
+
+function initPullToRefresh(){
+  let touchId = null;
+
+  window.addEventListener("touchstart", (e) => {
+    if (liveMode) return;                // ✅ only in refresh mode
+    if (!hasInternet()) return;
+    if (document.body.classList.contains("drawer-open")) return;
+    if (document.body.classList.contains("card-expanded")) return;
+
+    const atTop = (window.scrollY || document.documentElement.scrollTop || 0) <= 2;
+    if (!atTop) return;
+
+    const t = e.touches?.[0];
+    if (!t) return;
+    touchId = t.identifier;
+    ptr.startY = t.clientY;
+    ptr.pulling = true;
+    ptr.shown = false;
+  }, { passive: true });
+
+  window.addEventListener("touchmove", (e) => {
+    if (!ptr.pulling) return;
+    const t = [...(e.touches || [])].find(x => x.identifier === touchId) || e.touches?.[0];
+    if (!t) return;
+    const dy = t.clientY - ptr.startY;
+    if (dy > 85 && !ptr.shown) {
+      ptr.shown = true;
+      showPullSpinner(true);
+    }
+  }, { passive: true });
+
+  window.addEventListener("touchend", async () => {
+    if (!ptr.pulling) return;
+    const doRefresh = ptr.shown;
+    ptr.pulling = false;
+    ptr.shown = false;
+
+    if (!doRefresh) return;
+    showPullSpinner(true);
+    try{
+      await refreshLoadAllOnce();
+      pushEvent({ kind:"info", title:"Refresh", detail:"Data refreshed (REFRESH mode).", status:"ok" });
+    } finally {
+      setTimeout(() => showPullSpinner(false), 550);
+    }
+  }, { passive: true });
+
+  window.addEventListener("touchcancel", () => {
+    ptr.pulling = false; ptr.shown = false;
+    showPullSpinner(false);
+  }, { passive: true });
+}
+
 /* ================= STATE ================= */
 let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0 };
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0, apr: 0 };
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
-
-/* Validator state */
-let validatorAddr = "";
-let validatorMoniker = "";
-let validatorLoading = false;
 
 const candle = {
   d: { t: 0, open: 0, high: 0, low: 0 },
@@ -802,239 +1061,86 @@ function startKlineWS() {
   };
 }
 
-/* ================= VALIDATOR UI (DEDUPE + DOT BLINK) ================= */
-function injectValidatorDotStylesOnce(){
-  if (document.getElementById("inj-validator-dot-style")) return;
-  const st = document.createElement("style");
-  st.id = "inj-validator-dot-style";
-  st.textContent = `
-    @keyframes injValBlink { 0%{opacity:.35; transform:scale(.92);} 50%{opacity:1; transform:scale(1.10);} 100%{opacity:.35; transform:scale(.92);} }
-    .inj-validator-dot{ width:10px; height:10px; border-radius:999px; background:#f59e0b; animation:injValBlink .95s infinite; box-shadow:0 0 14px rgba(245,158,11,.45); }
-    .inj-validator-dot.red{ background:#ef4444; animation:none; box-shadow:0 0 14px rgba(239,68,68,.35); }
-  `;
-  document.head.appendChild(st);
-}
-injectValidatorDotStylesOnce();
+/* ================= ACCOUNT (Injective LCD) + VALIDATOR ================= */
+let validator = { addr: "", moniker: "", status: "unknown" };
+let validatorLoading = false;
 
-function findValidatorCards(){
-  // Supporta diversi markup senza rompere nulla
-  const byId = $("validatorCard");
-  if (byId) return [byId];
+function setValidatorUI(state){
+  const nameEl = $("validatorName");
+  const addrEl = $("validatorAddr");
+  const dotEl  = $("validatorDot");
 
-  const list = Array.from(document.querySelectorAll(
-    ".validator-card, [data-card='validator'], [data-validator-card='true']"
-  ));
-  return list;
-}
+  if (nameEl) nameEl.textContent = validator.moniker || "Validator";
+  if (addrEl) addrEl.textContent = validator.addr ? shortAddr(validator.addr) : "—";
 
-function cardHasInjectiveLogo(card){
-  if (!card) return false;
-  // cerca img/logo che indichi injective
-  const img = card.querySelector("img");
-  const alt = (img?.alt || "").toLowerCase();
-  const src = (img?.src || "").toLowerCase();
-  if (alt.includes("injective") || src.includes("injective") || src.includes("inj")) return true;
+  if (!dotEl) return;
 
-  // oppure elemento con class specifica
-  if (card.querySelector(".inj-logo, .injective-logo, [data-inj-logo]")) return true;
-  return false;
-}
+  // ✅ request: dot yellow blinking at far right; also color based on state
+  dotEl.classList.remove("ok","err");
+  dotEl.style.background = "#f59e0b";
 
-function dedupeValidatorCards(){
-  const cards = findValidatorCards();
-  if (!cards || cards.length <= 1) return;
-
-  // Preferisci la card con logo Injective
-  let keep = cards.find(cardHasInjectiveLogo) || cards[0];
-
-  cards.forEach((c) => {
-    if (c !== keep) {
-      try { c.remove(); } catch { c.style.display = "none"; }
-    }
-  });
-}
-
-function validatorUI(){
-  const cards = findValidatorCards();
-  const card = (cards && cards.length) ? cards[0] : null;
-  if (!card) return { card:null, name:null, addr:null, dot:null };
-
-  const name =
-    card.querySelector("#validatorName") ||
-    card.querySelector("[data-validator-name]") ||
-    card.querySelector(".validator-name");
-
-  const addrEl =
-    card.querySelector("#validatorAddr") ||
-    card.querySelector("[data-validator-addr]") ||
-    card.querySelector(".validator-addr");
-
-  const dot =
-    card.querySelector("#validatorDot") ||
-    card.querySelector("[data-validator-dot]") ||
-    card.querySelector(".validator-dot") ||
-    card.querySelector(".inj-validator-dot");
-
-  return { card, name, addr: addrEl, dot };
-}
-
-function setValidatorDotState(state){
-  // state: "offline" | "loading" | "online"
-  const ui = validatorUI();
-  if (!ui.dot) return;
-
-  // Assicura classe base
-  ui.dot.classList.add("inj-validator-dot");
-
-  if (state === "offline"){
-    ui.dot.classList.add("red");
-  } else {
-    ui.dot.classList.remove("red");
-  }
-}
-
-function setValidatorText(moniker, vAddr){
-  const ui = validatorUI();
-  if (ui.name) ui.name.textContent = moniker || "Validator";
-  if (ui.addr) ui.addr.textContent = vAddr ? shortAddr(vAddr) : "—";
-}
-
-function validatorCacheKey(addr){
-  const a = (addr || "").trim();
-  return a ? `inj_validator_cache_v${VALIDATOR_CACHE_VER}_${a}` : "";
-}
-function saveValidatorCache(){
-  const key = validatorCacheKey(address);
-  if (!key) return;
-  try{
-    localStorage.setItem(key, JSON.stringify({
-      v: VALIDATOR_CACHE_VER,
-      t: Date.now(),
-      validatorAddr,
-      moniker: validatorMoniker
-    }));
-  } catch {}
-}
-function loadValidatorCache(){
-  const key = validatorCacheKey(address);
-  if (!key) return false;
-  try{
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== VALIDATOR_CACHE_VER) return false;
-    validatorAddr = String(obj.validatorAddr || "");
-    validatorMoniker = String(obj.moniker || "");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function pickTopValidator(delegation_responses){
-  try{
-    const arr = Array.isArray(delegation_responses) ? delegation_responses : [];
-    if (!arr.length) return "";
-
-    // somma per validator, scegli quello col maggiore stake
-    const map = new Map();
-    for (const d of arr){
-      const v = d?.delegation?.validator_address || "";
-      const amt = safe(d?.balance?.amount);
-      if (!v) continue;
-      map.set(v, (map.get(v) || 0) + amt);
-    }
-    let best = "";
-    let bestAmt = -1;
-    for (const [v, amt] of map.entries()){
-      if (amt > bestAmt){
-        bestAmt = amt;
-        best = v;
-      }
-    }
-    return best;
-  } catch {
-    return "";
-  }
-}
-
-async function fetchValidatorMoniker(vAddr){
-  if (!vAddr || !hasInternet()) return "";
-  const base = "https://lcd.injective.network";
-  const info = await fetchJSON(`${base}/cosmos/staking/v1beta1/validators/${vAddr}`);
-  const mon = info?.validator?.description?.moniker || "";
-  return String(mon || "");
-}
-
-async function updateValidatorFromDelegations(delegation_responses){
-  dedupeValidatorCards();
-
-  // offline
-  if (!hasInternet()){
-    setValidatorDotState("offline");
-    // prova cache
-    if (loadValidatorCache()){
-      setValidatorText(validatorMoniker || "Validator", validatorAddr);
-    }
+  if (!hasInternet()) {
+    dotEl.classList.add("err");
+    dotEl.style.background = "#ef4444";
     return;
   }
+
+  if (state === "loading" || validatorLoading) {
+    dotEl.style.background = "#f59e0b";
+    return;
+  }
+
+  if (validator.status === "bonded" || validator.status === "active") {
+    dotEl.classList.add("ok");
+    dotEl.style.background = "#22c55e";
+  } else if (validator.status === "unbonded" || validator.status === "jailed") {
+    dotEl.classList.add("err");
+    dotEl.style.background = "#ef4444";
+  } else {
+    dotEl.style.background = "#f59e0b";
+  }
+}
+
+async function fetchValidatorInfo(valAddr){
+  if (!valAddr) return;
+  if (!hasInternet()) return;
 
   validatorLoading = true;
-  setValidatorDotState("loading");
+  setValidatorUI("loading");
 
-  const top = pickTopValidator(delegation_responses);
-  if (!top){
-    validatorAddr = "";
-    validatorMoniker = "";
-    setValidatorText("Validator", "");
-    setValidatorDotState("online"); // resta giallo blink
-    validatorLoading = false;
-    return;
-  }
-
-  validatorAddr = top;
-
-  // se cache già valida e recente (30 min), usa quella subito
-  let usedCache = false;
-  try{
-    const key = validatorCacheKey(address);
-    const raw = key ? localStorage.getItem(key) : "";
-    if (raw){
-      const obj = JSON.parse(raw);
-      const age = Date.now() - safe(obj?.t);
-      const same = String(obj?.validatorAddr || "") === top;
-      if (same && age < 30 * 60 * 1000) {
-        validatorMoniker = String(obj?.moniker || "");
-        usedCache = !!validatorMoniker;
-      }
-    }
-  } catch {}
-
-  if (usedCache){
-    setValidatorText(validatorMoniker || "Validator", validatorAddr);
-    setValidatorDotState("online");
-    validatorLoading = false;
-    return;
-  }
-
-  // fetch moniker live
-  const mon = await fetchValidatorMoniker(top);
-  validatorMoniker = mon || "Validator";
-  saveValidatorCache();
-
-  setValidatorText(validatorMoniker, validatorAddr);
-  setValidatorDotState("online");
+  const base = "https://lcd.injective.network";
+  const v = await fetchJSON(`${base}/cosmos/staking/v1beta1/validators/${valAddr}`);
   validatorLoading = false;
+
+  if (!v?.validator) {
+    validator.status = "unknown";
+    setValidatorUI("ready");
+    return;
+  }
+
+  const moniker = v.validator?.description?.moniker || "Validator";
+  const jailed = !!v.validator?.jailed;
+  const st = String(v.validator?.status || "").toLowerCase();
+
+  validator.addr = valAddr;
+  validator.moniker = moniker;
+
+  // cosmos status values: BOND_STATUS_BONDED / etc
+  if (jailed) validator.status = "jailed";
+  else if (st.includes("bonded")) validator.status = "bonded";
+  else if (st.includes("unbond")) validator.status = "unbonded";
+  else validator.status = "unknown";
+
+  setValidatorUI("ready");
 }
 
-/* ================= ACCOUNT (Injective LCD) ================= */
 async function loadAccount(isRefresh=false) {
   if (!isRefresh && !liveMode) return;
 
   if (!address || !hasInternet()) {
     accountOnline = false;
     refreshConnUI();
-    setValidatorDotState("offline");
+    setValidatorUI("ready");
     return;
   }
 
@@ -1049,7 +1155,7 @@ async function loadAccount(isRefresh=false) {
   if (!b || !s || !r || !i) {
     accountOnline = false;
     refreshConnUI();
-    setValidatorDotState(hasInternet() ? "loading" : "offline");
+    setValidatorUI("ready");
     return;
   }
 
@@ -1060,21 +1166,31 @@ async function loadAccount(isRefresh=false) {
   const bal = b.balances?.find(x => x.denom === "inj");
   availableInj = safe(bal?.amount) / 1e18;
 
-  const delegations = (s.delegation_responses || []);
-  stakeInj = delegations.reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
+  const del = (s.delegation_responses || []);
+  stakeInj = del.reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
 
   const newRewards = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
   rewardsInj = newRewards;
 
   apr = safe(i.inflation) * 100;
 
-  // ✅ update validator UI (dedupe + moniker)
-  updateValidatorFromDelegations(delegations);
+  // ✅ validator (first delegation)
+  const valAddr = del?.[0]?.delegation?.validator_address || "";
+  if (valAddr && valAddr !== validator.addr) {
+    validator.addr = valAddr;
+    validator.moniker = "Loading…";
+    validator.status = "unknown";
+    setValidatorUI("loading");
+    fetchValidatorInfo(valAddr);
+  } else {
+    setValidatorUI("ready");
+  }
 
+  // series updates
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
 
-  /* ✅ NET WORTH: record point once account updates */
+  // net worth point
   recordNetWorthPoint();
 
   setUIReady(true);
@@ -1400,7 +1516,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKE CHART (persist) ================= */
+/* ================= STAKE CHART (persist + cloud-ready labels) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -1413,7 +1529,14 @@ function stakeStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
 }
-function saveStakeSeries() {
+
+function clampArray(arr, max) {
+  if (!Array.isArray(arr)) return [];
+  if (arr.length <= max) return arr;
+  return arr.slice(arr.length - max);
+}
+
+function saveStakeSeriesLocal() {
   const key = stakeStoreKey(address);
   if (!key) return;
   try {
@@ -1421,12 +1544,12 @@ function saveStakeSeries() {
       v: STAKE_LOCAL_VER, t: Date.now(),
       labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
     }));
-    cloudBump(1);
-  } catch {
-    cloudSetState("error");
-  }
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
 }
-function loadStakeSeries() {
+
+function loadStakeSeriesLocal() {
   const key = stakeStoreKey(address);
   if (!key) return false;
   try {
@@ -1454,21 +1577,6 @@ function loadStakeSeries() {
   } catch {
     return false;
   }
-}
-function clearStakeSeriesStorage() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-  try { localStorage.removeItem(key); } catch {}
-}
-function resetStakeSeriesFromNow() {
-  stakeLabels = [nowLabel()];
-  stakeData = [0];
-  stakeMoves = [0];
-  stakeTypes = ["Reset start"];
-  lastStakeRecordedRounded = 0;
-  stakeBaselineCaptured = false;
-  saveStakeSeries();
-  drawStakeChart();
 }
 
 function initStakeChart() {
@@ -1504,7 +1612,11 @@ function initStakeChart() {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => stakeLabels[items?.[0]?.dataIndex ?? 0] || "",
+            title: (items) => {
+              const lbl = stakeLabels[items?.[0]?.dataIndex ?? 0] || "";
+              const ts = labelToTs(lbl);
+              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : String(lbl);
+            },
             label: (item) => {
               const i = item.dataIndex;
               const v = safe(stakeData[i]);
@@ -1516,12 +1628,25 @@ function initStakeChart() {
         ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
       },
       scales: {
-        x: { display: false },
+        x: {
+          ticks: {
+            color: axisTickColor(),
+            callback: (val, idx) => {
+              const ts = labelToTs(stakeLabels[idx]);
+              return ts ? fmtHHMM(ts) : "";
+            },
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 6
+          },
+          grid: { color: axisGridColor() }
+        },
         y: { ticks: { color: axisTickColor() }, grid: { color: axisGridColor() } }
       }
     }
   });
 }
+
 function drawStakeChart() {
   if (!stakeChart) initStakeChart();
   if (stakeChart) {
@@ -1530,19 +1655,20 @@ function drawStakeChart() {
     stakeChart.update("none");
   }
 }
+
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
   const rounded = Number(s.toFixed(6));
 
   if (!stakeBaselineCaptured) {
-    stakeLabels.push(nowLabel());
+    stakeLabels.push(tsLabel());
     stakeData.push(rounded);
     stakeMoves.push(1);
     stakeTypes.push("Baseline (current)");
     lastStakeRecordedRounded = rounded;
     stakeBaselineCaptured = true;
-    saveStakeSeries();
+    saveStakeSeriesLocal();
     drawStakeChart();
     return;
   }
@@ -1553,16 +1679,24 @@ function maybeAddStakePoint(currentStake) {
   const delta = rounded - lastStakeRecordedRounded;
   lastStakeRecordedRounded = rounded;
 
-  stakeLabels.push(nowLabel());
+  stakeLabels.push(tsLabel());
   stakeData.push(rounded);
   stakeMoves.push(delta > 0 ? 1 : -1);
   stakeTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
 
-  saveStakeSeries();
+  saveStakeSeriesLocal();
   drawStakeChart();
+
+  // ✅ event
+  pushEvent({
+    kind: "tx",
+    title: delta > 0 ? "Stake increased" : "Stake decreased",
+    detail: `${delta > 0 ? "+" : ""}${delta.toFixed(6)} INJ`,
+    status: "pending"
+  });
 }
 
-/* ================= REWARD WITHDRAWALS (persist) ================= */
+/* ================= REWARD WITHDRAWALS (persist + cloud) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
@@ -1578,7 +1712,8 @@ function wdStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
 }
-function saveWdAll() {
+
+function saveWdAllLocal() {
   const key = wdStoreKey(address);
   if (!key) return;
   try {
@@ -1586,12 +1721,12 @@ function saveWdAll() {
       v: REWARD_WD_LOCAL_VER, t: Date.now(),
       labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
-    cloudBump(1);
-  } catch {
-    cloudSetState("error");
-  }
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
 }
-function loadWdAll() {
+
+function loadWdAllLocal() {
   const key = wdStoreKey(address);
   if (!key) return false;
   try {
@@ -1629,7 +1764,6 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* labels over reward points */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -1724,7 +1858,11 @@ function initRewardWdChart() {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => wdLabels[items?.[0]?.dataIndex ?? 0] || "",
+            title: (items) => {
+              const i = items?.[0]?.dataIndex ?? 0;
+              const ts = wdTimes[i] || labelToTs(wdLabels[i]);
+              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : (wdLabels[i] || "");
+            },
             label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
           }
         },
@@ -1784,8 +1922,10 @@ function syncRewardTimelineUI(forceToEnd=false) {
     rewardChart.update("none");
   }
 
-  const from = wdLabels[minIdx] || "";
-  const to = wdLabels[maxIdx] || "";
+  const fromTs = wdTimes[minIdx] || labelToTs(wdLabels[minIdx]);
+  const toTs   = wdTimes[maxIdx] || labelToTs(wdLabels[maxIdx]);
+  const from = fromTs ? fmtHHMM(fromTs) : (wdLabels[minIdx] || "");
+  const to   = toTs ? fmtHHMM(toTs) : (wdLabels[maxIdx] || "");
   meta.textContent = n <= 1 ? `${to}` : `${from} → ${to}`;
 }
 
@@ -1818,69 +1958,40 @@ function maybeRecordRewardWithdrawal(newRewards) {
 
   const diff = wdLastRewardsSeen - r;
   if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    wdTimesAll.push(Date.now());
-    wdLabelsAll.push(nowLabel());
+    const ts = Date.now();
+    wdTimesAll.push(ts);
+    wdLabelsAll.push(tsLabel(ts));
     wdValuesAll.push(diff);
-    saveWdAll();
+    saveWdAllLocal();
     rebuildWdView();
     goRewardLive();
+
+    pushEvent({
+      kind: "tx",
+      title: "Rewards withdrawn",
+      detail: `+${diff.toFixed(6)} INJ`,
+      status: "pending"
+    });
   }
   wdLastRewardsSeen = r;
 }
 
 /* ================= NET WORTH (persist + chart) ================= */
-let nwTf = "1d";
+let nwTf = "1d";         // 1d | 1w | 1m | 1y | all | live
+let nwScale = "linear";  // linear | log
 let nwTAll = [];
 let nwUsdAll = [];
 let nwInjAll = [];
-let netWorthChart = null;
 
+let netWorthChart = null;
 let nwHoverActive = false;
 let nwHoverIndex = null;
-let nwPinnedIndex = null;
-let nwViewTimes = []; // times corresponding to current view
 
 function nwStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
 }
-function saveNW(){
-  const key = nwStoreKey(address);
-  if (!key) return;
-  try{
-    localStorage.setItem(key, JSON.stringify({
-      v: NW_LOCAL_VER, t: Date.now(),
-      tAll: nwTAll,
-      usdAll: nwUsdAll,
-      injAll: nwInjAll,
-      tf: nwTf
-    }));
-    cloudBump(1);
-  } catch {
-    cloudSetState("error");
-  }
-}
 
-function loadNW(){
-  const key = nwStoreKey(address);
-  if (!key) return false;
-  try{
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== NW_LOCAL_VER) return false;
-
-    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
-    nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
-    nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
-    nwTf = (obj.tf === "1w" || obj.tf === "1m" || obj.tf === "1y") ? obj.tf : "1d";
-
-    clampNWArrays();
-    return true;
-  } catch {
-    return false;
-  }
-}
 function clampNWArrays(){
   const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
   nwTAll = nwTAll.slice(-n);
@@ -1892,18 +2003,67 @@ function clampNWArrays(){
     nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
   }
 }
+
+function saveNWLocal(){
+  const key = nwStoreKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({
+      v: NW_LOCAL_VER, t: Date.now(),
+      tAll: nwTAll,
+      usdAll: nwUsdAll,
+      injAll: nwInjAll,
+      tf: nwTf,
+      scale: nwScale
+    }));
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
+}
+
+function loadNWLocal(){
+  const key = nwStoreKey(address);
+  if (!key) return false;
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== NW_LOCAL_VER) return false;
+
+    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
+    nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
+    nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
+    nwTf = typeof obj.tf === "string" ? obj.tf : "1d";
+    nwScale = (obj.scale === "log") ? "log" : "linear";
+
+    clampNWArrays();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function nwWindowMs(tf){
+  if (tf === "live") return NW_LIVE_WINDOW_MS;
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
+  if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000; // big
   return 24 * 60 * 60 * 1000;
 }
 
-/* ✅ view: include times + labels (avoid 0 balzi: NEVER push 0, spanGaps) */
+function nwHasSpan(tf){
+  if (!nwTAll.length) return false;
+  const first = nwTAll[0];
+  const span = Date.now() - first;
+  return span >= nwWindowMs(tf) * 0.8;
+}
+
+/* build view: always left->right, no scroll except live window */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
-  const minT = now - w;
+  const minT = (tf === "all") ? 0 : (now - w);
 
   const labels = [];
   const data = [];
@@ -1914,9 +2074,19 @@ function nwBuildView(tf){
     const u = safe(nwUsdAll[i]);
     if (t >= minT && Number.isFinite(u) && u > 0) {
       times.push(t);
-      labels.push(tf === "1y" ? new Date(t).toLocaleDateString() : fmtHHMM(t));
+      labels.push(tsLabel(t)); // store label as ts
       data.push(u);
     }
+  }
+
+  // live: keep only last window (and this will "scroll" by filtering)
+  if (tf === "live") {
+    const liveMin = now - NW_LIVE_WINDOW_MS;
+    const outL = [], outD = [], outT = [];
+    for (let i = 0; i < times.length; i++){
+      if (times[i] >= liveMin) { outT.push(times[i]); outL.push(labels[i]); outD.push(data[i]); }
+    }
+    return { labels: outL, data: outD, times: outT };
   }
 
   return { labels, data, times };
@@ -1940,7 +2110,6 @@ function nwApplySignStyling(sign){
   netWorthChart.update("none");
 }
 
-/* ✅ Pro: vertical line while interacting */
 const nwVerticalLinePlugin = {
   id: "nwVerticalLinePlugin",
   afterDraw(ch){
@@ -1960,7 +2129,6 @@ const nwVerticalLinePlugin = {
   }
 };
 
-/* ✅ Blinking yellow dot at last visible point */
 const nwLastDotPlugin = {
   id: "nwLastDotPlugin",
   afterDatasetsDraw(ch) {
@@ -1971,14 +2139,7 @@ const nwLastDotPlugin = {
     const pts = meta?.data || [];
     if (!pts.length) return;
 
-    const xScale = ch.scales?.x;
-    let lastIdx = pts.length - 1;
-
-    if (xScale && Number.isFinite(xScale.max)) {
-      lastIdx = clamp(Math.floor(xScale.max), 0, pts.length - 1);
-    }
-
-    const el = pts[lastIdx];
+    const el = pts[pts.length - 1];
     if (!el) return;
 
     const t = Date.now();
@@ -2010,7 +2171,6 @@ function initNWChart(){
   if (!canvas || !window.Chart) return;
 
   const view = nwBuildView(nwTf);
-  nwViewTimes = view.times;
 
   netWorthChart = new Chart(canvas, {
     type: "line",
@@ -2036,6 +2196,7 @@ function initNWChart(){
       animation: false,
       normalized: true,
       layout: { padding: { left: 8, right: 34, top: 8, bottom: 12 } },
+
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
@@ -2046,7 +2207,9 @@ function initNWChart(){
           }
         } : {})
       },
+
       interaction: { mode: "index", intersect: false },
+
       scales: {
         x: {
           display: true,
@@ -2055,12 +2218,17 @@ function initNWChart(){
             maxRotation: 0,
             autoSkip: true,
             maxTicksLimit: 6,
-            padding: 8
+            padding: 8,
+            callback: (val, idx) => {
+              const ts = labelToTs(netWorthChart?.data?.labels?.[idx]);
+              return ts ? fmtHHMM(ts) : "";
+            }
           },
           grid: { display: false },
           border: { display: false }
         },
         y: {
+          type: (nwScale === "log") ? "logarithmic" : "linear",
           position: "right",
           ticks: {
             mirror: false,
@@ -2085,19 +2253,23 @@ function drawNW(){
   if (!netWorthChart) return;
 
   const view = nwBuildView(nwTf);
-  nwViewTimes = view.times;
 
   netWorthChart.data.labels = view.labels;
   netWorthChart.data.datasets[0].data = view.data;
+
+  // update y scale type
+  netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
+
   netWorthChart.update("none");
 
+  // pnl
+  const pnlEl = $("netWorthPnl");
   if (view.data.length >= 2){
     const first = safe(view.data[0]);
-    const last = safe(view.data[view.data.length - 1]);
+    const last  = safe(view.data[view.data.length - 1]);
     const pnl = last - first;
     const pnlPct = first ? (pnl / first) * 100 : 0;
 
-    const pnlEl = $("netWorthPnl");
     if (pnlEl){
       pnlEl.classList.remove("good","bad","flat");
       const cls = pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat");
@@ -2107,7 +2279,6 @@ function drawNW(){
       nwApplySignStyling(pnl > 0 ? "up" : (pnl < 0 ? "down" : "flat"));
     }
   } else {
-    const pnlEl = $("netWorthPnl");
     if (pnlEl){
       pnlEl.classList.remove("good","bad");
       pnlEl.classList.add("flat");
@@ -2115,9 +2286,33 @@ function drawNW(){
       nwApplySignStyling("flat");
     }
   }
+
+  updateNWTFButtons();
 }
 
-/* ✅ Interaction: hover/touch shows point value in Net Worth USD temporarily */
+function updateNWTFButtons(){
+  const wrap = $("nwTfSwitch");
+  if (!wrap) return;
+  const btns = wrap.querySelectorAll(".tf-btn");
+  btns.forEach(b => {
+    const tf = b.dataset.tf || "";
+    // live always available
+    const enabled = (tf === "live") ? true
+      : (tf === "1d") ? true
+      : (tf === "1w") ? nwHasSpan("1w")
+      : (tf === "1m") ? nwHasSpan("1m")
+      : (tf === "1y") ? nwHasSpan("1y")
+      : (tf === "all") ? (nwTAll.length > 20)
+      : true;
+
+    b.disabled = !enabled;
+    b.style.opacity = enabled ? "1" : "0.42";
+    b.style.pointerEvents = enabled ? "auto" : "none";
+    b.classList.toggle("active", (b.dataset.tf === nwTf));
+  });
+}
+
+/* hover interactions */
 function nwGetIndexFromEvent(evt){
   if (!netWorthChart) return null;
   const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
@@ -2131,26 +2326,19 @@ function nwShowHoverValue(idx){
   const labels = netWorthChart.data.labels || [];
   idx = clamp(idx, 0, data.length - 1);
   const v = safe(data[idx]);
-  const lab = labels[idx] || "";
+  const ts = labelToTs(labels[idx]);
   if (!v) return;
 
   const el = $("netWorthUsd");
   if (el){
     el.textContent = `$${v.toFixed(2)}`;
   }
-
   const pnlEl = $("netWorthPnl");
   if (pnlEl){
     pnlEl.classList.remove("good","bad","flat");
     pnlEl.classList.add("flat");
-    pnlEl.textContent = `Point: ${lab} • $${v.toFixed(2)}`;
+    pnlEl.textContent = `Point: ${ts ? fmtHHMMSS(ts) : ""} • $${v.toFixed(2)}`;
   }
-}
-
-function nwRestoreRealtimeValue(){
-  nwHoverActive = false;
-  nwHoverIndex = null;
-  nwPinnedIndex = null;
 }
 
 function attachNWInteractions(){
@@ -2162,13 +2350,13 @@ function attachNWInteractions(){
     if (idx == null) return;
     nwHoverActive = true;
     nwHoverIndex = idx;
-    nwPinnedIndex = idx;
     nwShowHoverValue(idx);
     netWorthChart.update("none");
   };
 
   const onLeave = () => {
-    nwRestoreRealtimeValue();
+    nwHoverActive = false;
+    nwHoverIndex = null;
     netWorthChart.update("none");
   };
 
@@ -2181,6 +2369,45 @@ function attachNWInteractions(){
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
 
+function attachNWTFHandlers(){
+  const wrap = $("nwTfSwitch");
+  if (!wrap) return;
+
+  wrap.addEventListener("click", (e) => {
+    const btn = e.target?.closest(".tf-btn");
+    if (!btn) return;
+    const tf = btn.dataset.tf || "1d";
+    if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
+    if (btn.disabled) return;
+
+    nwTf = tf;
+    saveNWLocal();
+    drawNW();
+  }, { passive:true });
+
+  // scale toggle
+  $("nwScaleBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    nwScale = (nwScale === "log") ? "linear" : "log";
+    const b = $("nwScaleBtn");
+    if (b) b.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    saveNWLocal();
+    drawNW();
+  }, { passive:false });
+
+  // live toggle button
+  $("nwLiveBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    const b = $("nwLiveBtn");
+    const on = (nwTf === "live") ? false : true;
+    nwTf = on ? "live" : "1d";
+    if (b) b.classList.toggle("active", on);
+    saveNWLocal();
+    drawNW();
+  }, { passive:false });
+}
+
+/* record points */
 function recordNetWorthPoint(){
   if (!address) return;
   const px = safe(targetPrice);
@@ -2188,45 +2415,306 @@ function recordNetWorthPoint(){
 
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * px;
-
   if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
 
   const now = Date.now();
-
   const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
   const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwUsdAll.length - 1]) : 0;
 
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
 
+  // density control
   if (lastT && dt < 5_000 && dUsd < 0.25) return;
 
   nwTAll.push(now);
   nwUsdAll.push(totalUsd);
   nwInjAll.push(totalInj);
   clampNWArrays();
-  saveNW();
+  saveNWLocal();
   drawNW();
 }
 
-function attachNWTFHandlers(){
-  const wrap = $("nwTfSwitch");
-  if (!wrap) return;
+/* ================= CLOUD SYNC (REAL) ================= */
+const CLOUD_VER = 2;
+const CLOUD_KEY = `inj_cloudmeta_v${CLOUD_VER}`;
+let cloudPts = 0;
+let cloudLastSync = 0;
+let cloudDirty = false;
+let cloudPushTimer = null;
 
-  const btns = wrap.querySelectorAll(".tf-btn");
-  btns.forEach(b => b.classList.toggle("active", b.dataset.tf === nwTf));
+function cloudLoadMeta(){
+  try{
+    const raw = localStorage.getItem(CLOUD_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    cloudPts = safe(obj?.pts);
+    cloudLastSync = safe(obj?.lastSync);
+  } catch {}
+}
+function cloudSaveMeta(){
+  try{
+    localStorage.setItem(CLOUD_KEY, JSON.stringify({ v:CLOUD_VER, pts: cloudPts, lastSync: cloudLastSync }));
+  } catch {}
+}
 
-  wrap.addEventListener("click", (e) => {
-    const btn = e.target?.closest(".tf-btn");
-    if (!btn) return;
-    const tf = btn.dataset.tf || "1d";
-    if (!["1d","1w","1m","1y"].includes(tf)) return;
+function cloudSetState(state){
+  const root = $("appRoot");
+  const st = $("cloudStatus");
+  if (!root || !st) return;
 
-    nwTf = tf;
-    btns.forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
-    saveNW();
+  root.classList.remove("cloud-synced","cloud-saving","cloud-error");
+
+  // footer text
+  if (state === "saving"){
+    root.classList.add("cloud-saving");
+    st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
+  } else if (state === "error"){
+    root.classList.add("cloud-error");
+    st.textContent = "Cloud: Error";
+  } else {
+    root.classList.add("cloud-synced");
+    st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
+  }
+
+  // menu text + dot
+  if (cloudDotMenu) {
+    cloudDotMenu.classList.remove("ok","saving","err");
+    if (state === "saving") cloudDotMenu.classList.add("saving");
+    else if (state === "error") cloudDotMenu.classList.add("err");
+    else cloudDotMenu.classList.add("ok");
+  }
+  if (cloudTextMenu) {
+    cloudTextMenu.textContent = (state === "saving") ? "Saving"
+      : (state === "error") ? "Error"
+      : hasInternet() ? "Synced" : "Offline cache";
+  }
+}
+
+function cloudRenderMeta(){
+  const hist = $("cloudHistory");
+  if (hist) hist.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
+  if (cloudPtsMenu) cloudPtsMenu.textContent = `${Math.max(0, Math.floor(cloudPts))} pts`;
+}
+
+function cloudBumpLocal(points = 1){
+  cloudPts = safe(cloudPts) + safe(points);
+  cloudLastSync = Date.now();
+  cloudSaveMeta();
+  cloudRenderMeta();
+}
+
+function cloudMarkDirty(){
+  if (!address) return;
+  cloudDirty = true;
+  if (!hasInternet()) return;
+  scheduleCloudPush();
+}
+
+function scheduleCloudPush(){
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => cloudPush(), CLOUD_PUSH_DEBOUNCE_MS);
+}
+
+function buildCloudPayload(){
+  return {
+    v: 2,
+    t: Date.now(),
+    stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
+    wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll },
+    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll }
+  };
+}
+
+function mergeUniqueByTs(baseTimes, baseVals, addTimes, addVals){
+  // assumes times arrays contain ms timestamps
+  const map = new Map();
+  for (let i=0;i<baseTimes.length;i++){
+    const t = safe(baseTimes[i]);
+    if (!t) continue;
+    map.set(t, safe(baseVals[i]));
+  }
+  for (let i=0;i<addTimes.length;i++){
+    const t = safe(addTimes[i]);
+    if (!t) continue;
+    if (!map.has(t)) map.set(t, safe(addVals[i]));
+  }
+  const times = [...map.keys()].sort((a,b)=>a-b);
+  const vals = times.map(t => map.get(t));
+  return { times, vals };
+}
+
+function mergeStakeByLabel(payloadStake){
+  if (!payloadStake) return;
+  const pl = Array.isArray(payloadStake.labels) ? payloadStake.labels : [];
+  const pd = Array.isArray(payloadStake.data) ? payloadStake.data : [];
+  const pm = Array.isArray(payloadStake.moves) ? payloadStake.moves : [];
+  const pt = Array.isArray(payloadStake.types) ? payloadStake.types : [];
+
+  // merge by timestamp label (we store numeric-label)
+  const map = new Map();
+  for (let i=0;i<stakeLabels.length;i++){
+    const k = String(stakeLabels[i]);
+    map.set(k, { d: safe(stakeData[i]), m: safe(stakeMoves[i]), t: String(stakeTypes[i] || "Stake update") });
+  }
+  for (let i=0;i<pl.length;i++){
+    const k = String(pl[i]);
+    if (!map.has(k)) {
+      map.set(k, { d: safe(pd[i]), m: safe(pm[i]), t: String(pt[i] || "Stake update") });
+    }
+  }
+
+  const keys = [...map.keys()].sort((a,b)=>labelToTs(a)-labelToTs(b));
+  stakeLabels = keys;
+  stakeData = keys.map(k => map.get(k).d);
+  stakeMoves = keys.map(k => map.get(k).m);
+  stakeTypes = keys.map(k => map.get(k).t);
+
+  // clamp
+  stakeLabels = clampArray(stakeLabels, 2400);
+  stakeData   = clampArray(stakeData,   2400);
+  stakeMoves  = clampArray(stakeMoves,  2400);
+  stakeTypes  = clampArray(stakeTypes,  2400);
+
+  stakeBaselineCaptured = stakeData.length > 0;
+  lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
+}
+
+function mergeWd(payloadWd){
+  if (!payloadWd) return;
+  const pl = Array.isArray(payloadWd.labels) ? payloadWd.labels : [];
+  const pv = Array.isArray(payloadWd.values) ? payloadWd.values : [];
+  const pt = Array.isArray(payloadWd.times) ? payloadWd.times : [];
+
+  // merge by times (preferred)
+  const map = new Map();
+  for (let i=0;i<wdTimesAll.length;i++){
+    const t = safe(wdTimesAll[i]) || labelToTs(wdLabelsAll[i]);
+    if (!t) continue;
+    map.set(t, { v: safe(wdValuesAll[i]), l: String(wdLabelsAll[i] || tsLabel(t)) });
+  }
+  for (let i=0;i<pt.length;i++){
+    const t = safe(pt[i]) || labelToTs(pl[i]);
+    if (!t) continue;
+    if (!map.has(t)) map.set(t, { v: safe(pv[i]), l: String(pl[i] || tsLabel(t)) });
+  }
+
+  const times = [...map.keys()].sort((a,b)=>a-b);
+  wdTimesAll  = times;
+  wdValuesAll = times.map(t => map.get(t).v);
+  wdLabelsAll = times.map(t => map.get(t).l);
+
+  // clamp
+  wdTimesAll  = clampArray(wdTimesAll, 2400);
+  wdValuesAll = clampArray(wdValuesAll, 2400);
+  wdLabelsAll = clampArray(wdLabelsAll, 2400);
+}
+
+function mergeNW(payloadNw){
+  if (!payloadNw) return;
+  const t = Array.isArray(payloadNw.times) ? payloadNw.times : [];
+  const u = Array.isArray(payloadNw.usd) ? payloadNw.usd : [];
+  const j = Array.isArray(payloadNw.inj) ? payloadNw.inj : [];
+
+  const m1 = mergeUniqueByTs(nwTAll, nwUsdAll, t, u);
+  const m2 = mergeUniqueByTs(nwTAll, nwInjAll, t, j);
+
+  nwTAll = m1.times;
+  nwUsdAll = m1.vals;
+  nwInjAll = m2.vals;
+
+  clampNWArrays();
+}
+
+async function cloudPull(){
+  if (!address) return;
+  if (!hasInternet()) { cloudSetState("synced"); return; }
+
+  const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
+  const res = await fetchJSON(url);
+  if (!res?.ok) { cloudSetState("error"); return; }
+  if (!res.data) { cloudSetState("synced"); return; }
+
+  try{
+    const data = res.data;
+    mergeStakeByLabel(data.stake);
+    mergeWd(data.wd);
+    mergeNW(data.nw);
+
+    // rebuild chart views
+    saveStakeSeriesLocal();
+    saveWdAllLocal();
+    rebuildWdView();
+    goRewardLive();
+    saveNWLocal();
     drawNW();
-  }, { passive:true });
+    drawStakeChart();
+    drawRewardWdChart();
+
+    cloudLastSync = Date.now();
+    cloudSaveMeta();
+    cloudSetState("synced");
+  } catch {
+    cloudSetState("error");
+  }
+}
+
+async function cloudPush(){
+  if (!address) return;
+  if (!hasInternet()) return;
+  if (!cloudDirty) return;
+
+  cloudSetState("saving");
+
+  const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
+  const payload = buildCloudPayload();
+
+  const res = await fetchJSON(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res?.ok) {
+    cloudSetState("error");
+    return;
+  }
+
+  cloudDirty = false;
+  cloudLastSync = Date.now();
+  cloudSaveMeta();
+  cloudSetState("synced");
+}
+
+/* ================= NET WORTH UI rows ================= */
+function updateNetWorthMiniRows(){
+  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
+  const px = safe(displayed.price);
+
+  setText("nwInjQty", totalInj.toFixed(4));
+  setText("nwInjPx", `$${px.toFixed(2)}`);
+
+  // also big total INJ label if present
+  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+}
+
+/* ================= IMPORTANT PRICE EVENTS (24h thresholds) ================= */
+let lastPriceStepUp = 0;
+let lastPriceStepDown = 0;
+function maybePriceEvent(pct24h){
+  // fire at each 5% step
+  const step = 5;
+  const upSteps = Math.floor(Math.max(0, pct24h) / step);
+  const dnSteps = Math.floor(Math.max(0, -pct24h) / step);
+
+  if (upSteps > lastPriceStepUp) {
+    lastPriceStepUp = upSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ +${(upSteps*step).toFixed(0)}% (24h)`, dir:"up", status:"ok" });
+  }
+  if (dnSteps > lastPriceStepDown) {
+    lastPriceStepDown = dnSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ -${(dnSteps*step).toFixed(0)}% (24h)`, dir:"down", status:"ok" });
+  }
 }
 
 /* ================= CHART THEME REFRESH ================= */
@@ -2235,6 +2723,8 @@ function refreshChartsTheme(){
     if (stakeChart) {
       stakeChart.options.scales.y.grid.color = axisGridColor();
       stakeChart.options.scales.y.ticks.color = axisTickColor();
+      stakeChart.options.scales.x.grid.color = axisGridColor();
+      stakeChart.options.scales.x.ticks.color = axisTickColor();
       stakeChart.update("none");
     }
     if (rewardChart) {
@@ -2264,46 +2754,40 @@ async function commitAddress(newAddr) {
   if (!a) return;
 
   address = a;
-  pendingAddress = a;
   localStorage.setItem("inj_address", address);
 
   setAddressDisplay(address);
   settleStart = Date.now();
 
-  // reset validator display per address
-  validatorAddr = "";
-  validatorMoniker = "";
-  validatorLoading = false;
-  dedupeValidatorCards();
-  // prova a caricare cache per address (mostra subito qualcosa)
-  if (loadValidatorCache()){
-    setValidatorText(validatorMoniker || "Validator", validatorAddr);
-    setValidatorDotState(hasInternet() ? "online" : "offline");
-  } else {
-    setValidatorText("Validator", "");
-    setValidatorDotState(hasInternet() ? "loading" : "offline");
-  }
-
+  // reset runtime
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
-  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0;
+  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0; displayed.apr = 0;
 
-  if (RESET_STAKE_FROM_NOW_ON_BOOT) {
-    clearStakeSeriesStorage();
-    resetStakeSeriesFromNow();
-  } else {
-    loadStakeSeries();
-    drawStakeChart();
-  }
+  // load local series
+  loadStakeSeriesLocal();
+  drawStakeChart();
 
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
-  loadWdAll();
+  loadWdAllLocal();
   rebuildWdView();
   goRewardLive();
 
-  loadNW();
+  loadNWLocal();
+  const scaleBtn = $("nwScaleBtn");
+  if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
+  const liveBtn = $("nwLiveBtn");
+  if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
   attachNWTFHandlers();
   drawNW();
+
+  // events
+  loadEvents();
+  renderEvents();
+
+  // cloud pull
+  cloudSetState("saving");
+  await cloudPull();
 
   modeLoading = true;
   refreshConnUI();
@@ -2319,8 +2803,9 @@ async function commitAddress(newAddr) {
 /* ================= ONLINE / OFFLINE listeners ================= */
 window.addEventListener("online", () => {
   refreshConnUI();
+  setValidatorUI("ready");
   cloudSetState("synced");
-  setValidatorDotState("loading");
+  if (address) cloudPull();
   if (liveMode) {
     startTradeWS();
     startKlineWS();
@@ -2338,60 +2823,59 @@ window.addEventListener("offline", () => {
   refreshLoading = false;
   modeLoading = false;
   refreshConnUI();
+  setValidatorUI("ready");
   cloudSetState("synced");
-  setValidatorDotState("offline");
 }, { passive: true });
 
 /* ================= BOOT ================= */
 (async function boot() {
-  cloudLoad();
-  cloudRender();
+  // theme + zoom
+  applyTheme(theme);
+  ZOOM_OK = tryRegisterZoom();
+
+  // ui
+  cloudLoadMeta();
+  cloudRenderMeta();
   cloudSetState("synced");
-
-  // Fix: in caso esistano due validator card nel DOM (versioni precedenti)
-  dedupeValidatorCards();
-
   refreshConnUI();
-  setTimeout(() => setUIReady(true), 2800);
+  setTimeout(() => setUIReady(true), 2600);
 
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
   attachRewardFilterHandler();
 
-  pendingAddress = address || "";
-  if (addressInput) addressInput.value = pendingAddress;
-  setAddressDisplay(address);
-
-  wdMinFilter = safe($("rewardFilter")?.value || 0);
-
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
-    clearStakeSeriesStorage();
-    resetStakeSeriesFromNow();
-  } else {
-    loadStakeSeries();
-    drawStakeChart();
-  }
+  // bind expand
+  bindExpandButtons();
+
+  // pull-to-refresh
+  initPullToRefresh();
+
+  // address display
+  setAddressDisplay(address);
+
+  // initial data for last saved address
+  wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (address) {
-    loadWdAll();
-    rebuildWdView();
-    goRewardLive();
-  }
+    // local loads first
+    loadStakeSeriesLocal(); drawStakeChart();
+    loadWdAllLocal(); rebuildWdView(); goRewardLive();
+    loadNWLocal();
+    const scaleBtn = $("nwScaleBtn");
+    if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    const liveBtn = $("nwLiveBtn");
+    if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
+    attachNWTFHandlers();
+    drawNW();
 
-  if (address) loadNW();
-  attachNWTFHandlers();
-  drawNW();
+    loadEvents();
+    renderEvents();
 
-  // Validator cache render immediato
-  if (address && loadValidatorCache()){
-    setValidatorText(validatorMoniker || "Validator", validatorAddr);
-    setValidatorDotState(hasInternet() ? "online" : "offline");
-  } else {
-    setValidatorText("Validator", "");
-    setValidatorDotState(hasInternet() ? "loading" : "offline");
+    // cloud merge
+    await cloudPull();
   }
 
   modeLoading = true;
@@ -2430,6 +2914,9 @@ function animate() {
   updatePerf("arrow24h", "pct24h", pD);
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
+
+  // price event thresholds (24h)
+  if (tfReady.d) maybePriceEvent(pD);
 
   // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
@@ -2533,39 +3020,51 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  // APR + time
-  setText("apr", safe(apr).toFixed(2) + "%");
+  // APR (animated like price)
+  const oapr = displayed.apr;
+  displayed.apr = tick(displayed.apr, apr);
+  colorNumber($("apr"), displayed.apr, oapr, 2);
+
+  // Last update at bottom
   setText("updated", "Last update: " + nowLabel());
 
   /* ================= NET WORTH UI ================= */
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
-  // ✅ se stai interagendo, non sovrascrivere: lascia il valore puntato
   if (!nwHoverActive) {
     const onw = displayed.netWorthUsd;
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
 
-    // ✅ PnL ritorna realtime
+    // keep pnl & chart updated (live view filters window)
     drawNW();
   }
 
-  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+  updateNetWorthMiniRows();
 
   // densità: registra spesso (solo live + address)
   if (address && liveMode) recordNetWorthPoint();
 
-  // validator dot state (online/offline) – mantiene blinking giallo come richiesto
-  if (!hasInternet()) setValidatorDotState("offline");
-  else if (validatorLoading) setValidatorDotState("loading");
-  else setValidatorDotState("online");
+  // cloud push if dirty (debounced)
+  if (cloudDirty && hasInternet()) scheduleCloudPush();
 
   refreshConnUI();
+  setValidatorUI("ready");
 
-  // ✅ keep the blinking dot fluid even without data updates
+  // keep dot fluid
   if (netWorthChart) netWorthChart.draw();
 
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ================= WHAT WAS ADDED (this file) =================
+✅ FIX: Coming soon close works always (button + background + ESC)
+✅ Menu: Event opens dedicated Events page; other items open coming soon overlay
+✅ Validator card: single card, Injective validator fetched (if delegations exist), status dot yellow/green/red
+✅ Cloud Sync: real GET/POST to /api/point with Saving/Synced/Error reflected in menu + footer
+✅ Address search: wallet stays displayed, input clears after commit
+✅ Events: toast slide-down + persistence + events table rendering; stake/reward/price events added
+✅ Pull-to-refresh: enabled only in REFRESH mode (mobile), shows spinner and refreshes data
+=============================================================== */
