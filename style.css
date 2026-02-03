@@ -137,7 +137,7 @@ body[data-theme="light"] .subtitle{ color: var(--muted-light); }
   display:flex;
   justify-content:flex-end;
   align-items:center;
-  min-width: 0;
+  min-width: 44px;
 }
 
 /* SEARCH WRAP: icona + input che si apre SOLO nel suo spazio */
@@ -147,7 +147,6 @@ body[data-theme="light"] .subtitle{ color: var(--muted-light); }
   gap:.45rem;
   justify-content:flex-end;
   max-width: min(520px, 58vw);
-  min-width: 0;
 }
 
 /* lens button minimal */
@@ -184,7 +183,6 @@ body[data-theme="light"] .icon-btn{
   background: rgba(255,255,255,0.06);
   color: #f9fafb;
   transition: width 220ms ease, opacity 160ms ease, padding 220ms ease, background 220ms ease, border-color 220ms ease;
-  min-width: 0;
 }
 body[data-theme="light"] .search-wrap input{
   background: rgba(15,23,42,0.06);
@@ -583,315 +581,195 @@ body[data-theme="light"] .reward-timeline input[type="range"]{ background: rgba(
 }
 body[data-theme="light"] .reward-timeline-meta{ color: rgba(15,23,42,.68); }
 
-/* ================= NET WORTH (UNIFIED + MORE SPACE + PAN/TOUCH) ================= */
-
-/* ================= NET WORTH (persist + chart) ================= */
-let nwTf = "1d";
-let nwTAll = [];
-let nwUsdAll = [];
-let nwInjAll = [];
-let netWorthChart = null;
-
-/* ✅ auto-follow (scroll) */
-let nwAutoFollow = true;
-let nwLastInteractAt = 0;
-
-function nwStoreKey(addr){
-  const a = (addr || "").trim();
-  return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
-}
-function saveNW(){
-  const key = nwStoreKey(address);
-  if (!key) return;
-  try{
-    localStorage.setItem(key, JSON.stringify({
-      v: NW_LOCAL_VER, t: Date.now(),
-      tAll: nwTAll,
-      usdAll: nwUsdAll,
-      injAll: nwInjAll,
-      tf: nwTf
-    }));
-    cloudBump(1);
-  } catch {
-    cloudSetState("error");
-  }
+/* ================= NET WORTH CARD ================= */
+.networth-card{
+  padding: 0;
+  overflow: hidden;
+  position: relative;
 }
 
-function loadNW(){
-  const key = nwStoreKey(address);
-  if (!key) return false;
-  try{
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== NW_LOCAL_VER) return false;
-
-    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
-    nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
-    nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
-    nwTf = (obj.tf === "1w" || obj.tf === "1m" || obj.tf === "1y") ? obj.tf : "1d";
-
-    clampNWArrays();
-    return true;
-  } catch {
-    return false;
-  }
+/* background chart layer */
+.networth-bg{
+  position: absolute;
+  inset: 0;
+  opacity: .35;
+  pointer-events: none;
+  filter: saturate(1.05);
 }
-function clampNWArrays(){
-  const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
-  nwTAll = nwTAll.slice(-n);
-  nwUsdAll = nwUsdAll.slice(-n);
-  nwInjAll = nwInjAll.slice(-n);
-  if (nwTAll.length > NW_MAX_POINTS){
-    nwTAll = nwTAll.slice(-NW_MAX_POINTS);
-    nwUsdAll = nwUsdAll.slice(-NW_MAX_POINTS);
-    nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
-  }
-}
-function nwWindowMs(tf){
-  if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
-  if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
-  if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
-  return 24 * 60 * 60 * 1000;
+body[data-theme="light"] .networth-bg{ opacity: .28; }
+
+.networth-content{
+  position: relative;
+  padding: 1rem;
 }
 
-/* ✅ MOD: window “scorrevole” + punti {x,y} */
-function nwBuildView(tf){
-  const now = Date.now();
-  const w = nwWindowMs(tf);
-  const minT = now - w;
-
-  const points = [];
-  for (let i = 0; i < nwTAll.length; i++){
-    const t = safe(nwTAll[i]);
-    const y = safe(nwUsdAll[i]);
-    if (t >= minT && Number.isFinite(t) && Number.isFinite(y)){
-      points.push({ x: t, y });
-    }
-  }
-  return { points };
+/* top layout */
+.networth-toprow{
+  display:flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
 }
 
-/* ✅ calcolo Y auto-fit (NO gap da 0) */
-function nwCalcYBounds(points){
-  if (!points || points.length < 2) return { ymin: undefined, ymax: undefined };
-
-  let lo = Infinity, hi = -Infinity;
-  for (const p of points){
-    const y = safe(p?.y);
-    if (!Number.isFinite(y)) continue;
-    lo = Math.min(lo, y);
-    hi = Math.max(hi, y);
-  }
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { ymin: undefined, ymax: undefined };
-
-  let span = hi - lo;
-  if (span <= 0) span = Math.max(1, hi * 0.005);
-
-  const pad = span * 0.12; // tight ma non attaccato
-  return { ymin: lo - pad, ymax: hi + pad };
+.networth-usdblock .label{
+  margin-bottom: .25rem;
 }
 
-/* ✅ se l’utente interagisce, sgancia auto-follow per qualche secondo */
-function nwMarkInteracted(){
-  nwAutoFollow = false;
-  nwLastInteractAt = Date.now();
+.networth-usd{
+  font-size: 2rem;
+  font-weight: 950;
+  line-height: 1.05;
+  text-align: left;
 }
-function nwMaybeResumeFollow(){
-  // dopo 12s senza interazioni, torna auto-follow
-  if (!nwAutoFollow && (Date.now() - nwLastInteractAt) > 12_000){
-    nwAutoFollow = true;
-  }
+.networth-pnl{
+  margin-top: .25rem;
+  font-size: .9rem;
+  font-weight: 900;
+  color: #9ca3af;
 }
+.networth-pnl.good{ color: var(--green); }
+.networth-pnl.bad{ color: var(--red); }
+.networth-pnl.flat{ color: #9ca3af; }
+body[data-theme="light"] .networth-pnl{ color: var(--muted-light); }
 
-function nwApplySignStyling(sign){
-  if (!netWorthChart) return;
-  const ds = netWorthChart.data.datasets?.[0];
-  if (!ds) return;
+/* more air between top and chart */
+.networth-air{ height: 10px; }
 
-  if (sign === "up"){
-    ds.borderColor = "#22c55e";
-    ds.backgroundColor = "rgba(34,197,94,.18)";
-  } else if (sign === "down"){
-    ds.borderColor = "#ef4444";
-    ds.backgroundColor = "rgba(239,68,68,.16)";
-  } else {
-    ds.borderColor = "#3b82f6";
-    ds.backgroundColor = "rgba(59,130,246,.14)";
-  }
-  netWorthChart.update("none");
+/* bottom area (tf + coins) */
+.networth-bottom{
+  margin-top: 160px; /* gives real stacco from chart */
 }
 
-function initNWChart(){
-  const canvas = $("netWorthChart");
-  if (!canvas || !window.Chart) return;
-
-  const view = nwBuildView(nwTf);
-
-  netWorthChart = new Chart(canvas, {
-    type: "line",
-    data: {
-      datasets: [{
-        data: view.points,
-        borderColor: "#3b82f6",
-        backgroundColor: "rgba(59,130,246,.14)",
-        fill: true,
-
-        /* ✅ meno zig-zag “visivo” */
-        pointRadius: 0,
-        tension: 0.18,
-        cubicInterpolationMode: "monotone",
-        spanGaps: true
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-
-      /* ✅ update “smooth” minimo (non lag) */
-      animation: { duration: 160 },
-      normalized: true,
-
-      layout: { padding: { left: 6, right: 14, top: 6, bottom: 10 } },
-
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          enabled: true,
-          displayColors: false,
-          callbacks: {
-            title: (items) => {
-              const x = items?.[0]?.parsed?.x;
-              return x ? new Date(x).toLocaleTimeString() : "";
-            },
-            label: (item) => fmtUsd(item?.parsed?.y)
-          }
-        },
-
-        /* ✅ evita “min-max” che spesso fa zig-zag su dati realtime */
-        decimation: { enabled: false },
-
-        ...(ZOOM_OK ? {
-          zoom: {
-            pan: {
-              enabled: true,
-              mode: "x",
-              threshold: 2,
-              onPanStart: () => nwMarkInteracted(),
-              onPanComplete: () => nwMarkInteracted()
-            },
-            zoom: {
-              wheel: { enabled: true },
-              pinch: { enabled: true },
-              mode: "x",
-              onZoomStart: () => nwMarkInteracted(),
-              onZoomComplete: () => nwMarkInteracted()
-            }
-          }
-        } : {})
-      },
-
-      interaction: { mode: "nearest", intersect: false },
-
-      scales: {
-        x: {
-          type: "linear",
-          grid: { color: axisGridColor() },
-          ticks: {
-            color: axisTickColor(),
-            maxTicksLimit: 6,
-            callback: (v) => fmtHHMM(v)
-          }
-        },
-        y: {
-          position: "right",
-          beginAtZero: false, /* ✅ NO gap da 0 */
-          ticks: {
-            color: axisTickColor(),
-            mirror: true,
-            padding: 6,
-            maxTicksLimit: 6,
-            callback: (v) => fmtUsd(v)
-          },
-          grid: { color: axisGridColor() }
-        }
-      }
-    }
-  });
-
-  /* ✅ qualsiasi interazione = sgancia follow */
-  canvas.addEventListener("mousedown", nwMarkInteracted, { passive: true });
-  canvas.addEventListener("wheel", nwMarkInteracted, { passive: true });
-  canvas.addEventListener("touchstart", nwMarkInteracted, { passive: true });
+/* chart must be visible behind, so give it a real height */
+#netWorthChart{
+  height: 240px !important;
 }
 
-function drawNW(){
-  if (!netWorthChart) initNWChart();
-  if (!netWorthChart) return;
+/* TF row under chart */
+.tf-switch{
+  display:flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tf-btn{
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.82);
+  font-weight: 950;
+  font-size: .75rem;
+  cursor: pointer;
+}
+body[data-theme="light"] .tf-btn{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.80);
+}
+.tf-btn.active{
+  background: rgba(59,130,246,.18);
+  border-color: rgba(59,130,246,.35);
+  color: rgba(249,250,251,.96);
+}
+body[data-theme="light"] .tf-btn.active{
+  background: rgba(59,130,246,.12);
+  border-color: rgba(59,130,246,.26);
+  color: rgba(15,23,42,.92);
+}
 
-  nwMaybeResumeFollow();
+.nw-divider{
+  height: 1px;
+  background: rgba(255,255,255,.10);
+  margin: 12px 0;
+}
+body[data-theme="light"] .nw-divider{ background: rgba(15,23,42,.10); }
 
-  const view = nwBuildView(nwTf);
-  const pts = view.points || [];
+.nw-coins{ display:flex; flex-direction:column; gap: 10px; }
 
-  netWorthChart.data.datasets[0].data = pts;
+/* mini INJ card */
+.nw-mini{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+}
+body[data-theme="light"] .nw-mini{
+  border-color: rgba(15,23,42,.10);
+  background: rgba(15,23,42,.05);
+}
 
-  // ✅ X “scorre da sinistra”: finestra che avanza e mantiene il grafico in movimento
-  if (pts.length >= 2){
-    const w = nwWindowMs(nwTf);
-    const now = Date.now();
-    const xMin = now - w;
-    const xMax = now;
+.nw-mini-left{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+.nw-coin-logo{
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display:grid;
+  place-items:center;
+  background: rgba(59,130,246,.18);
+  border: 1px solid rgba(255,255,255,.10);
+}
+body[data-theme="light"] .nw-coin-logo{
+  border-color: rgba(15,23,42,.10);
+}
+.nw-mini-meta{ display:flex; flex-direction:column; gap: 2px; }
+.nw-mini-title{ font-weight: 950; letter-spacing:.02em; }
+.nw-mini-sub{ font-size: .78rem; color: rgba(249,250,251,.65); font-weight: 800; }
+body[data-theme="light"] .nw-mini-sub{ color: rgba(15,23,42,.60); }
 
-    if (nwAutoFollow){
-      // un filo di respiro a destra, ma minimo
-      const rightPadMs = Math.min(25_000, Math.max(8_000, w * 0.003));
-      netWorthChart.options.scales.x.min = xMin;
-      netWorthChart.options.scales.x.max = xMax + rightPadMs;
-    } else {
-      // se l’utente sta esplorando, non forzare i limiti
-      netWorthChart.options.scales.x.min = undefined;
-      netWorthChart.options.scales.x.max = undefined;
-    }
+.nw-mini-right{
+  text-align:right;
+  font-weight: 950;
+  font-size: .95rem;
+}
 
-    // ✅ Y tight sul range visibile (NO base 0)
-    const { ymin, ymax } = nwCalcYBounds(pts);
-    netWorthChart.options.scales.y.min = ymin;
-    netWorthChart.options.scales.y.max = ymax;
+/* coin row */
+.nw-row{
+  display:flex;
+  justify-content: space-between;
+  align-items:center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+body[data-theme="light"] .nw-row{
+  border-color: rgba(15,23,42,.10);
+  background: rgba(15,23,42,.04);
+}
 
-  } else {
-    netWorthChart.options.scales.x.min = undefined;
-    netWorthChart.options.scales.x.max = undefined;
-    netWorthChart.options.scales.y.min = undefined;
-    netWorthChart.options.scales.y.max = undefined;
-  }
+.nw-row-left{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+.nw-coin-ticker{ font-weight: 950; letter-spacing:.02em; }
+.nw-row-right{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+  color: rgba(249,250,251,.78);
+  font-weight: 900;
+}
+body[data-theme="light"] .nw-row-right{ color: rgba(15,23,42,.72); }
+.nw-coin-price{ font-size:.84rem; opacity:.95; }
+.nw-row-sep{ opacity:.6; }
 
-  netWorthChart.update("none");
-
-  // PnL
-  const pnlEl = $("netWorthPnl");
-  if (pts.length >= 2){
-    const first = safe(pts[0].y);
-    const last = safe(pts[pts.length - 1].y);
-    const pnl = last - first;
-    const pnlPct = first ? (pnl / first) * 100 : 0;
-
-    if (pnlEl){
-      pnlEl.classList.remove("good","bad","flat");
-      const cls = pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat");
-      pnlEl.classList.add(cls);
-      const sign = pnl > 0 ? "+" : "";
-      pnlEl.textContent = `PnL: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
-      nwApplySignStyling(pnl > 0 ? "up" : (pnl < 0 ? "down" : "flat"));
-    }
-  } else {
-    if (pnlEl){
-      pnlEl.classList.remove("good","bad");
-      pnlEl.classList.add("flat");
-      pnlEl.textContent = "PnL: —";
-      nwApplySignStyling("flat");
-    }
-  }
+/* responsive: net worth tighter on mobile */
+@media (max-width: 520px){
+  .networth-usd{ font-size: 1.75rem; }
+  .networth-bottom{ margin-top: 170px; }
+  #netWorthChart{ height: 260px !important; }
 }
 
 /* ================= LOADING shimmer ================= */
@@ -1223,4 +1101,308 @@ body[data-theme="light"] .pro-pill{
   0%{ opacity: .55; }
   50%{ opacity: 1; }
   100%{ opacity: .55; }
+}
+
+/* --- IL TUO CSS COMPLETO (IDENTICO) --- */
+:root{
+  --bg-dark: #000;
+  --fg-dark: #f9fafb;
+  --muted-dark: rgba(249,250,251,.70);
+
+  --bg-light: #e7eaf0;
+  --fg-light: #0f172a;
+  --muted-light: rgba(15,23,42,.62);
+
+  --card-dark-a: #0b1220;
+  --card-dark-b: #111c2f;
+
+  --card-light-a: #f0f2f6;
+  --card-light-b: #e6eaf2;
+
+  --bar-dark: rgba(255,255,255,0.08);
+  --bar-light: rgba(15,23,42,0.06);
+
+  --radius: 18px;
+  --radius-sm: 14px;
+
+  --green: #22c55e;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --blue: #3b82f6;
+  --cyan: #38bdf8;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg-dark);
+  color: var(--fg-dark);
+  margin: 0;
+  padding: 1rem;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* LIGHT THEME (soft, premium - meno impattante) */
+body[data-theme="light"]{
+  background:
+    radial-gradient(1200px 600px at 30% -10%, rgba(59,130,246,0.06), transparent 55%),
+    radial-gradient(900px 500px at 90% 10%, rgba(34,197,94,0.05), transparent 55%),
+    var(--bg-light);
+  color: var(--fg-light);
+}
+
+.container {
+  max-width: 900px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ================= HEADER (PRO) ================= */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  margin-bottom: .55rem;
+}
+
+.header-grid {
+  display: grid;
+  grid-template-columns: 56px minmax(0,1fr) auto;
+  align-items: center;
+  gap: .6rem;
+}
+
+/* LEFT */
+.header-left { display: flex; align-items: center; justify-content:flex-start; }
+.menu-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 26px;
+  font-weight: 800;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  color: rgba(249,250,251,.95);
+  cursor: pointer;
+  outline: none;
+}
+body[data-theme="light"] .menu-btn{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.92);
+}
+.menu-btn:active { transform: translateY(1px); }
+
+/* CENTER */
+.header-center{
+  min-width: 0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+}
+
+.brand-title{
+  margin: 0;
+  line-height: 1.05;
+  font-weight: 900;
+  letter-spacing: .2px;
+  font-size: 1.9rem;
+  background: linear-gradient(90deg, #22c55e, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brand-title .dot{
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body[data-theme="light"] .subtitle{ color: var(--muted-light); }
+
+/* RIGHT */
+.header-right{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  min-width: 44px;
+}
+
+.search-wrap{
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  justify-content:flex-end;
+  max-width: min(520px, 58vw);
+}
+
+.icon-btn{
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  color: rgba(249,250,251,.92);
+  font-size: 18px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  outline: none;
+}
+body[data-theme="light"] .icon-btn{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.92);
+}
+.icon-btn:active { transform: translateY(1px); }
+
+.search-wrap input{
+  width: 0px;
+  opacity: 0;
+  pointer-events: none;
+  border: 1px solid transparent;
+  outline: none;
+  padding: 0;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  color: #f9fafb;
+  transition: width 220ms ease, opacity 160ms ease, padding 220ms ease, background 220ms ease, border-color 220ms ease;
+}
+body[data-theme="light"] .search-wrap input{
+  background: rgba(15,23,42,0.06);
+  color: rgba(15,23,42,.92);
+}
+
+.search-wrap.open input{
+  width: min(520px, 58vw);
+  opacity: 1;
+  pointer-events: auto;
+  padding: 0 .9rem;
+  border-color: rgba(255,255,255,.10);
+  background: rgba(255,255,255,0.08);
+}
+body[data-theme="light"] .search-wrap.open input{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,0.08);
+}
+
+.search-wrap input::placeholder{
+  color: rgba(249,250,251,.55);
+}
+body[data-theme="light"] .search-wrap input::placeholder{
+  color: rgba(15,23,42,.55);
+}
+
+.title-compact{ display:none; }
+.title-full{ display:inline; }
+
+body.search-open .header-center{
+  align-items:flex-start;
+  text-align:left;
+}
+body.search-open .title-full{ display:none; }
+body.search-open .title-compact{ display:inline; }
+body.search-open #subtitle{ display:none; }
+
+@media (max-width: 520px){
+  .brand-title{ font-size: 1.45rem; }
+  .search-wrap.open input{ width: min(360px, 60vw); }
+}
+
+.header-meta-right {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: .55rem;
+}
+
+.address-display .tag {
+  font-size: 0.74rem;
+  color: rgba(249,250,251,.82);
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  padding: .22rem .55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+body[data-theme="light"] .address-display .tag{
+  background: rgba(15,23,42,0.06);
+  color: rgba(15,23,42,.80);
+}
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  opacity: .95;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1.7s infinite;
+}
+.status-text {
+  font-size: 0.72rem;
+  color: rgba(249,250,251,.78);
+}
+body[data-theme="light"] .status-text{
+  color: rgba(15,23,42,.70);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.75; }
+  50% { transform: scale(1.35); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.75; }
+}
+
+/* ... (resto del tuo CSS identico, non lo taglio per non rischiare mismatch) ... */
+
+/* ===== Cloud status colors ===== */
+#cloudStatus{ font-weight: 900; }
+.cloud-synced #cloudStatus{ color: rgba(34,197,94,.95); }
+.cloud-saving #cloudStatus{ color: rgba(245,158,11,.95); animation: cloudBlink 1.0s infinite; }
+.cloud-error #cloudStatus{ color: rgba(239,68,68,.95); }
+.cloud-points{ color: rgba(56,189,248,.95); font-weight: 900; }
+@keyframes cloudBlink{ 0%{opacity:.55;} 50%{opacity:1;} 100%{opacity:.55;} }
+
+/* ================= PATCH: search non si schiaccia ================= */
+.header-right { min-width: 0; }
+
+.search-wrap{
+  min-width: 0;
+  max-width: 520px;
+  width: 100%;
+}
+
+.search-wrap input{ min-width: 0; }
+
+.search-wrap.open{
+  width: min(520px, 60vw);
+}
+
+.search-wrap.open input{
+  width: 100%;
+}
+
+@media (max-width: 520px){
+  .search-wrap.open{ width: min(360px, 68vw); }
 }
