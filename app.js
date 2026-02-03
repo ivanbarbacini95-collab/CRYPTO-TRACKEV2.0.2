@@ -42,6 +42,11 @@ function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
 function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
 
+function fmtUsd(v){
+  v = safe(v);
+  return `$${v.toFixed(2)}`;
+}
+
 function fmtSmart(v){
   v = safe(v);
   const av = Math.abs(v);
@@ -51,13 +56,6 @@ function fmtSmart(v){
   if (av >= 1) return v.toFixed(3);
   if (av >= 0.1) return v.toFixed(4);
   return v.toFixed(6);
-}
-function fmtUsd(v){
-  v = safe(v);
-  const abs = Math.abs(v);
-  if (abs >= 1000000) return `$${(v/1e6).toFixed(2)}M`;
-  if (abs >= 10000) return `$${Math.round(v).toLocaleString()}`;
-  return `$${v.toFixed(2)}`;
 }
 
 /* money + digit coloring */
@@ -294,7 +292,6 @@ function tick(cur, tgt) {
 /* ================= COLORED DIGITS ================= */
 function colorNumber(el, n, o, d) {
   if (!el) return;
-  n = safe(n); o = safe(o);
   const ns = n.toFixed(d), os = o.toFixed(d);
   if (ns === os) { el.textContent = ns; return; }
   el.innerHTML = [...ns].map((c, i) => {
@@ -386,13 +383,13 @@ setAddressDisplay(address);
 function openSearch() {
   if (!searchWrap) return;
   searchWrap.classList.add("open");
-  document.body.classList.add("search-open");
+  document.body.classList.add("search-open"); /* ✅ attiva title-compact */
   setTimeout(() => addressInput?.focus(), 20);
 }
 function closeSearch() {
   if (!searchWrap) return;
   searchWrap.classList.remove("open");
-  document.body.classList.remove("search-open");
+  document.body.classList.remove("search-open"); /* ✅ */
   addressInput?.blur();
 }
 
@@ -925,6 +922,40 @@ async function fetchKlines1mRange(startTime, endTime) {
   return out.slice(0, DAY_MINUTES);
 }
 
+function initChartToday() {
+  const canvas = $("priceChart");
+  if (!canvas || !window.Chart) return;
+
+  const zoomBlock = ZOOM_OK ? {
+    zoom: {
+      pan: {
+        enabled: true,
+        mode: "x",
+        threshold: 2,
+        onPanStart: () => { isPanning = true; },
+        onPanComplete: ({ chart }) => {
+          isPanning = false;
+          const xScale = chart.scales.x;
+          const center = (chart.chartArea.left + chart.chartArea.right) / 2;
+          pinnedIndex = xScale.getValueForPixel(center);
+          updatePinnedOverlay();
+        }
+      },
+      zoom: {
+        wheel: { enabled: true },
+        pinch: { enabled: true },
+        mode: "x",
+        onZoomComplete: ({ chart }) => {
+          const xScale = chart.scales.x;
+          const center = (chart.chartArea.left + chart.chartArea.right) / 2;
+          pinnedIndex = xScale.getValueForPixel(center);
+          updatePinnedOverlay();
+        }
+      }
+    }
+  } : {};
+
+  // ✅ MOD: grafico più largo + prezzi “mirror” a destra dentro il grafico
   chart = new Chart(canvas, {
     type: "line",
     data: {
@@ -943,31 +974,23 @@ async function fetchKlines1mRange(startTime, endTime) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      // ✅ usa più area orizzontale
+
       layout: { padding: { left: 6, right: 10, top: 6, bottom: 6 } },
 
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
-
-        // ✅ performance/linea più “pulita” (se disponibile)
         decimation: { enabled: true, algorithm: "min-max" },
-
         ...zoomBlock
       },
 
-      // ✅ evita “tagli” strani vicino ai bordi
       clip: { left: 0, top: 6, right: 0, bottom: 0 },
 
       interaction: { mode: "index", intersect: false },
       scales: {
-        x: {
-          display: false,
-          grid: { display: false }
-        },
+        x: { display: false, grid: { display: false } },
         y: {
           position: "right",
-          // ✅ tick “dentro” al grafico -> più spazio
           ticks: {
             color: axisTickColor(),
             mirror: true,
@@ -1093,7 +1116,6 @@ let stakeLabels = [];
 let stakeData = [];
 let stakeMoves = [];
 let stakeTypes = [];
-let stakePctMoves = []; // ✅ percent increment vs previous
 let lastStakeRecordedRounded = null;
 let stakeBaselineCaptured = false;
 
@@ -1107,9 +1129,9 @@ function saveStakeSeries() {
   try {
     localStorage.setItem(key, JSON.stringify({
       v: STAKE_LOCAL_VER, t: Date.now(),
-      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes, pct: stakePctMoves
+      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
     }));
-    cloudBump(1);
+    cloudBump(1); /* ✅ */
   } catch {
     cloudSetState("error");
   }
@@ -1127,17 +1149,14 @@ function loadStakeSeries() {
     stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
     stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
     stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
-    stakePctMoves = Array.isArray(obj.pct)  ? obj.pct    : [];
 
     const n = stakeData.length;
     stakeLabels = stakeLabels.slice(0, n);
     stakeMoves  = stakeMoves.slice(0, n);
     stakeTypes  = stakeTypes.slice(0, n);
-    stakePctMoves = stakePctMoves.slice(0, n);
 
     while (stakeMoves.length < n) stakeMoves.push(0);
     while (stakeTypes.length < n) stakeTypes.push("Stake update");
-    while (stakePctMoves.length < n) stakePctMoves.push(0);
 
     stakeBaselineCaptured = stakeData.length > 0;
     lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
@@ -1156,7 +1175,6 @@ function resetStakeSeriesFromNow() {
   stakeData = [0];
   stakeMoves = [0];
   stakeTypes = ["Reset start"];
-  stakePctMoves = [0];
   lastStakeRecordedRounded = 0;
   stakeBaselineCaptured = false;
   saveStakeSeries();
@@ -1199,11 +1217,7 @@ function initStakeChart() {
               const i = item.dataIndex;
               const v = safe(stakeData[i]);
               const t = stakeTypes[i] || "Stake update";
-              const pct = safe(stakePctMoves[i]);
-              const pctTxt = (i > 0 && Number.isFinite(pct) && pct !== 0)
-                ? ` • ${pct > 0 ? "+" : ""}${pct.toFixed(4)}%`
-                : "";
-              return `${t} • ${v.toFixed(6)} INJ${pctTxt}`;
+              return `${t} • ${v.toFixed(6)} INJ`;
             }
           }
         },
@@ -1234,7 +1248,6 @@ function maybeAddStakePoint(currentStake) {
     stakeData.push(rounded);
     stakeMoves.push(1);
     stakeTypes.push("Baseline (current)");
-    stakePctMoves.push(0);
     lastStakeRecordedRounded = rounded;
     stakeBaselineCaptured = true;
     saveStakeSeries();
@@ -1245,17 +1258,13 @@ function maybeAddStakePoint(currentStake) {
   if (lastStakeRecordedRounded == null) { lastStakeRecordedRounded = rounded; return; }
   if (rounded === lastStakeRecordedRounded) return;
 
-  const prev = lastStakeRecordedRounded;
-  const delta = rounded - prev;
+  const delta = rounded - lastStakeRecordedRounded;
   lastStakeRecordedRounded = rounded;
-
-  const pct = prev ? (delta / prev) * 100 : 0;
 
   stakeLabels.push(nowLabel());
   stakeData.push(rounded);
   stakeMoves.push(delta > 0 ? 1 : -1);
   stakeTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
-  stakePctMoves.push(Number.isFinite(pct) ? pct : 0);
 
   saveStakeSeries();
   drawStakeChart();
@@ -1285,7 +1294,7 @@ function saveWdAll() {
       v: REWARD_WD_LOCAL_VER, t: Date.now(),
       labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
-    cloudBump(1);
+    cloudBump(1); /* ✅ */
   } catch {
     cloudSetState("error");
   }
@@ -1531,15 +1540,6 @@ let nwUsdAll = [];
 let nwInjAll = [];
 let netWorthChart = null;
 
-/* ✅ smooth only for chart line (not the realtime number) */
-let nwChartSmoothUsd = 0;
-let nwLastSmoothInit = false;
-
-/* ✅ interaction override: when user interacts, show hovered value temporarily */
-let nwInteract = false;
-let nwHoverUsd = null;
-let nwHoverTs = null;
-
 function nwStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
@@ -1555,11 +1555,12 @@ function saveNW(){
       injAll: nwInjAll,
       tf: nwTf
     }));
-    cloudBump(1);
+    cloudBump(1); /* ✅ */
   } catch {
     cloudSetState("error");
   }
 }
+
 function loadNW(){
   const key = nwStoreKey(address);
   if (!key) return false;
@@ -1598,52 +1599,22 @@ function nwWindowMs(tf){
   return 24 * 60 * 60 * 1000;
 }
 
-/* ✅ PRO: bucket 10s + y padding -> no “mountain jagged” */
+/* ✅ MOD: per usare x linear “vero” -> ritorno points {x,y} */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
   const minT = now - w;
 
-  const BUCKET_MS = 10_000;
-  const buckets = new Map(); // key -> {sum,n,lastT}
-
+  const points = [];
   for (let i = 0; i < nwTAll.length; i++){
     const t = safe(nwTAll[i]);
     const y = safe(nwUsdAll[i]);
-    if (!Number.isFinite(t) || !Number.isFinite(y)) continue;
-    if (t < minT) continue;
-
-    const key = Math.floor(t / BUCKET_MS) * BUCKET_MS;
-    const cur = buckets.get(key);
-    if (!cur) buckets.set(key, { sum: y, n: 1, lastT: t });
-    else {
-      cur.sum += y;
-      cur.n += 1;
-      if (t > cur.lastT) cur.lastT = t;
+    if (t >= minT && Number.isFinite(t) && Number.isFinite(y)){
+      points.push({ x: t, y });
     }
   }
 
-  const pts = [];
-  for (const [x, obj] of buckets.entries()){
-    pts.push({ x, y: obj.sum / Math.max(1, obj.n) });
-  }
-  pts.sort((a,b) => a.x - b.x);
-
-  let yMin = null, yMax = null;
-  for (const p of pts){
-    if (yMin == null || p.y < yMin) yMin = p.y;
-    if (yMax == null || p.y > yMax) yMax = p.y;
-  }
-  if (yMin == null || yMax == null) { yMin = 0; yMax = 1; }
-
-  const pad = Math.max(1, (yMax - yMin) * 0.06);
-  yMin -= pad;
-  yMax += pad;
-
-  const xMin = pts.length ? pts[0].x : (now - w);
-  const xMax = pts.length ? pts[pts.length - 1].x : now;
-
-  return { pts, xMin, xMax, yMin, yMax };
+  return { points };
 }
 
 function nwApplySignStyling(sign){
@@ -1664,82 +1635,34 @@ function nwApplySignStyling(sign){
   netWorthChart.update("none");
 }
 
-/* ✅ blinking yellow dot at end */
-const nwEndDotPlugin = {
-  id: "nwEndDotPlugin",
-  afterDatasetsDraw(ch){
-    const meta = ch.getDatasetMeta(0);
-    const pts = meta?.data || [];
-    if (!pts.length) return;
-    const last = pts[pts.length - 1];
-    if (!last) return;
-
-    const ctx = ch.ctx;
-    const t = Date.now();
-    const pulse = 0.55 + 0.45 * Math.sin(t / 240); // blink
-    const r = 4.6 + 1.6 * pulse;
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(last.x, last.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(250,204,21,${0.55 + 0.35 * pulse})`;
-    ctx.shadowColor = `rgba(250,204,21,${0.45 + 0.35 * pulse})`;
-    ctx.shadowBlur = 14;
-    ctx.fill();
-    ctx.restore();
-  }
-};
-
-/* ✅ hover vertical line + value read */
-const nwHoverPlugin = {
-  id: "nwHoverPlugin",
-  afterDraw(ch){
-    if (!nwInteract || nwHoverTs == null) return;
-
-    const xScale = ch.scales?.x;
-    if (!xScale) return;
-
-    const x = xScale.getPixelForValue(nwHoverTs);
-    if (!Number.isFinite(x)) return;
-
-    const ctx = ch.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, ch.chartArea.top);
-    ctx.lineTo(x, ch.chartArea.bottom);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(250,204,21,0.85)";
-    ctx.stroke();
-    ctx.restore();
-  }
-};
-
 function initNWChart(){
   const canvas = $("netWorthChart");
   if (!canvas || !window.Chart) return;
 
   const view = nwBuildView(nwTf);
 
+  // ✅ MOD: line “pulita” e più spazio utile orizzontale
   netWorthChart = new Chart(canvas, {
     type: "line",
     data: {
       datasets: [{
-        data: view.pts,
+        data: view.points,
         borderColor: "#3b82f6",
         backgroundColor: "rgba(59,130,246,.14)",
         fill: true,
         pointRadius: 0,
-        tension: 0.35
+        tension: 0.25,
+        spanGaps: true
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: {
-        // ✅ reserve right side so line never looks like it invades the column
-        padding: { left: 8, right: 58, top: 8, bottom: 10 }
-      },
+
+      // ✅ più spazio “lunghezza”, tick dentro a destra
+      layout: { padding: { left: 6, right: 16, top: 6, bottom: 8 } },
+
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1753,6 +1676,7 @@ function initNWChart(){
             label: (item) => fmtUsd(item?.parsed?.y)
           }
         },
+        decimation: { enabled: true, algorithm: "min-max" },
         ...(ZOOM_OK ? {
           zoom: {
             pan: { enabled: true, mode: "x", threshold: 2 },
@@ -1760,83 +1684,60 @@ function initNWChart(){
           }
         } : {})
       },
+
       interaction: { mode: "nearest", intersect: false },
+      clip: { left: 0, top: 6, right: 0, bottom: 0 },
+
       scales: {
         x: {
           type: "linear",
           grid: { color: axisGridColor() },
           ticks: {
             color: axisTickColor(),
-            maxTicksLimit: 6,
+            maxTicksLimit: 5,
             callback: (v) => fmtHHMM(v)
           }
         },
         y: {
           position: "right",
-          grid: { color: axisGridColor() },
           ticks: {
             color: axisTickColor(),
-            callback: (v) => fmtUsd(v),
-            maxTicksLimit: 5
-          }
+            mirror: true,      // ✅ “schiaccia” i prezzi verso la fine senza rubare spazio
+            padding: 6,
+            maxTicksLimit: 5,
+            callback: (v) => fmtUsd(v)
+          },
+          grid: { color: axisGridColor() }
         }
       }
-    },
-    plugins: [nwHoverPlugin, nwEndDotPlugin]
+    }
   });
-
-  attachNWChartInteractions();
 }
 
-function drawNW(withLivePointUsd = null){
+function drawNW(){
   if (!netWorthChart) initNWChart();
   if (!netWorthChart) return;
 
   const view = nwBuildView(nwTf);
-
-  // ✅ if no points, avoid “0 jumps”: seed with current-ish value
-  let pts = view.pts.slice();
-  const now = Date.now();
-  const xQ = Math.floor(now / 1000) * 1000;
-
-  let rawLive = Number.isFinite(withLivePointUsd)
-    ? safe(withLivePointUsd)
-    : (pts.length ? pts[pts.length - 1].y : 0);
-
-  const liveUsd = (Number.isFinite(nwChartSmoothUsd) && nwLastSmoothInit)
-    ? nwChartSmoothUsd
-    : rawLive;
-
-  if (!pts.length){
-    pts.push({ x: xQ - 2000, y: liveUsd });
-    pts.push({ x: xQ, y: liveUsd });
-  } else {
-    pts.push({ x: xQ, y: liveUsd });
-  }
+  const pts = view.points || [];
 
   netWorthChart.data.datasets[0].data = pts;
 
-  // dynamic axis window
-  const xMin = pts.length ? pts[0].x : (xQ - nwWindowMs(nwTf));
-  const xMax = pts.length ? pts[pts.length - 1].x : xQ;
+  // ✅ MOD: “respiro” a destra così la linea non muore sul bordo
+  if (pts.length >= 2){
+    const xMin = pts[0].x;
+    const xMax = pts[pts.length - 1].x;
+    const rightPadMs = 25_000;
 
-  let yMin = null, yMax = null;
-  for (const p of pts){
-    if (yMin == null || p.y < yMin) yMin = p.y;
-    if (yMax == null || p.y > yMax) yMax = p.y;
+    netWorthChart.options.scales.x.min = xMin;
+    netWorthChart.options.scales.x.max = xMax + rightPadMs;
+  } else {
+    netWorthChart.options.scales.x.min = undefined;
+    netWorthChart.options.scales.x.max = undefined;
   }
-  if (yMin == null || yMax == null) { yMin = 0; yMax = 1; }
-  const pad = Math.max(1, (yMax - yMin) * 0.08);
-  yMin -= pad; yMax += pad;
-
-  netWorthChart.options.scales.x.min = xMin;
-  netWorthChart.options.scales.x.max = xMax;
-  netWorthChart.options.scales.y.min = yMin;
-  netWorthChart.options.scales.y.max = yMax;
 
   netWorthChart.update("none");
 
-  // ✅ PnL based on visible range
   if (pts.length >= 2){
     const first = safe(pts[0].y);
     const last = safe(pts[pts.length - 1].y);
@@ -1863,64 +1764,6 @@ function drawNW(withLivePointUsd = null){
   }
 }
 
-/* ✅ keep last point following realtime without creating zig-zag */
-function nwUpdateLivePointRealtime(totalUsd){
-  if (!netWorthChart) return;
-  const ds = netWorthChart.data.datasets?.[0]?.data;
-  if (!Array.isArray(ds) || !ds.length) return;
-
-  const now = Date.now();
-  const xQ = Math.floor(now / 1000) * 1000;
-
-  const y = (Number.isFinite(nwChartSmoothUsd) && nwLastSmoothInit)
-    ? nwChartSmoothUsd
-    : safe(totalUsd);
-
-  ds[ds.length - 1] = { x: xQ, y };
-  netWorthChart.update("none");
-}
-
-function attachNWChartInteractions(){
-  const canvas = $("netWorthChart");
-  if (!canvas || !netWorthChart) return;
-
-  const getNearestPoint = (evt) => {
-    const points = netWorthChart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, false);
-    if (!points || !points.length) return null;
-    const idx = points[0].index;
-    const d = netWorthChart.data.datasets?.[0]?.data?.[idx];
-    if (!d) return null;
-    return { x: safe(d.x), y: safe(d.y) };
-  };
-
-  const enter = (pt) => {
-    if (!pt) return;
-    nwInteract = true;
-    nwHoverUsd = pt.y;
-    nwHoverTs = pt.x;
-  };
-
-  const move = (evt) => {
-    const pt = getNearestPoint(evt);
-    if (!pt) return;
-    enter(pt);
-  };
-
-  const leave = () => {
-    nwInteract = false;
-    nwHoverUsd = null;
-    nwHoverTs = null;
-  };
-
-  canvas.addEventListener("mousemove", move, { passive: true });
-  canvas.addEventListener("mouseleave", leave, { passive: true });
-
-  canvas.addEventListener("touchstart", (e) => move(e), { passive: true });
-  canvas.addEventListener("touchmove", (e) => move(e), { passive: true });
-  canvas.addEventListener("touchend", leave, { passive: true });
-  canvas.addEventListener("touchcancel", leave, { passive: true });
-}
-
 function recordNetWorthPoint(){
   if (!address) return;
   if (!Number.isFinite(targetPrice) || targetPrice <= 0) return;
@@ -1944,7 +1787,7 @@ function recordNetWorthPoint(){
   nwInjAll.push(totalInj);
   clampNWArrays();
   saveNW();
-  drawNW(totalUsd);
+  drawNW();
 }
 
 function attachNWTFHandlers(){
@@ -1963,7 +1806,7 @@ function attachNWTFHandlers(){
     nwTf = tf;
     btns.forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
     saveNW();
-    drawNW(displayed.netWorthUsd);
+    drawNW();
   }, { passive:true });
 }
 
@@ -2012,11 +1855,6 @@ async function commitAddress(newAddr) {
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0;
 
-  // reset interaction state
-  nwInteract = false; nwHoverUsd = null; nwHoverTs = null;
-  nwLastSmoothInit = false;
-  nwChartSmoothUsd = 0;
-
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -2033,7 +1871,7 @@ async function commitAddress(newAddr) {
 
   loadNW();
   attachNWTFHandlers();
-  drawNW(displayed.netWorthUsd);
+  drawNW();
 
   modeLoading = true;
   refreshConnUI();
@@ -2108,7 +1946,7 @@ window.addEventListener("offline", () => {
 
   if (address) loadNW();
   attachNWTFHandlers();
-  drawNW(displayed.netWorthUsd);
+  drawNW();
 
   modeLoading = true;
   refreshConnUI();
@@ -2255,35 +2093,16 @@ function animate() {
 
   /* ================= NET WORTH UI ================= */
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
-  const totalUsdRealtime = totalInj * safe(displayed.price);
-
-  // ✅ smooth only for chart (low-pass)
-  if (!nwLastSmoothInit) {
-    nwChartSmoothUsd = Number.isFinite(totalUsdRealtime) ? totalUsdRealtime : 0;
-    nwLastSmoothInit = true;
-  } else {
-    const alpha = 0.12; // more smooth
-    nwChartSmoothUsd = nwChartSmoothUsd + (totalUsdRealtime - nwChartSmoothUsd) * alpha;
-  }
-
-  // ✅ if user interacts with chart: temporarily show hovered value, then back to realtime
-  const shownUsd = (nwInteract && Number.isFinite(nwHoverUsd)) ? nwHoverUsd : totalUsdRealtime;
+  const totalUsd = totalInj * safe(displayed.price);
 
   const onw = displayed.netWorthUsd;
-  displayed.netWorthUsd = tick(displayed.netWorthUsd, shownUsd);
+  displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
   colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
 
   /* ✅ FIX "2 INJ": qui SOLO il totale mostra 'INJ', la riga coin mostra solo numero */
   setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
   setText("nwInjQty", totalInj.toFixed(4));            // no ticker
   setText("nwInjPx", `$${safe(displayed.price).toFixed(2)}`);
-
-  // ✅ update chart last dot realtime without jaggedness
-  if (netWorthChart) {
-    nwUpdateLivePointRealtime(totalUsdRealtime);
-  } else {
-    drawNW(totalUsdRealtime);
-  }
 
   if (address && liveMode) recordNetWorthPoint();
 
