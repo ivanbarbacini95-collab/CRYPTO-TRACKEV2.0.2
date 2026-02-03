@@ -50,8 +50,9 @@
     </div>
   </aside>
 
-  <div class="coming-soon" id="comingSoon" aria-hidden="true">
-    <div class="coming-card">
+  <!-- Coming Soon dialog (accessibility pro) -->
+  <div class="coming-soon" id="comingSoon" aria-hidden="true" role="dialog" aria-modal="true">
+    <div class="coming-card" role="document" aria-labelledby="comingTitle" aria-describedby="comingSub">
       <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
       <div class="coming-sub" id="comingSub">—</div>
       <button class="coming-close" id="comingClose" type="button">Chiudi</button>
@@ -64,7 +65,7 @@
       <div class="header-grid">
 
         <div class="header-left">
-          <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
+          <button class="menu-btn" id="menuBtn" aria-label="Menu" aria-expanded="false" aria-controls="drawer">≡</button>
         </div>
 
         <div class="header-center">
@@ -72,13 +73,20 @@
             <span class="title-full">Injective <span class="dot">•</span> Portfolio</span>
             <span class="title-compact" aria-hidden="true">I<span class="dot">•</span>P</span>
           </h1>
-          <div class="subtitle" id="subtitle">Realtime staking & rewards dashboard</div>
+          <div class="subtitle" id="subtitle">Real-time staking & rewards dashboard</div>
         </div>
 
         <div class="header-right">
           <div class="search-wrap" id="searchWrap">
             <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
-            <input id="addressInput" placeholder="Enter Injective address (inj...)" autocomplete="off" />
+
+            <!-- label accessibile (sr-only) -->
+            <label class="sr-only" for="addressInput">Injective address</label>
+            <input id="addressInput"
+                   placeholder="Enter Injective address (inj...)"
+                   autocomplete="off"
+                   spellcheck="false"
+                   inputmode="text" />
           </div>
         </div>
       </div>
@@ -95,13 +103,13 @@
 
     <div class="cards-wrapper">
 
-      <!-- 1) NET WORTH (NEW: spacing + realtime chart + TF + ALL + LIN/LOG + mini INJ zone) -->
+      <!-- 1) NET WORTH -->
       <div class="card networth-card" id="netWorthCard">
 
         <div class="networth-top">
           <div class="label networth-title">Net Worth</div>
 
-          <!-- NEW: small scale toggle top-right -->
+          <!-- scale toggle -->
           <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
         </div>
 
@@ -123,7 +131,7 @@
             <button class="tf-btn" data-tf="all" type="button">ALL</button>
           </div>
 
-          <!-- NEW: mini zone under TF -->
+          <!-- mini asset zone -->
           <div class="networth-asset">
             <span class="nw-asset-icon">🟣</span>
             <span class="nw-asset-name">Injective</span>
