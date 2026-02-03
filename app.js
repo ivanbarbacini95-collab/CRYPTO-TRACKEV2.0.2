@@ -81,7 +81,10 @@ function setStatusError(msg){
   const statusText = $("statusText");
   const statusDot = $("statusDot");
   if (statusText) statusText.textContent = msg || "Error";
-  if (statusDot) statusDot.style.background = "#ef4444";
+  if (statusDot) {
+    statusDot.style.background = "#ef4444";
+    statusDot.style.animation = "pulse 0.9s infinite";
+  }
 }
 
 window.addEventListener("error", (e) => {
@@ -214,6 +217,14 @@ let accountOnline = false;
 
 function hasInternet() { return navigator.onLine === true; }
 
+function setDot(color, pulseMode = "off"){
+  if (!statusDot) return;
+  statusDot.style.background = color;
+  if (pulseMode === "fast") statusDot.style.animation = "pulse 0.9s infinite";
+  else if (pulseMode === "slow") statusDot.style.animation = "pulse 2.2s infinite";
+  else statusDot.style.animation = "none";
+}
+
 /* ✅ Determine if LIVE is truly "ready" */
 function liveReady(){
   const socketsOk = wsTradeOnline && wsKlineOnline;
@@ -222,16 +233,16 @@ function liveReady(){
 }
 
 /* ✅ Status dot logic:
-   - No internet => red
-   - Loading (switching / fetching) => orange
-   - Ready => green
+   - No internet => red (fast pulse)
+   - Loading (switching / fetching) => orange (slow pulse)
+   - Ready => green (no pulse)
 */
 function refreshConnUI() {
   if (!statusDot || !statusText) return;
 
   if (!hasInternet()) {
     statusText.textContent = "Offline";
-    statusDot.style.background = "#ef4444";
+    setDot("#ef4444", "fast");
     return;
   }
 
@@ -243,12 +254,12 @@ function refreshConnUI() {
 
   if (loadingNow) {
     statusText.textContent = "Loading...";
-    statusDot.style.background = "#f59e0b"; // orange
+    setDot("#f59e0b", "slow");
     return;
   }
 
   statusText.textContent = "Online";
-  statusDot.style.background = "#22c55e"; // green
+  setDot("#22c55e", "off");
 }
 
 /* ================= UI READY FAILSAFE ================= */
@@ -442,12 +453,14 @@ function openDrawer(){
   document.body.classList.add("drawer-open");
   drawer?.setAttribute("aria-hidden", "false");
   backdrop?.setAttribute("aria-hidden", "false");
+  menuBtn?.setAttribute?.("aria-expanded", "true");
 }
 function closeDrawer(){
   isDrawerOpen = false;
   document.body.classList.remove("drawer-open");
   drawer?.setAttribute("aria-hidden", "true");
   backdrop?.setAttribute("aria-hidden", "true");
+  menuBtn?.setAttribute?.("aria-expanded", "false");
 }
 function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
 
@@ -487,6 +500,7 @@ function openComingSoon(pageKey){
   if (comingSub) comingSub.textContent = `${pageLabel(pageKey)} is coming soon.`;
   comingSoon.classList.add("show");
   comingSoon.setAttribute("aria-hidden", "false");
+  setTimeout(() => comingClose?.focus?.(), 10);
 }
 function closeComingSoon(){
   if (!comingSoon) return;
@@ -1536,6 +1550,7 @@ function maybeRecordRewardWithdrawal(newRewards) {
 
 /* ================= NET WORTH (persist + chart) ================= */
 let nwTf = "1d";
+let nwScale = "linear"; // linear | logarithmic
 let nwTAll = [];
 let nwUsdAll = [];
 let nwInjAll = [];
@@ -1545,6 +1560,12 @@ let nwHoverActive = false;
 let nwHoverIndex = null;
 let nwPinnedIndex = null;
 let nwViewTimes = []; // times corresponding to current view
+
+/* ✅ performance: redraw only when needed */
+let nwDirty = true;
+
+/* hover delay (more native feel) */
+let nwHoverTimer = null;
 
 function nwStoreKey(addr){
   const a = (addr || "").trim();
@@ -1559,7 +1580,8 @@ function saveNW(){
       tAll: nwTAll,
       usdAll: nwUsdAll,
       injAll: nwInjAll,
-      tf: nwTf
+      tf: nwTf,
+      scale: nwScale
     }));
     cloudBump(1);
   } catch {
@@ -1579,14 +1601,18 @@ function loadNW(){
     nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
     nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
     nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
-    nwTf = (obj.tf === "1w" || obj.tf === "1m" || obj.tf === "1y") ? obj.tf : "1d";
+
+    nwTf = (obj.tf === "1w" || obj.tf === "1m" || obj.tf === "1y" || obj.tf === "all") ? obj.tf : "1d";
+    nwScale = (obj.scale === "logarithmic") ? "logarithmic" : "linear";
 
     clampNWArrays();
+    nwDirty = true;
     return true;
   } catch {
     return false;
   }
 }
+
 function clampNWArrays(){
   const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
   nwTAll = nwTAll.slice(-n);
@@ -1598,18 +1624,25 @@ function clampNWArrays(){
     nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
   }
 }
+
 function nwWindowMs(tf){
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
+  if (tf === "all") return Infinity;
   return 24 * 60 * 60 * 1000;
+}
+
+function nwLabelForTime(tf, t){
+  if (tf === "1y" || tf === "all") return new Date(t).toLocaleDateString();
+  return fmtHHMM(t);
 }
 
 /* ✅ view: include times + labels (avoid 0 balzi: NEVER push 0, spanGaps) */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
-  const minT = now - w;
+  const minT = (w === Infinity) ? -Infinity : (now - w);
 
   const labels = [];
   const data = [];
@@ -1620,7 +1653,7 @@ function nwBuildView(tf){
     const u = safe(nwUsdAll[i]);
     if (t >= minT && Number.isFinite(u) && u > 0) {
       times.push(t);
-      labels.push(tf === "1y" ? new Date(t).toLocaleDateString() : fmtHHMM(t));
+      labels.push(nwLabelForTime(tf, t));
       data.push(u);
     }
   }
@@ -1755,20 +1788,20 @@ function initNWChart(){
         legend: { display: false },
         tooltip: { enabled: false },
 
+        // ✅ decimation: less noise + better perf
+        decimation: { enabled: true, algorithm: "lttb", samples: 180 },
+
         ...(ZOOM_OK ? {
           zoom: {
             pan: {
               enabled: true,
               mode: "x",
-              threshold: 2,
-              onPanStart: () => {},
-              onPanComplete: () => {}
+              threshold: 2
             },
             zoom: {
               wheel: { enabled: true },
               pinch: { enabled: true },
-              mode: "x",
-              onZoomComplete: () => {}
+              mode: "x"
             }
           }
         } : {})
@@ -1790,6 +1823,7 @@ function initNWChart(){
           border: { display: false }
         },
         y: {
+          type: nwScale,
           position: "right",
           ticks: {
             mirror: false,
@@ -1807,18 +1841,26 @@ function initNWChart(){
   });
 
   attachNWInteractions();
+  syncNWScaleButton();
 }
 
-function drawNW(){
+function drawNW(force=false){
   if (!netWorthChart) initNWChart();
   if (!netWorthChart) return;
+
+  if (!force && !nwDirty) return;
 
   const view = nwBuildView(nwTf);
   nwViewTimes = view.times;
 
   netWorthChart.data.labels = view.labels;
   netWorthChart.data.datasets[0].data = view.data;
+
+  // keep scale type synced
+  netWorthChart.options.scales.y.type = nwScale;
+
   netWorthChart.update("none");
+  nwDirty = false;
 
   if (view.data.length >= 2){
     const first = safe(view.data[0]);
@@ -1879,7 +1921,6 @@ function nwShowHoverValue(idx){
 }
 
 function nwRestoreRealtimeValue(){
-  // restores on next animate tick (we just mark hover as off)
   nwHoverActive = false;
   nwHoverIndex = null;
   nwPinnedIndex = null;
@@ -1892,14 +1933,19 @@ function attachNWInteractions(){
   const onMove = (evt) => {
     const idx = nwGetIndexFromEvent(evt);
     if (idx == null) return;
-    nwHoverActive = true;
-    nwHoverIndex = idx;
-    nwPinnedIndex = idx;
-    nwShowHoverValue(idx);
-    netWorthChart.update("none");
+
+    clearTimeout(nwHoverTimer);
+    nwHoverTimer = setTimeout(() => {
+      nwHoverActive = true;
+      nwHoverIndex = idx;
+      nwPinnedIndex = idx;
+      nwShowHoverValue(idx);
+      netWorthChart.update("none");
+    }, 80);
   };
 
   const onLeave = () => {
+    clearTimeout(nwHoverTimer);
     nwRestoreRealtimeValue();
     netWorthChart.update("none");
   };
@@ -1911,6 +1957,24 @@ function attachNWInteractions(){
   canvas.addEventListener("touchmove", (e) => onMove(e), { passive: true });
   canvas.addEventListener("touchend", onLeave, { passive: true });
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
+}
+
+/* scale toggle */
+function syncNWScaleButton(){
+  const btn = $("nwScaleToggle");
+  if (!btn) return;
+  btn.textContent = (nwScale === "logarithmic") ? "LOG" : "LIN";
+}
+function attachNWScaleHandler(){
+  const btn = $("nwScaleToggle");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    nwScale = (nwScale === "linear") ? "logarithmic" : "linear";
+    syncNWScaleButton();
+    saveNW();
+    nwDirty = true;
+    drawNW(true);
+  }, { passive: true });
 }
 
 function recordNetWorthPoint(){
@@ -1931,18 +1995,21 @@ function recordNetWorthPoint(){
 
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
+  const pct = lastUsd ? (dUsd / lastUsd) : 0;
 
-  // ✅ densità punti AL MASSIMO (senza esplodere): ogni 5s o se cambia di $0.25
-  if (lastT && dt < 5_000 && dUsd < 0.25) return;
+  // ✅ densità adattiva: ogni 5s o se cambia di 0.03% (e comunque almeno $0.10)
+  if (lastT && dt < 5_000 && pct < 0.0003 && dUsd < 0.10) return;
 
   nwTAll.push(now);
   nwUsdAll.push(totalUsd);
   nwInjAll.push(totalInj);
   clampNWArrays();
   saveNW();
-  drawNW();
+
+  nwDirty = true;
 }
 
+/* timeframe buttons */
 function attachNWTFHandlers(){
   const wrap = $("nwTfSwitch");
   if (!wrap) return;
@@ -1954,12 +2021,13 @@ function attachNWTFHandlers(){
     const btn = e.target?.closest(".tf-btn");
     if (!btn) return;
     const tf = btn.dataset.tf || "1d";
-    if (!["1d","1w","1m","1y"].includes(tf)) return;
+    if (!["1d","1w","1m","1y","all"].includes(tf)) return;
 
     nwTf = tf;
     btns.forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
     saveNW();
-    drawNW();
+    nwDirty = true;
+    drawNW(true);
   }, { passive:true });
 }
 
@@ -2023,7 +2091,9 @@ async function commitAddress(newAddr) {
 
   loadNW();
   attachNWTFHandlers();
-  drawNW();
+  attachNWScaleHandler();
+  nwDirty = true;
+  drawNW(true);
 
   modeLoading = true;
   refreshConnUI();
@@ -2098,7 +2168,9 @@ window.addEventListener("offline", () => {
 
   if (address) loadNW();
   attachNWTFHandlers();
-  drawNW();
+  attachNWScaleHandler();
+  nwDirty = true;
+  drawNW(true);
 
   modeLoading = true;
   refreshConnUI();
@@ -2122,6 +2194,8 @@ window.addEventListener("offline", () => {
 })();
 
 /* ================= LOOP ================= */
+let nwBlinkLastDraw = 0;
+
 function animate() {
   // PRICE
   const op = displayed.price;
@@ -2247,28 +2321,37 @@ function animate() {
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
+  // ✅ mini asset zone under TF (match your HTML ids)
+  setText("nwAssetQty", totalInj.toFixed(4));
+  setText("nwAssetPrice", `$${safe(displayed.price).toFixed(2)}`);
+  setText("nwAssetUsd", `$${safe(totalUsd).toFixed(2)}`);
+
+  // ✅ single INJ line bottom
+  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+
   // ✅ se stai interagendo, non sovrascrivere: lascia il valore puntato
   if (!nwHoverActive) {
     const onw = displayed.netWorthUsd;
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
 
-    // ✅ PnL ritorna realtime (drawNW la tiene aggiornata)
-    drawNW();
+    // draw only when dirty
+    drawNW(false);
   }
-
-  /* ✅ FIX "2 INJ": qui SOLO il totale mostra 'INJ', la riga coin mostra solo numero */
-  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
-  setText("nwInjQty", totalInj.toFixed(4));
-  setText("nwInjPx", `$${safe(displayed.price).toFixed(2)}`);
 
   // densità: registra spesso (solo live + address)
   if (address && liveMode) recordNetWorthPoint();
 
   refreshConnUI();
 
-  // ✅ keep the blinking dot fluid even without data updates
-  if (netWorthChart) netWorthChart.draw();
+  // ✅ keep blinking dot fluid (throttled)
+  if (netWorthChart) {
+    const t = performance.now();
+    if (t - nwBlinkLastDraw > 33) { // ~30fps
+      nwBlinkLastDraw = t;
+      try { netWorthChart.draw(); } catch {}
+    }
+  }
 
   requestAnimationFrame(animate);
 }
