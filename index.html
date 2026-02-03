@@ -2,454 +2,457 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
   <title>Injective • Portfolio</title>
 
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" />
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+  <!-- Chart.js + Zoom plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 
+  <!-- App -->
   <script src="app.js" defer></script>
 </head>
-<body>
 
-  <!-- BACKDROP + DRAWER -->
+<body data-theme="dark">
+  <!-- Backdrop for drawer -->
   <div class="backdrop" id="backdrop" aria-hidden="true"></div>
 
+  <!-- Drawer -->
   <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-top">
       <div class="drawer-title">Menu</div>
 
       <div class="drawer-toggles">
-        <button class="toggle-btn" id="themeToggle" aria-label="Tema">
-          <span id="themeIcon">🌙</span>
+        <button class="toggle-btn" id="themeToggle" type="button" aria-label="Theme">
+          <span class="toggle-ico" id="themeIcon">🌙</span>
         </button>
 
-        <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
-          <span id="liveIcon">📡</span>
+        <button class="toggle-btn" id="liveToggle" type="button" aria-label="Mode">
+          <span class="toggle-ico" id="liveIcon">📡</span>
         </button>
       </div>
+
+      <div class="drawer-hint" id="modeHint">Mode: LIVE</div>
     </div>
 
-    <nav class="drawer-nav" id="drawerNav">
-      <button class="nav-item" data-page="home">HOME</button>
-      <button class="nav-item" data-page="market">MARKET</button>
-      <button class="nav-item active" data-page="dashboard">MY DASHBOARD</button>
-      <button class="nav-item" data-page="event">EVENT</button>
+    <nav class="drawer-nav" id="drawerNav" aria-label="Navigation">
+      <button class="nav-item" type="button" data-page="home">
+        <span class="nav-ico">🏠</span>
+        <span class="nav-txt">Home</span>
+      </button>
 
-      <div class="nav-spacer"></div>
+      <button class="nav-item" type="button" data-page="market">
+        <span class="nav-ico">📈</span>
+        <span class="nav-txt">Market</span>
+      </button>
 
-      <button class="nav-item settings-item" data-page="settings">
-        SETTINGS
-        <span class="nav-version">v2.0.2</span>
+      <button class="nav-item active" type="button" data-page="dashboard">
+        <span class="nav-ico">🧩</span>
+        <span class="nav-txt">My Dashboard</span>
+      </button>
+
+      <button class="nav-item" type="button" data-page="event">
+        <span class="nav-ico">🗂️</span>
+        <span class="nav-txt">Event</span>
+      </button>
+
+      <button class="nav-item" type="button" data-page="settings">
+        <span class="nav-ico">⚙️</span>
+        <span class="nav-txt">Settings</span>
       </button>
     </nav>
 
-    <!-- Footer menu: Mode + Cloud Sync -->
     <div class="drawer-foot">
-      <div class="drawer-hint" id="modeHint">Mode: LIVE</div>
-
-      <div class="drawer-meta">
-        <div class="drawer-meta-row">
-          <span class="drawer-meta-label">App</span>
-          <span class="drawer-meta-value">v2.0.2</span>
-        </div>
-
-        <div class="drawer-meta-row">
-          <span class="drawer-meta-label">Cloud Sync</span>
-          <span class="drawer-meta-value">
-            <span class="cloud-dot" id="cloudMenuDot" aria-hidden="true"></span>
-            <span id="cloudMenuStatus">—</span>
-          </span>
-        </div>
-
-        <div class="drawer-meta-row">
-          <span class="drawer-meta-label">Last sync</span>
-          <span class="drawer-meta-value" id="cloudMenuLast">—</span>
-        </div>
-      </div>
+      <!-- JS injects: App v2.0.2 + Cloud status -->
     </div>
   </aside>
 
-  <!-- COMING SOON OVERLAY (per Home/Market/Settings) -->
+  <!-- Coming soon overlay -->
   <div class="coming-soon" id="comingSoon" aria-hidden="true">
-    <div class="coming-card">
+    <div class="coming-card" role="dialog" aria-modal="true" aria-label="Coming soon">
+      <div class="coming-emoji">🚀</div>
       <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
-      <div class="coming-sub" id="comingSub">—</div>
-      <button class="coming-close" id="comingClose" type="button">Chiudi</button>
+      <div class="coming-sub" id="comingSub">This page is coming soon.</div>
+      <button class="coming-close" id="comingClose" type="button">Close</button>
     </div>
   </div>
 
-  <!-- EVENT TOAST (compare dall’alto, dura ~2s) -->
-  <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
-
-  <!-- APP ROOT -->
+  <!-- App Root -->
   <div class="container loading" id="appRoot">
-
-    <!-- HEADER -->
-    <div class="header">
+    <!-- Header -->
+    <header class="header">
       <div class="header-grid">
+        <!-- LEFT: Menu -->
         <div class="header-left">
-          <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
+          <button class="menu-btn" id="menuBtn" type="button" aria-label="Menu">
+            <span class="menu-ico">☰</span>
+          </button>
         </div>
 
-        <!-- TITOLO centrato -->
+        <!-- CENTER: Search -->
         <div class="header-center">
-          <h1 class="brand-title">
-            <span class="title-full">Injective <span class="dot">•</span> Portfolio</span>
-            <span class="title-compact" aria-hidden="true">I<span class="dot">•</span>P</span>
-          </h1>
-          <div class="subtitle" id="subtitle">Realtime staking & rewards dashboard</div>
-        </div>
-
-        <div class="header-right">
           <div class="search-wrap" id="searchWrap">
-            <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
-            <input id="addressInput" placeholder="Enter Injective address (inj...)" autocomplete="off" />
+            <button class="search-btn" id="searchBtn" type="button" aria-label="Search wallet">
+              <span class="search-ico">🔍</span>
+            </button>
+
+            <input
+              class="search-input"
+              id="addressInput"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Enter Injective address (inj...)"
+              aria-label="Wallet address"
+            />
+          </div>
+
+          <div class="address-display" id="addressDisplay"></div>
+        </div>
+
+        <!-- RIGHT: Status -->
+        <div class="header-right">
+          <div class="status">
+            <span class="dot" id="statusDot" aria-hidden="true"></span>
+            <span class="status-text" id="statusText">Loading…</span>
           </div>
         </div>
       </div>
+    </header>
 
-      <div class="header-meta-right">
-        <!-- Wallet “in evidenza” a sinistra di status -->
-        <div id="addressDisplay" class="address-display"></div>
-
-        <div class="connection-status" id="connectionStatus">
-          <span class="status-dot" id="statusDot"></span>
-          <span class="status-text" id="statusText">Offline</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- PAGES -->
-    <main class="pages" id="pages">
-
-      <!-- ========== DASHBOARD PAGE ========== -->
-      <section class="page page-dashboard active" id="pageDashboard" data-page="dashboard" aria-hidden="false">
-
-        <div class="cards-wrapper">
-
-          <!-- 1) NET WORTH -->
-          <div class="card networth-card" id="netWorthCard">
-
-            <div class="networth-top">
-              <div class="label networth-title">Net Worth</div>
-
-              <!-- expand icon (piccola, non invade) -->
-              <button class="card-expand" id="nwExpand" type="button" aria-label="Expand Net Worth">⤢</button>
-            </div>
-
-            <!-- scale toggle sotto (separato dall’expand) -->
-            <div class="networth-top2">
-              <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
-
-              <!-- LIVE toggle dedicato al net worth -->
-              <button class="nw-live-btn" id="nwLiveToggle" type="button" aria-label="Net worth live toggle">
-                LIVE
-              </button>
-            </div>
-
-            <div class="networth-metrics">
-              <div class="networth-usd" id="netWorthUsd">$0.00</div>
-              <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
-            </div>
-
-            <div class="networth-chart">
-              <canvas id="netWorthChart"></canvas>
-            </div>
-
-            <div class="networth-tf">
-              <div class="tf-switch" id="nwTfSwitch">
-                <button class="tf-btn active" data-tf="live" type="button" id="tfLiveBtn">LIVE</button>
-                <button class="tf-btn" data-tf="1d" type="button">1D</button>
-                <button class="tf-btn" data-tf="1w" type="button">1W</button>
-                <button class="tf-btn" data-tf="1m" type="button">1M</button>
-                <button class="tf-btn" data-tf="1y" type="button">1Y</button>
-                <button class="tf-btn" data-tf="all" type="button">ALL</button>
+    <!-- Main -->
+    <main class="main">
+      <div class="cards-wrapper">
+        <!-- PRICE CARD -->
+        <section class="card" id="priceCard">
+          <div class="card-top">
+            <div class="card-title">
+              <div class="card-title-row">
+                <div class="card-name">INJ Price</div>
+                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
               </div>
 
-              <!-- mini asset row: logo Injective + qty/price/usd -->
-              <div class="networth-asset">
-                <img
-                  class="inj-logo"
-                  src="https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png"
-                  alt="Injective"
-                  loading="lazy"
-                />
-                <span class="nw-asset-name">Injective</span>
-
-                <span class="nw-asset-qty" id="nwAssetQty">0.0000</span>
-                <span class="nw-asset-mid">INJ</span>
-                <span class="nw-asset-sep">·</span>
-                <span class="nw-asset-price" id="nwAssetPrice">$0.00</span>
-                <span class="nw-asset-sep">→</span>
-                <span class="nw-asset-usd" id="nwAssetUsd">$0.00</span>
-              </div>
-            </div>
-
-            <div class="networth-foot">
-
-              <!-- box 1: Total owned -->
-              <div class="nw-mini nw-mini-single">
-                <div class="nw-mini-left">
-                  <img
-                    class="nw-coin-logo-img"
-                    src="https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png"
-                    alt="INJ"
-                    loading="lazy"
-                  />
-                  <div class="nw-mini-meta">
-                    <div class="nw-mini-title">INJ</div>
-                    <div class="nw-mini-sub">Total owned (staked + available + rewards)</div>
+              <div class="price-line">
+                <div class="price-value" id="price">--</div>
+                <div class="price-perf">
+                  <div class="perf">
+                    <span class="arrow" id="arrow24h">►</span>
+                    <span class="pct" id="pct24h">0.00%</span>
+                    <span class="perf-label">24H</span>
+                  </div>
+                  <div class="perf">
+                    <span class="arrow" id="arrowWeek">►</span>
+                    <span class="pct" id="pctWeek">0.00%</span>
+                    <span class="perf-label">1W</span>
+                  </div>
+                  <div class="perf">
+                    <span class="arrow" id="arrowMonth">►</span>
+                    <span class="pct" id="pctMonth">0.00%</span>
+                    <span class="perf-label">1M</span>
                   </div>
                 </div>
-                <div class="nw-mini-right">
-                  <div class="nw-mini-qty" id="netWorthInj">0.0000 INJ</div>
-                </div>
               </div>
+            </div>
+          </div>
 
-              <!-- box 2: Validator (solo UI, i dati arrivano dal JS) -->
-              <div class="nw-mini nw-mini-validator" id="validatorCard">
-                <div class="nw-mini-left">
-                  <img
-                    class="nw-coin-logo-img"
-                    src="https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png"
-                    alt="Validator"
-                    loading="lazy"
-                  />
-                  <div class="nw-mini-meta">
-                    <div class="nw-mini-title">Validator</div>
-                    <div class="nw-mini-sub" id="validatorName">—</div>
-                  </div>
-                </div>
-
-                <div class="nw-mini-right validator-right">
-                  <span class="validator-dot" id="validatorDot" aria-hidden="true"></span>
-                </div>
+          <!-- Bars -->
+          <div class="bars">
+            <div class="bar-block">
+              <div class="bar-head">
+                <span class="bar-label">24H</span>
+                <span class="bar-minmax">
+                  <span class="mm"><span class="mm-l">L</span> <span id="priceMin">--</span></span>
+                  <span class="mm"><span class="mm-l">O</span> <span id="priceOpen">--</span></span>
+                  <span class="mm"><span class="mm-l">H</span> <span id="priceMax">--</span></span>
+                </span>
               </div>
-
-            </div>
-          </div>
-
-          <!-- 2) AVAILABLE -->
-          <div class="card">
-            <div class="label">Available</div>
-            <div class="value-row"><span id="available">0.000000</span></div>
-            <div class="sub-row" id="availableUsd">≈ $0.00</div>
-          </div>
-
-          <!-- 3) STAKED -->
-          <div class="card stake-card">
-            <div class="label">Staked</div>
-            <div class="value-row"><span id="stake">0.0000</span></div>
-            <div class="sub-row" id="stakeUsd">≈ $0.00</div>
-
-            <div class="stake-bar-container bar-container stake-container">
-              <div id="stakeBar" class="bar-fill stake-fill"></div>
-              <div id="stakeLine" class="bar-line"></div>
-              <span id="stakePercent" class="stake-percent">0%</span>
-            </div>
-
-            <div class="bar-values stake-values">
-              <span id="stakeMin" class="left">0</span>
-              <span id="stakeMax" class="right">1000</span>
-            </div>
-
-            <div class="card-tools">
-              <button class="card-expand" id="stakeExpand" type="button" aria-label="Expand Staked">⤢</button>
-            </div>
-
-            <div class="stake-chart-wrap">
-              <canvas id="stakeChart"></canvas>
-            </div>
-          </div>
-
-          <!-- 4) REWARDS -->
-          <div class="card reward-card">
-            <div class="label">Rewards</div>
-            <div class="value-row"><span id="rewards">0.0000000</span></div>
-            <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
-
-            <div class="reward-bar-container bar-container reward-container">
-              <div id="rewardBar" class="bar-fill reward-fill"></div>
-              <div id="rewardLine" class="bar-line"></div>
-              <span id="rewardPercent" class="reward-percent">0%</span>
-            </div>
-
-            <div class="bar-values reward-values">
-              <span id="rewardMin" class="left">0</span>
-              <span id="rewardMax" class="right">0.1</span>
-            </div>
-
-            <div class="card-tools">
-              <button class="card-expand" id="rewardExpand" type="button" aria-label="Expand Rewards">⤢</button>
-            </div>
-
-            <div class="reward-chart-wrap">
-              <canvas id="rewardChart"></canvas>
-            </div>
-
-            <div class="reward-tools">
-              <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
-
-              <div class="mini-select-wrap">
-                <span class="mini-select-label">Filtro</span>
-                <select id="rewardFilter" class="mini-select">
-                  <option value="0">Tutti</option>
-                  <option value="0.00001">≥ 0.00001</option>
-                  <option value="0.00005">≥ 0.00005</option>
-                  <option value="0.0001">≥ 0.0001</option>
-                  <option value="0.0002">≥ 0.0002</option>
-                </select>
+              <div class="bar-container">
+                <div class="bar-fill" id="priceBar"></div>
+                <div class="bar-line" id="priceLine"></div>
               </div>
             </div>
 
-            <div class="reward-timeline">
-              <input id="rewardTimeline" type="range" min="0" max="0" value="0" />
-              <div class="reward-timeline-meta" id="rewardTimelineMeta">—</div>
+            <div class="bar-block">
+              <div class="bar-head">
+                <span class="bar-label">1W</span>
+                <span class="bar-minmax">
+                  <span class="mm"><span class="mm-l">L</span> <span id="weekMin">--</span></span>
+                  <span class="mm"><span class="mm-l">O</span> <span id="weekOpen">--</span></span>
+                  <span class="mm"><span class="mm-l">H</span> <span id="weekMax">--</span></span>
+                </span>
+              </div>
+              <div class="bar-container">
+                <div class="bar-fill" id="weekBar"></div>
+                <div class="bar-line" id="weekLine"></div>
+              </div>
+            </div>
+
+            <div class="bar-block">
+              <div class="bar-head">
+                <span class="bar-label">1M</span>
+                <span class="bar-minmax">
+                  <span class="mm"><span class="mm-l">L</span> <span id="monthMin">--</span></span>
+                  <span class="mm"><span class="mm-l">O</span> <span id="monthOpen">--</span></span>
+                  <span class="mm"><span class="mm-l">H</span> <span id="monthMax">--</span></span>
+                </span>
+              </div>
+              <div class="bar-container">
+                <div class="bar-fill" id="monthBar"></div>
+                <div class="bar-line" id="monthLine"></div>
+              </div>
             </div>
           </div>
 
-          <!-- 5) APR (card separata) -->
-          <div class="card">
-            <div class="label">APR</div>
-            <div class="value-row"><span id="apr">0%</span></div>
-          </div>
-
-          <!-- 6) 1D PRICE CHART -->
-          <div class="card chart-card">
-            <div class="label">1D Price Chart</div>
-
-            <div class="card-tools">
-              <button class="card-expand" id="priceChartExpand" type="button" aria-label="Expand 1D Price Chart">⤢</button>
+          <!-- 1D Chart -->
+          <div class="chart-wrap">
+            <div class="chart-overlay" id="chartOverlay" aria-hidden="true">
+              <div class="chart-overlay-text" id="chartPrice">--</div>
             </div>
-
-            <div class="chart-overlay" id="chartOverlay">
-              <span id="chartPrice">--</span>
-            </div>
-
             <canvas id="priceChart"></canvas>
           </div>
+        </section>
 
-          <!-- 7) INJ PRICE -->
-          <div class="card price-card">
-            <div class="label">INJ Price</div>
-            <div class="value-row"><span id="price">0.0000</span></div>
+        <!-- NET WORTH CARD -->
+        <section class="card" id="netWorthCard">
+          <div class="card-top">
+            <div class="card-title">
+              <div class="card-title-row">
+                <div class="card-name">Net Worth</div>
+                <div class="card-actions">
+                  <!-- Only scale button next to the value (JS wires it) -->
+                  <button class="nw-scale-btn" type="button" aria-label="Scale">LIN</button>
+                  <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
+                </div>
+              </div>
 
-            <div class="sub-row perf">
-              <span class="arrow" id="arrow24h">►</span>
-              <span class="pct" id="pct24h">0.00%</span>
-            </div>
-            <div class="price-bar-container bar-container">
-              <span class="bar-label">1D</span>
-              <div id="priceBar" class="bar-fill"></div>
-              <div class="open-marker" aria-hidden="true"></div>
-              <div id="priceLine" class="bar-line"></div>
-            </div>
-            <div class="bar-values">
-              <span id="priceMin" class="left">--</span>
-              <span id="priceOpen" class="center">--</span>
-              <span id="priceMax" class="right">--</span>
-            </div>
+              <div class="nw-head">
+                <div class="nw-usd" id="netWorthUsd">$0.00</div>
+                <div class="nw-pnl" id="netWorthPnl">PnL: —</div>
+              </div>
 
-            <div class="sub-row perf">
-              <span class="arrow" id="arrowWeek">►</span>
-              <span class="pct" id="pctWeek">0.00%</span>
-            </div>
-            <div class="week-bar-container bar-container">
-              <span class="bar-label">1W</span>
-              <div id="weekBar" class="bar-fill"></div>
-              <div class="open-marker" aria-hidden="true"></div>
-              <div id="weekLine" class="bar-line"></div>
-            </div>
-            <div class="bar-values">
-              <span id="weekMin" class="left">--</span>
-              <span id="weekOpen" class="center">--</span>
-              <span id="weekMax" class="right">--</span>
-            </div>
-
-            <div class="sub-row perf">
-              <span class="arrow" id="arrowMonth">►</span>
-              <span class="pct" id="pctMonth">0.00%</span>
-            </div>
-            <div class="month-bar-container bar-container">
-              <span class="bar-label">1M</span>
-              <div id="monthBar" class="bar-fill"></div>
-              <div class="open-marker" aria-hidden="true"></div>
-              <div id="monthLine" class="bar-line"></div>
-            </div>
-            <div class="bar-values">
-              <span id="monthMin" class="left">--</span>
-              <span id="monthOpen" class="center">--</span>
-              <span id="monthMax" class="right">--</span>
+              <!-- Timeframes -->
+              <div class="tf-switch" id="nwTfSwitch" aria-label="Net worth timeframes">
+                <button class="tf-btn active" type="button" data-tf="1d">1D</button>
+                <button class="tf-btn" type="button" data-tf="1w">1W</button>
+                <button class="tf-btn" type="button" data-tf="1m">1M</button>
+                <button class="tf-btn" type="button" data-tf="1y">1Y</button>
+                <button class="tf-btn" type="button" data-tf="all">ALL</button>
+                <!-- JS injects LIVE if missing -->
+              </div>
             </div>
           </div>
 
-        </div>
-      </section>
-
-      <!-- ========== EVENTS PAGE (dedicata) ========== -->
-      <section class="page page-events" id="pageEvents" data-page="event" aria-hidden="true">
-        <div class="events-head">
-          <div class="events-title">
-            <h2>Event</h2>
-            <div class="events-sub">On-chain actions + key price moves (24h)</div>
+          <div class="chart-wrap networth-chart">
+            <canvas id="netWorthChart"></canvas>
           </div>
 
-          <button class="events-clear" id="eventsClearBtn" type="button">Clear</button>
-        </div>
+          <!-- Mini cards (keep structure, JS updates IDs) -->
+          <div class="nw-mini-grid">
+            <div class="nw-mini">
+              <div class="nw-mini-label">INJ Total Owned</div>
+              <div class="nw-mini-val" id="netWorthInj">0.0000 INJ</div>
+              <div class="nw-mini-sub">
+                <span class="nw-coin-logo" aria-hidden="true"></span>
+                <span class="nw-mini-muted">Available + Staked + Rewards</span>
+              </div>
+            </div>
 
-        <div class="events-card">
-          <div class="events-table-wrap" id="eventsTableWrap">
-            <table class="events-table" aria-label="Event table">
-              <thead>
-                <tr>
-                  <th>Event</th>
-                  <th>Date</th>
-                  <th>Details</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="eventsTbody">
-                <!-- rows injected by JS -->
-              </tbody>
-            </table>
+            <!-- Second mini card kept for compatibility; can be hidden via CSS later -->
+            <div class="nw-mini is-empty">
+              <div class="nw-mini-label">—</div>
+              <div class="nw-mini-val">—</div>
+              <div class="nw-mini-sub">—</div>
+            </div>
           </div>
 
-          <div class="events-empty" id="eventsEmpty">
-            No events yet. They will appear here automatically.
+          <!-- Legacy asset row (kept for compatibility; you can hide via CSS) -->
+          <div class="networth-asset">
+            <div class="networth-asset-row">
+              <div class="networth-asset-left">
+                <span class="nw-asset-icon" aria-hidden="true"></span>
+                <div class="networth-asset-meta">
+                  <div class="networth-asset-name">Injective</div>
+                  <div class="networth-asset-sub">Total crypto</div>
+                </div>
+              </div>
+              <div class="networth-asset-right">
+                <div class="networth-asset-line">
+                  <span class="muted">Qty</span> <span id="nwAssetQty">0.0000</span>
+                </div>
+                <div class="networth-asset-line">
+                  <span class="muted">Price</span> <span id="nwAssetPrice">$0.00</span>
+                </div>
+                <div class="networth-asset-line">
+                  <span class="muted">Value</span> <span id="nwAssetUsd">$0.00</span>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
+        <!-- STAKED CARD -->
+        <section class="card" id="stakeCard">
+          <div class="card-top">
+            <div class="card-title">
+              <div class="card-title-row">
+                <div class="card-name">Staked</div>
+                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric-main">
+                  <div class="metric-val" id="stake">0.0000</div>
+                  <div class="metric-sub" id="stakeUsd">≈ $0.00</div>
+                </div>
+                <div class="metric-side">
+                  <div class="metric-chip">
+                    <span class="chip-label">Progress</span>
+                    <span class="chip-val" id="stakePercent">0.0%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bar-block">
+            <div class="bar-head">
+              <span class="bar-label">Target</span>
+              <span class="bar-minmax">
+                <span class="mm"><span class="mm-l">Min</span> <span id="stakeMin">0</span></span>
+                <span class="mm"><span class="mm-l">Max</span> <span id="stakeMax">1000</span></span>
+              </span>
+            </div>
+            <div class="bar-container">
+              <div class="bar-fill" id="stakeBar"></div>
+              <div class="bar-line" id="stakeLine"></div>
+              <!-- Gear injected by JS if missing -->
+            </div>
+          </div>
+
+          <div class="chart-wrap stake-chart-wrap">
+            <canvas id="stakeChart"></canvas>
+          </div>
+        </section>
+
+        <!-- REWARDS CARD -->
+        <section class="card" id="rewardCard">
+          <div class="card-top">
+            <div class="card-title">
+              <div class="card-title-row">
+                <div class="card-name">Rewards</div>
+                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric-main">
+                  <div class="metric-val" id="rewards">0.0000000</div>
+                  <div class="metric-sub" id="rewardsUsd">≈ $0.00</div>
+                </div>
+
+                <div class="metric-side">
+                  <!-- This button exists for JS (will be repurposed to LIN/LOG toggle) -->
+                  <button class="mini-btn" id="rewardLiveBtn" type="button">LIN</button>
+
+                  <select class="mini-select" id="rewardFilter" aria-label="Reward filter">
+                    <option value="all">All</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bar-block">
+            <div class="bar-head">
+              <span class="bar-label">Range</span>
+              <span class="bar-minmax">
+                <span class="mm"><span class="mm-l">Min</span> <span id="rewardMin">0</span></span>
+                <span class="mm"><span class="mm-l">Max</span> <span id="rewardMax">0.1</span></span>
+              </span>
+            </div>
+            <div class="bar-container">
+              <div class="bar-fill" id="rewardBar"></div>
+              <div class="bar-line" id="rewardLine"></div>
+              <!-- Gear injected by JS if missing -->
+            </div>
+          </div>
+
+          <div class="reward-meta-row">
+            <input
+              class="timeline"
+              id="rewardTimeline"
+              type="range"
+              min="0"
+              max="0"
+              value="0"
+              step="1"
+              aria-label="Reward timeline"
+            />
+            <div class="timeline-meta" id="rewardTimelineMeta">—</div>
+          </div>
+
+          <div class="chart-wrap reward-chart-wrap">
+            <canvas id="rewardChart"></canvas>
+          </div>
+        </section>
+
+        <!-- APR CARD (moved to bottom) -->
+        <section class="card" id="aprCard">
+          <div class="card-top">
+            <div class="card-title">
+              <div class="card-title-row">
+                <div class="card-name">APR</div>
+                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric-main">
+                  <div class="metric-val" id="apr">0.00%</div>
+                  <div class="metric-sub" id="updated">Last update: --</div>
+                </div>
+
+                <div class="metric-side">
+                  <div class="metric-chip">
+                    <span class="chip-label">Cloud</span>
+                    <span class="chip-val" id="cloudStatus">Cloud: —</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- (Optional future) APR chart can be added here later with a canvas -->
+              <!-- <div class="chart-wrap apr-chart-wrap"><canvas id="aprChart"></canvas></div> -->
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
 
-    <!-- LAST UPDATE in fondo pagina -->
-    <div id="updated" class="last-update">Last update: --:--</div>
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-grid">
+        <div class="footer-left">
+          <span class="foot-strong">v2.0.2</span>
+          <span class="foot-muted">·</span>
+          <span class="foot-muted" id="footerSync">Last sync</span>
+        </div>
 
-    <!-- Footer pro -->
-    <div class="pro-footer" id="proFooter">
-      <span class="pro-pill">INJ Portfolio</span>
-      <span class="pro-dot">•</span>
-      <span class="pro-meta">v2.0.2</span>
-      <span class="pro-dot">•</span>
-      <span class="pro-meta" id="cloudStatus">Cloud: —</span>
-      <span class="pro-meta cloud-points" id="cloudHistory">· 0 pts</span>
-    </div>
+        <div class="footer-center">
+          <span class="foot-muted">Data verified</span>
+          <span class="foot-muted">·</span>
+          <span class="foot-strong">Injective</span>
+        </div>
 
+        <div class="footer-right">
+          <span class="foot-muted">API</span>
+          <span class="foot-strong">Online</span>
+          <span class="foot-muted">·</span>
+          <span class="foot-muted">UTC+1</span>
+        </div>
+      </div>
+    </footer>
   </div>
-
-  <!--
-    ✅ HTML changes (v2.0.2):
-    - Added dedicated Events page (pageEvents + events table + clear button)
-    - Added toastHost for “event arrived” slide-down notifications
-    - Added Cloud Sync status area inside drawer menu (cloudMenuDot/cloudMenuStatus/cloudMenuLast)
-    - Fixed Coming Soon overlay structure (comingClose always present)
-    - Restored centered title layout
-    - Replaced purple dot with Injective high-res logo (Wikimedia PNG)
-    - Prepared expand buttons inside cards (⤢) without overlapping metrics
-    - Last update moved to bottom of the app
-  -->
 </body>
 </html>
