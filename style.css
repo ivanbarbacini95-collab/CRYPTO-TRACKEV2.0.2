@@ -935,3 +935,10 @@ body.card-expanded{ overflow:hidden; }
 .card.fullscreen canvas{
   height: calc(100% - 40px) !important;
 }
+
+.chart-card,
+.stake-chart-wrap,
+.reward-chart-wrap,
+.networth-chart { overflow: hidden; }
+
+canvas { display:block; }
