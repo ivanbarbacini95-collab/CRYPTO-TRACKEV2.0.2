@@ -1,5 +1,3 @@
-"use strict";
-
 /* ================= CONFIG ================= */
 const INITIAL_SETTLE_TIME = 4200;
 let settleStart = Date.now();
@@ -218,18 +216,14 @@ function setUIReady(force=false){
   root.classList.add("ready");
 }
 
-/* ================= SAFE FETCH (with timeout) ================= */
+/* ================= SAFE FETCH ================= */
 async function fetchJSON(url, opts={}) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 12_000);
   try {
-    const res = await fetch(url, { cache: "no-store", signal: ctrl.signal, ...opts });
+    const res = await fetch(url, { cache: "no-store", ...opts });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
   } catch {
     return null;
-  } finally {
-    clearTimeout(t);
   }
 }
 
@@ -496,12 +490,6 @@ function ensureEventPage(){
         </button>
       </div>
 
-      <div style="opacity:.78;font-weight:800;font-size:.80rem;margin:0 2px 10px 2px;line-height:1.35;">
-        Nota importante (onesta): la parte “flussi in/out da Exchange con nome exchange” non è affidabile solo con LCD + Binance price.
-        Serve un indexer / API transazioni (es. explorer/indexer Injective) che classifichi indirizzi CEX.
-        Qui salviamo eventi certi (reward withdraw, stake changes, APR changes, price thresholds ecc) e lasciamo un hook per collegare un indexer.
-      </div>
-
       <div id="eventTableWrap"
         style="border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.05);overflow:hidden;">
         <div style="display:grid;grid-template-columns: 1.2fr .9fr .9fr .55fr;gap:10px;
@@ -527,6 +515,7 @@ function ensureEventPage(){
     hideEventPage();
   }, { passive:false });
 
+  // click outside not used (it's full page), but Esc closes
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideEventPage();
   });
@@ -542,16 +531,19 @@ function showEventPage(){
   eventPage.style.display = "block";
   eventPage.setAttribute("aria-hidden","false");
 
+  // update subtitle
   const sub = eventPage.querySelector("#eventPageSub");
   if (sub) sub.textContent = address ? `Wallet: ${shortAddr(address)}` : "No wallet selected";
 
   renderEventRows();
 }
+
 function hideEventPage(){
   if (!eventPage) return;
   eventPage.style.display = "none";
   eventPage.setAttribute("aria-hidden","true");
 }
+
 function isEventPageOpen(){
   return !!eventPage && eventPage.style.display === "block";
 }
@@ -682,6 +674,7 @@ let cloudLastOk = 0;
 function cloudSetState(state){
   cloudState = state || "synced";
 
+  // footer
   const root = $("appRoot");
   const st = $("cloudStatus");
   if (root) root.classList.remove("cloud-synced","cloud-saving","cloud-error");
@@ -696,6 +689,7 @@ function cloudSetState(state){
     else st.textContent = "Cloud: Synced";
   }
 
+  // drawer (optional)
   const ds = $("drawerCloudStatus");
   if (ds) {
     if (!hasInternet()) ds.textContent = "Offline cache";
@@ -790,6 +784,8 @@ function uniqMergeByKey(items, keyFn){
 }
 
 function mergeSeriesArrays(localArrs, remoteArrs, max){
+  // merge by index alignment + clamp.
+  // For stake/wd (string labels), we merge by label+value key.
   const { labelsL, dataL, extra1L, extra2L } = localArrs;
   const { labelsR, dataR, extra1R, extra2R } = remoteArrs;
 
@@ -851,6 +847,7 @@ function mergeEvents(localItems, remoteItems){
 async function cloudHydrateAndMerge(){
   if (!address) return;
 
+  // local already loaded by normal loaders; now pull remote and merge
   cloudSetState(hasInternet() ? "saving" : "offline");
 
   const remote = await cloudPull();
@@ -860,6 +857,7 @@ async function cloudHydrateAndMerge(){
     return;
   }
 
+  // stake
   if (remote.stake) {
     const m = mergeSeriesArrays(
       { labelsL: stakeLabels, dataL: stakeData, extra1L: stakeMoves, extra2L: stakeTypes },
@@ -874,7 +872,9 @@ async function cloudHydrateAndMerge(){
     drawStakeChart();
   }
 
+  // wd
   if (remote.wd) {
+    // merge by time (best key)
     const LR = [];
     for (let i=0;i<wdTimesAll.length;i++) LR.push({t:safe(wdTimesAll[i]), l:String(wdLabelsAll[i]||""), v:safe(wdValuesAll[i])});
     const RR = [];
@@ -894,12 +894,14 @@ async function cloudHydrateAndMerge(){
     goRewardLive();
   }
 
+  // nw
   if (remote.nw) {
     mergeNW(null, remote.nw);
     saveNWLocalOnly();
     drawNW();
   }
 
+  // events
   if (remote.ev?.items) {
     eventsAll = mergeEvents(eventsAll, remote.ev.items);
     saveEventsLocalOnly();
@@ -908,6 +910,8 @@ async function cloudHydrateAndMerge(){
 
   cloudSetState("synced");
   cloudRenderCounts();
+
+  // if local seems newer, push back (light)
   cloudSchedulePush();
 }
 
@@ -1216,10 +1220,13 @@ function renderEventRows(){
 
 /* ================= INJECTIVE LOGO SWAP ================= */
 function swapInjectiveLogos(){
+  // net worth asset icon
   const icons = document.querySelectorAll(".nw-asset-icon, .nw-coin-logo");
   icons.forEach((el) => {
+    // if already an img, skip
     if (el.querySelector && el.querySelector("img")) return;
 
+    // keep size if it's a square wrapper
     const img = document.createElement("img");
     img.src = INJ_LOGO_PNG;
     img.alt = "Injective";
@@ -1229,6 +1236,7 @@ function swapInjectiveLogos(){
     img.style.objectFit = "cover";
     img.style.borderRadius = "inherit";
 
+    // if element is span with no dimensions, set a reasonable
     const cs = getComputedStyle(el);
     const w = parseFloat(cs.width || "0");
     const h = parseFloat(cs.height || "0");
@@ -1249,6 +1257,7 @@ function swapInjectiveLogos(){
 let validatorAddr = "";
 let validatorMoniker = "";
 let validatorBonded = false;
+let validatorLoading = false;
 
 function ensureSingleValidatorCard(){
   const cards = Array.from(document.querySelectorAll(".validator-card"));
@@ -1263,6 +1272,7 @@ function ensureValidatorCard(){
   let card = document.querySelector(".validator-card");
   if (card) return card;
 
+  // if not present, create one (safe)
   const cardsWrap = document.querySelector(".cards-wrapper");
   if (!cardsWrap) return null;
 
@@ -1284,6 +1294,7 @@ function ensureValidatorCard(){
       </div>
     </div>
   `;
+  // put it under Net Worth card, if exists
   const nw = document.getElementById("netWorthCard");
   if (nw && nw.parentElement === cardsWrap) {
     nw.insertAdjacentElement("afterend", card);
@@ -1291,11 +1302,12 @@ function ensureValidatorCard(){
     cardsWrap.insertAdjacentElement("afterbegin", card);
   }
 
-  ensureToastCSS();
+  ensureToastCSS(); // for pulse animation reuse
   return card;
 }
 
 function setValidatorDot(state){
+  // state: loading | ok | fail
   const dot = document.getElementById("validatorDot") || document.querySelector(".validator-card #validatorDot");
   if (!dot) return;
 
@@ -1342,10 +1354,12 @@ async function loadValidatorInfo(opAddr){
     return;
   }
 
+  validatorLoading = true;
   setValidatorDot("loading");
 
   const base = "https://lcd.injective.network";
   const v = await fetchJSON(`${base}/cosmos/staking/v1beta1/validators/${encodeURIComponent(opAddr)}`);
+  validatorLoading = false;
 
   if (!v?.validator) {
     validatorAddr = opAddr;
@@ -1543,6 +1557,7 @@ async function loadAccount(isRefresh=false) {
   const delgs = (s.delegation_responses || []);
   stakeInj = delgs.reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
 
+  // validator addr (first delegation)
   const firstVal = delgs?.[0]?.delegation?.validator_address || "";
   if (firstVal && firstVal !== validatorAddr) {
     loadValidatorInfo(firstVal);
@@ -1559,6 +1574,7 @@ async function loadAccount(isRefresh=false) {
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj, prevRewards);
 
+  /* ✅ NET WORTH: record point once account updates */
   recordNetWorthPoint();
 
   setUIReady(true);
@@ -1950,11 +1966,7 @@ function initStakeChart() {
       },
       scales: {
         x: { display: false },
-        y: {
-          position: "right",
-          ticks: { color: axisTickColor(), mirror: true, padding: 6, callback: (val) => fmtSmart(val) },
-          grid: { color: axisGridColor() }
-        }
+        y: { ticks: { color: axisTickColor() }, grid: { color: axisGridColor() } }
       }
     }
   });
@@ -1997,6 +2009,7 @@ function maybeAddStakePoint(currentStake) {
   const typ = delta > 0 ? "Delegate / Compound" : "Undelegate";
   stakeTypes.push(typ);
 
+  // ✅ event
   pushEvent({
     type: "stake",
     title: delta > 0 ? "Stake increased" : "Stake decreased",
@@ -2239,6 +2252,7 @@ function maybeRecordRewardWithdrawal(newRewards, prevRewardsForEvent=null) {
     rebuildWdView();
     goRewardLive();
 
+    // ✅ event (reward withdrawn)
     pushEvent({
       type: "reward",
       title: "Rewards withdrawn",
@@ -2247,6 +2261,7 @@ function maybeRecordRewardWithdrawal(newRewards, prevRewardsForEvent=null) {
     });
   }
 
+  // if rewards increased a lot (compound / accrual), optional
   const prev = safe(prevRewardsForEvent);
   if (prev && (r - prev) > 0.002) {
     pushEvent({
@@ -2270,6 +2285,7 @@ let netWorthChart = null;
 let nwHoverActive = false;
 let nwHoverIndex = null;
 
+/* window ms */
 function nwWindowMs(tf){
   if (tf === "live") return NW_LIVE_WINDOW_MS;
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
@@ -2279,6 +2295,7 @@ function nwWindowMs(tf){
   return 24 * 60 * 60 * 1000;
 }
 
+/* ✅ view builder */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
@@ -2319,6 +2336,7 @@ function nwApplySignStyling(sign){
   netWorthChart.update("none");
 }
 
+/* ✅ Vertical line while interacting */
 const nwVerticalLinePlugin = {
   id: "nwVerticalLinePlugin",
   afterDraw(ch){
@@ -2338,6 +2356,7 @@ const nwVerticalLinePlugin = {
   }
 };
 
+/* ✅ Blinking yellow dot at last point */
 const nwLastDotPlugin = {
   id: "nwLastDotPlugin",
   afterDatasetsDraw(ch) {
@@ -2442,6 +2461,7 @@ function drawNW(){
   netWorthChart.data.datasets[0].data = view.data;
   netWorthChart.update("none");
 
+  // PnL only for non-live
   const pnlEl = $("netWorthPnl");
   if (pnlEl && view.data.length >= 2 && nwTf !== "live") {
     const first = safe(view.data[0]);
@@ -2526,6 +2546,7 @@ function attachNWTFHandlers(){
   const wrap = $("nwTfSwitch");
   if (!wrap) return;
 
+  // ensure LIVE button exists (without editing HTML)
   const existing = Array.from(wrap.querySelectorAll(".tf-btn")).map(b => b.dataset.tf);
   if (!existing.includes("live")) {
     const liveBtn = document.createElement("button");
@@ -2545,11 +2566,12 @@ function attachNWTFHandlers(){
     const tf = btn.dataset.tf || "1d";
     if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
 
+    // ✅ lock: if timeframe not enough data, block selection (except live/1d)
     if (tf !== "live" && tf !== "1d") {
       const oldest = nwTAll.length ? safe(nwTAll[0]) : 0;
       const span = Date.now() - oldest;
       const need = nwWindowMs(tf);
-      if (span < need * 0.25) {
+      if (span < need * 0.25) { // soft lock
         pushEvent({ type:"ui", title:"Timeframe locked", value:`Not enough data for ${tf.toUpperCase()}`, status:"pending" });
         return;
       }
@@ -2617,11 +2639,14 @@ function refreshChartsTheme(){
       netWorthChart.update("none");
     }
 
+    // event page theme
     if (eventPage) {
       eventPage.style.background = (document.body.dataset.theme === "light")
         ? "rgba(231,234,240,0.96)"
         : "rgba(0,0,0,0.82)";
     }
+
+    // validator line/dot uses inline + animation -> ok
   } catch {}
 }
 
@@ -2636,9 +2661,11 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
+  // reset numeric targets
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0;
 
+  // series load local
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -2664,8 +2691,10 @@ async function commitAddress(newAddr) {
   setValidatorDot(hasInternet() ? "loading" : "fail");
   setValidatorLine("Loading…");
 
+  // swap logos
   swapInjectiveLogos();
 
+  // cloud hydrate from backend -> merge -> push
   await cloudHydrateAndMerge();
 
   modeLoading = true;
@@ -2734,6 +2763,7 @@ function ensurePullUI(){
   `;
   document.body.appendChild(pullWrap);
 
+  // animation
   const st = document.createElement("style");
   st.textContent = `@keyframes spin { to { transform: rotate(360deg); } }`;
   document.head.appendChild(st);
@@ -2754,8 +2784,9 @@ function pullSpin(on){
 }
 
 function attachPullToRefresh(){
+  // only mobile-like gestures
   window.addEventListener("touchstart", (e) => {
-    if (liveMode) return;
+    if (liveMode) return; // ✅ only refresh mode
     if (isDrawerOpen || isEventPageOpen()) return;
     if (window.scrollY > 0) return;
 
@@ -2782,6 +2813,7 @@ function attachPullToRefresh(){
 
     if (liveMode) { pullSet(-64); return; }
 
+    // threshold
     if (pullDist > 90) {
       pullSet(0);
       pullSpin(true);
@@ -2799,6 +2831,7 @@ function attachPullToRefresh(){
 
 /* ================= BOOT ================= */
 (async function boot() {
+  // menu drawer cloud status elements (optional) – create if missing
   const drawerFoot = drawer?.querySelector(".drawer-foot");
   if (drawerFoot && !document.getElementById("drawerCloudRow")) {
     const row = document.createElement("div");
@@ -2820,6 +2853,7 @@ function attachPullToRefresh(){
     drawerFoot.appendChild(row);
   }
 
+  // initial states
   cloudSetState(hasInternet() ? "synced" : "offline");
   cloudRenderCounts();
 
@@ -2831,15 +2865,18 @@ function attachPullToRefresh(){
   attachRewardFilterHandler();
   attachPullToRefresh();
 
-  ensureEventPage();
+  // ensure pages
+  ensureEventPage(); // ready for rendering rows
   hideEventPage();
 
+  // load current address
   setAddressDisplay(address);
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
+  // stake load
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -2848,6 +2885,7 @@ function attachPullToRefresh(){
     drawStakeChart();
   }
 
+  // reward + nw + events
   if (address) {
     loadWdAll();
     rebuildWdView();
@@ -2864,6 +2902,7 @@ function attachPullToRefresh(){
     drawNW();
   }
 
+  // validator + logos
   ensureValidatorCard();
   swapInjectiveLogos();
   if (address) setValidatorDot(hasInternet() ? "loading" : "fail");
@@ -2871,6 +2910,7 @@ function attachPullToRefresh(){
   modeLoading = true;
   refreshConnUI();
 
+  // hydrate cloud first (so charts don't reset across devices)
   if (address) await cloudHydrateAndMerge();
 
   await loadCandleSnapshot(liveMode ? false : true);
@@ -2896,10 +2936,12 @@ function attachPullToRefresh(){
 
 /* ================= LOOP ================= */
 function animate() {
+  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
+  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -2908,6 +2950,7 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
+  // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
@@ -2924,6 +2967,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
+  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -2964,11 +3008,13 @@ function animate() {
     setText("monthMin", "--"); setText("monthOpen", "--"); setText("monthMax", "--");
   }
 
+  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
   setText("availableUsd", `≈ $${(displayed.available * displayed.price).toFixed(2)}`);
 
+  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
@@ -2986,6 +3032,7 @@ function animate() {
   setText("stakeMin", "0");
   setText("stakeMax", String(STAKE_TARGET_MAX));
 
+  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
@@ -3005,9 +3052,11 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
+  // APR + time
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
+  /* ================= NET WORTH UI ================= */
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
@@ -3016,20 +3065,25 @@ function animate() {
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
 
+    // only update pnl when not live
     if (nwTf !== "live") drawNW();
   }
 
+  // networth mini (ids from your HTML: netWorthInj + nwAssetQty/Price/Usd)
   setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
   setText("nwAssetQty", totalInj.toFixed(4));
   setText("nwAssetPrice", `$${safe(displayed.price).toFixed(2)}`);
   setText("nwAssetUsd", `$${totalUsd.toFixed(2)}`);
 
+  // record points often in live
   if (address && liveMode) recordNetWorthPoint();
 
   refreshConnUI();
 
+  // keep blinking dot smooth
   if (netWorthChart) netWorthChart.draw();
 
+  // keep event page updated
   if (isEventPageOpen()) renderEventRows();
 
   requestAnimationFrame(animate);
