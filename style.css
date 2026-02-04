@@ -1886,3 +1886,37 @@ body[data-theme="light"] .settings-note{
   .reward-estimates .est{ flex: 1 1 95px; }
   .copy-btn{ width: 32px; height: 32px; }
 }
+
+/* ===== Bar row + gear next to bar ===== */
+.bar-row{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+}
+
+.bar-row .bar-container{
+  flex:1 1 auto;
+  min-width:0;
+}
+
+/* gear beside bar */
+.bar-gear{
+  flex:0 0 auto;
+  width:40px;
+  height:36px;
+  border-radius:12px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  line-height:1;
+}
+
+/* mobile: keep tappable */
+@media (max-width: 520px){
+  .bar-gear{
+    width:42px;
+    height:38px;
+    border-radius:14px;
+  }
+}
+
