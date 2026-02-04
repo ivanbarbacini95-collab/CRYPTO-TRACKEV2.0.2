@@ -3490,3 +3490,186 @@ window.addEventListener("offline", () => {
   cloudSetState("synced");
 }, { passive:true });
 
+/* ================= UI RENDER LOOP + BARS (RESTORE) ================= */
+
+// gradients per renderBar (price 1D/1W/1M)
+const GRAD_UP = "linear-gradient(90deg, rgba(34,197,94,.70), rgba(16,185,129,.55))";
+const GRAD_DN = "linear-gradient(90deg, rgba(239,68,68,.70), rgba(245,158,11,.55))";
+
+function setPctText(elId, pct){
+  const el = $(elId);
+  if (!el) return;
+  el.textContent = `${Math.round(clamp(pct, 0, 999))}%`;
+}
+
+/* Stake/Reward progress bar (0 -> range max) */
+function renderProgressBar(fillId, lineId, pct){
+  const fill = $(fillId);
+  const line = $(lineId);
+  if (!fill || !line) return;
+
+  const p = clamp(pct, 0, 100);
+  fill.style.left = "0%";
+  fill.style.width = `${p}%`;
+  line.style.left = `${p}%`;
+}
+
+/* Price bars (open-centered) */
+function renderPriceBars(){
+  // 1D
+  renderBar(
+    $("priceBar"), $("priceLine"),
+    displayed.price,
+    candle.d.open, candle.d.low, candle.d.high,
+    GRAD_UP, GRAD_DN
+  );
+
+  // 1W
+  renderBar(
+    $("weekBar"), $("weekLine"),
+    displayed.price,
+    candle.w.open, candle.w.low, candle.w.high,
+    GRAD_UP, GRAD_DN
+  );
+
+  // 1M
+  renderBar(
+    $("monthBar"), $("monthLine"),
+    displayed.price,
+    candle.m.open, candle.m.low, candle.m.high,
+    GRAD_UP, GRAD_DN
+  );
+
+  // labels min/open/max
+  setText("priceMin", candle.d.low ? candle.d.low.toFixed(3) : "--");
+  setText("priceOpen", candle.d.open ? candle.d.open.toFixed(3) : "--");
+  setText("priceMax", candle.d.high ? candle.d.high.toFixed(3) : "--");
+
+  setText("weekMin", candle.w.low ? candle.w.low.toFixed(3) : "--");
+  setText("weekOpen", candle.w.open ? candle.w.open.toFixed(3) : "--");
+  setText("weekMax", candle.w.high ? candle.w.high.toFixed(3) : "--");
+
+  setText("monthMin", candle.m.low ? candle.m.low.toFixed(3) : "--");
+  setText("monthOpen", candle.m.open ? candle.m.open.toFixed(3) : "--");
+  setText("monthMax", candle.m.high ? candle.m.high.toFixed(3) : "--");
+
+  // perf % (24h / week / month)
+  const p24 = pctChange(displayed.price, candle.d.open);
+  const pw  = pctChange(displayed.price, candle.w.open);
+  const pm  = pctChange(displayed.price, candle.m.open);
+
+  updatePerf("arrow24h", "pct24h", p24);
+  updatePerf("arrowWeek", "pctWeek", pw);
+  updatePerf("arrowMonth", "pctMonth", pm);
+
+  maybePriceEvent(p24);
+}
+
+function renderStakeRewardBars(){
+  // Stake (progress verso stakeRangeMax)
+  const sMax = Math.max(1e-9, safe(stakeRangeMax) || STAKE_TARGET_DEFAULT_MAX);
+  const sVal = safe(displayed.stake);
+  const sPct = (sVal / sMax) * 100;
+
+  renderProgressBar("stakeBar", "stakeLine", sPct);
+  setPctText("stakePercent", sPct);
+  setText("stakeMin", "0");
+  setText("stakeMax", String(sMax));
+
+  // Rewards (progress verso rewardRangeMax)
+  const rMax = Math.max(1e-9, safe(rewardRangeMax) || REWARD_TARGET_DEFAULT_MAX);
+  const rVal = safe(displayed.rewards);
+  const rPct = (rVal / rMax) * 100;
+
+  renderProgressBar("rewardBar", "rewardLine", rPct);
+  setPctText("rewardPercent", rPct);
+  setText("rewardMin", "0");
+  setText("rewardMax", String(rMax));
+}
+
+function renderTopValues(){
+  // Smooth numbers (tick)
+  displayed.price    = tick(displayed.price, targetPrice || displayed.price);
+  displayed.available= tick(displayed.available, availableInj);
+  displayed.stake    = tick(displayed.stake, stakeInj);
+  displayed.rewards  = tick(displayed.rewards, rewardsInj);
+  displayed.apr      = tick(displayed.apr, apr);
+
+  // price
+  setText("price", displayed.price ? displayed.price.toFixed(4) : "0.0000");
+  setText("updated", `Last update: ${fmtHHMMSS(Date.now())}`);
+
+  // amounts
+  setText("available", displayed.available.toFixed(6));
+  setText("stake", displayed.stake.toFixed(4));
+  setText("rewards", displayed.rewards.toFixed(7));
+  setText("apr", `${displayed.apr.toFixed(2)}%`);
+
+  // USD conversions
+  const px = safe(displayed.price);
+  setText("availableUsd", px ? `≈ $${(displayed.available * px).toFixed(2)}` : "≈ $0.00");
+  setText("stakeUsd",     px ? `≈ $${(displayed.stake * px).toFixed(2)}` : "≈ $0.00");
+  setText("rewardsUsd",   px ? `≈ $${(displayed.rewards * px).toFixed(2)}` : "≈ $0.00");
+
+  // Net worth top number (live value)
+  const totalInj = safe(displayed.available) + safe(displayed.stake) + safe(displayed.rewards);
+  const nwUsd = totalInj * px;
+  const nwEl = $("netWorthUsd");
+  if (nwEl) nwEl.textContent = `$${(Number.isFinite(nwUsd) ? nwUsd : 0).toFixed(2)}`;
+
+  updateNetWorthMiniRows();
+
+  // tools page (converter)
+  updateTools();
+}
+
+let uiRaf = 0;
+function uiLoop(){
+  renderTopValues();
+  renderPriceBars();
+  renderStakeRewardBars();
+  refreshConnUI();
+
+  uiRaf = requestAnimationFrame(uiLoop);
+}
+
+/* ================= APP BOOT (REQUIRED) ================= */
+function boot(){
+  applyTheme(theme);
+  ZOOM_OK = tryRegisterZoom();
+
+  bindExpandButtons();
+  initPullToRefresh();
+
+  cloudLoadMeta();
+  cloudRenderMeta();
+  cloudSetState("synced");
+
+  loadAprLocal();
+  if (address){
+    loadStakeSeriesLocal();
+    loadWdAllLocal();
+    loadNWLocal();
+    loadEvents();
+  } else {
+    loadEvents();
+  }
+
+  // charts init (safe)
+  initPriceChart();
+  initStakeChart();
+  initRewardChart();
+  initNWChart();
+  initAprChart();
+
+  // start mode
+  setMode(liveMode);
+
+  // cloud pull once
+  if (address) cloudPull();
+
+  // start UI loop
+  if (!uiRaf) uiLoop();
+}
+
+boot();
