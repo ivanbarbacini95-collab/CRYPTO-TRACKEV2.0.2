@@ -1569,4 +1569,30 @@ body[data-theme="light"] .validator-tag{
   .validator-tag__v{ max-width: 64vw; }
 }
 
+/* ===== PATCH: Scale toggle buttons (responsive) ===== */
+.scale-toggle-btn{
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.92);
+  font-weight: 950;
+  font-size: .78rem;
+  letter-spacing: .02em;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+body[data-theme="light"] .scale-toggle-btn{
+  border-color: rgba(15,23,42,.14);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.90);
+}
+.scale-toggle-btn:active{ transform: translateY(1px); }
+
+/* opzionale: se vuoi proprio togliere il LIVE button nella Reward card */
+#rewardLiveBtn{ display:none !important; }
+
+
 
