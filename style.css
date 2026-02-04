@@ -1451,3 +1451,436 @@ body.card-expanded{
   - Reduced expand button size and placed it safely inside cards
   - Added fullscreen card style (JS toggles .fullscreen + body.card-expanded)
 */
+/* =========================================================
+   PATCH v2.0.3 UI HOOKS (append-only)
+   - non rompe nulla se gli elementi non esistono in HTML
+   ========================================================= */
+
+/* ---------- Address chip + copy button ---------- */
+.address-chip{
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  min-width: 0;
+}
+.copy-btn{
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.copy-btn.copied{
+  border-color: rgba(34,197,94,.35) !important;
+  background: rgba(34,197,94,.12) !important;
+  color: rgba(34,197,94,.95) !important;
+}
+
+/* ---------- Drawer toggles: icon + label ---------- */
+.toggle-wrap{
+  display:flex;
+  flex-direction: column;
+  align-items:center;
+  gap: .25rem;
+}
+.toggle-label{
+  font-size: .65rem;
+  font-weight: 900;
+  letter-spacing: .03em;
+  color: rgba(249,250,251,.65);
+  user-select:none;
+}
+body[data-theme="light"] .toggle-label{
+  color: rgba(15,23,42,.62);
+}
+
+/* ---------- Nav badge (Event counter) ---------- */
+.nav-badge{
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size: .72rem;
+  font-weight: 950;
+  background: rgba(239,68,68,.18);
+  border: 1px solid rgba(239,68,68,.35);
+  color: rgba(249,250,251,.92);
+}
+body[data-theme="light"] .nav-badge{
+  background: rgba(239,68,68,.12);
+  color: rgba(15,23,42,.90);
+}
+.nav-badge[hidden]{ display:none !important; }
+
+/* ---------- Compact TF switch used in charts ---------- */
+.tf-switch-compact{
+  justify-content: center;
+  gap: 6px;
+  margin-top: .75rem;
+}
+.tf-switch-compact .tf-btn{
+  height: 30px;
+  padding: 0 10px;
+  font-size: .72rem;
+}
+
+/* ---------- Gear button (range settings) ---------- */
+.gear-btn{
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* ---------- Range modal (stake/reward) ---------- */
+.range-modal{
+  position: absolute;
+  inset: 0;
+  display:none;
+  place-items:center;
+  background: rgba(0,0,0,.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 60;
+  padding: 14px;
+}
+.range-modal.show{ display:grid; }
+
+.range-modal-card{
+  width: min(420px, 92vw);
+  border-radius: 18px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(135deg, rgba(11,18,32,.96), rgba(17,28,47,.92));
+  box-shadow: 0 26px 90px rgba(0,0,0,.55);
+}
+body[data-theme="light"] .range-modal-card{
+  background: linear-gradient(135deg, rgba(240,242,246,.98), rgba(230,234,242,.96));
+  border-color: rgba(15,23,42,.12);
+  box-shadow: 0 18px 70px rgba(2,6,23,.12);
+}
+
+.range-modal-title{
+  font-weight: 950;
+  letter-spacing:.02em;
+  margin-bottom: .75rem;
+}
+.range-modal-row{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+.range-modal-row label{
+  font-size: .8rem;
+  font-weight: 900;
+  color: rgba(249,250,251,.75);
+}
+body[data-theme="light"] .range-modal-row label{
+  color: rgba(15,23,42,.70);
+}
+.range-modal-row input{
+  flex: 1 1 auto;
+  height: 38px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.92);
+  padding: 0 .75rem;
+  outline:none;
+}
+body[data-theme="light"] .range-modal-row input{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.06);
+  color: rgba(15,23,42,.90);
+}
+.range-modal-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap: .5rem;
+  margin-top: .85rem;
+}
+.mini-btn.primary{
+  border-color: rgba(59,130,246,.35);
+  background: rgba(59,130,246,.16);
+}
+.mini-btn.danger{
+  border-color: rgba(239,68,68,.35);
+  background: rgba(239,68,68,.14);
+}
+
+/* ---------- Rewards estimates row ---------- */
+.reward-estimates{
+  margin-top: .75rem;
+  display:flex;
+  gap: 10px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.reward-estimates .est{
+  flex: 1 1 110px;
+  padding: .35rem .55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  font-size: .74rem;
+  font-weight: 900;
+  color: rgba(249,250,251,.78);
+  text-align:center;
+}
+body[data-theme="light"] .reward-estimates .est{
+  border-color: rgba(15,23,42,.10);
+  background: rgba(15,23,42,.04);
+  color: rgba(15,23,42,.74);
+}
+
+/* ---------- Events extra UI (filters + pager) ---------- */
+.events-actions{
+  display:flex;
+  align-items:center;
+  gap: .5rem;
+}
+.events-filters{
+  display:none;
+  margin: .6rem 0 .75rem 0;
+  padding: .75rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+}
+.events-filters.show{ display:block; }
+body[data-theme="light"] .events-filters{
+  border-color: rgba(15,23,42,.10);
+  background: rgba(15,23,42,.04);
+}
+
+.filter-row{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.filter-row label{
+  font-size: .8rem;
+  font-weight: 900;
+  color: rgba(249,250,251,.72);
+}
+body[data-theme="light"] .filter-row label{
+  color: rgba(15,23,42,.66);
+}
+.filter-row select{
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.90);
+  padding: 0 .65rem;
+  outline:none;
+}
+body[data-theme="light"] .filter-row select{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.86);
+}
+
+.events-pager{
+  margin-top: .85rem;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap: .6rem;
+}
+.events-pages{
+  display:flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+  justify-content:center;
+}
+.events-pages .page-btn{
+  height: 30px;
+  min-width: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.88);
+  font-size: .74rem;
+  font-weight: 950;
+  cursor:pointer;
+}
+body[data-theme="light"] .events-pages .page-btn{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.84);
+}
+.events-pages .page-btn.active{
+  background: rgba(59,130,246,.18);
+  border-color: rgba(59,130,246,.35);
+  color: rgba(249,250,251,.96);
+}
+
+/* ---------- Tools page (optional hooks) ---------- */
+.page-tools .tools-head{
+  margin: .25rem 0 .85rem 0;
+}
+.page-tools .tools-head h2{
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 950;
+}
+.tools-sub{
+  margin-top: .25rem;
+  font-size: .86rem;
+  color: rgba(249,250,251,.65);
+}
+body[data-theme="light"] .tools-sub{
+  color: rgba(15,23,42,.62);
+}
+.tools-card .tool-row{
+  margin-top: .75rem;
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+.tools-card .tool-row label{
+  font-weight: 900;
+  font-size: .82rem;
+  color: rgba(249,250,251,.75);
+}
+body[data-theme="light"] .tools-card .tool-row label{
+  color: rgba(15,23,42,.68);
+}
+.tools-card input, .tools-card select{
+  height: 38px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.92);
+  padding: 0 .75rem;
+  outline:none;
+}
+body[data-theme="light"] .tools-card input,
+body[data-theme="light"] .tools-card select{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.06);
+  color: rgba(15,23,42,.90);
+}
+.tools-card .tool-out{
+  margin-top: .8rem;
+  padding-top: .7rem;
+  border-top: 1px solid rgba(255,255,255,.10);
+}
+body[data-theme="light"] .tools-card .tool-out{
+  border-top-color: rgba(15,23,42,.10);
+}
+.tool-line{
+  font-weight: 950;
+  margin-top: .25rem;
+}
+.tool-line.small{
+  font-size: .82rem;
+  font-weight: 900;
+  color: rgba(249,250,251,.70);
+}
+body[data-theme="light"] .tool-line.small{
+  color: rgba(15,23,42,.62);
+}
+
+/* ---------- Settings page (optional hooks) ---------- */
+.page-settings .settings-head{
+  margin: .25rem 0 .85rem 0;
+}
+.page-settings .settings-head h2{
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 950;
+}
+.settings-sub{
+  margin-top: .25rem;
+  font-size: .86rem;
+  color: rgba(249,250,251,.65);
+}
+body[data-theme="light"] .settings-sub{
+  color: rgba(15,23,42,.62);
+}
+.settings-tabs{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content:center;
+  margin-bottom: .9rem;
+}
+.settings-body .settings-panel{ display:none; }
+.settings-body .settings-panel.active{ display:block; }
+
+.settings-card{
+  padding: .9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+}
+body[data-theme="light"] .settings-card{
+  border-color: rgba(15,23,42,.10);
+  background: rgba(15,23,42,.04);
+}
+.settings-row{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: .45rem 0;
+}
+.settings-label{
+  font-weight: 900;
+  font-size: .84rem;
+  color: rgba(249,250,251,.72);
+}
+body[data-theme="light"] .settings-label{
+  color: rgba(15,23,42,.66);
+}
+.settings-value{
+  font-weight: 950;
+  font-size: .84rem;
+}
+.settings-warn{
+  font-weight: 950;
+  color: rgba(239,68,68,.92);
+  margin-bottom: .6rem;
+}
+.check{
+  display:flex;
+  align-items:center;
+  gap: .55rem;
+  font-weight: 900;
+  font-size: .86rem;
+}
+.settings-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap: .5rem;
+  margin-top: .85rem;
+}
+.settings-note{
+  margin-top: .6rem;
+  font-size: .82rem;
+  color: rgba(249,250,251,.65);
+}
+body[data-theme="light"] .settings-note{
+  color: rgba(15,23,42,.62);
+}
+
+/* ---------- Safer positioning for card-tools on dense cards ---------- */
+.networth-card .card-expand,
+.chart-card .card-expand{
+  pointer-events:auto;
+}
+
+/* ---------- Mobile tweaks ---------- */
+@media (max-width: 520px){
+  .events-table{ min-width: 560px; }
+  .reward-estimates .est{ flex: 1 1 95px; }
+  .copy-btn{ width: 32px; height: 32px; }
+}
