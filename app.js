@@ -3068,3 +3068,308 @@ animate();
 ✅ Events: toast slide-down + persistence + events table rendering; stake/reward/price events added
 ✅ Pull-to-refresh: enabled only in REFRESH mode (mobile), shows spinner and refreshes data
 =============================================================== */
+
+/* =========================================================
+   PATCH v2.0.3 — Events paging + filters + Copy Address + Safety binds
+   (append-only, safe if HTML hooks are missing)
+   ========================================================= */
+
+/* ---------- 1) COPY ADDRESS button + animation ---------- */
+/*
+  HTML consigliato (dentro #addressDisplay):
+  <div class="address-chip">
+    <span class="tag">...</span>
+    <button class="icon-btn copy-btn" id="copyAddrBtn" title="Copy">⧉</button>
+  </div>
+*/
+
+(function patchCopyAddress(){
+  // intercetta la tua setAddressDisplay senza romperla:
+  const _origSetAddressDisplay = window.setAddressDisplay;
+
+  // re-wrap: se l’elemento esiste, aggiunge anche il bottone copy
+  window.setAddressDisplay = function(addr){
+    try { _origSetAddressDisplay?.(addr); } catch {}
+    const host = document.getElementById("addressDisplay");
+    if (!host) return;
+
+    // se il tuo setAddressDisplay ha già scritto HTML “semplice”, lo “wrappiamo” in .address-chip
+    // ma solo se non esiste già un copy button.
+    if (!addr) return;
+    if (host.querySelector("#copyAddrBtn")) return;
+
+    const tag = host.querySelector(".tag");
+    if (!tag) return;
+
+    // wrap
+    const wrap = document.createElement("div");
+    wrap.className = "address-chip";
+
+    const btn = document.createElement("button");
+    btn.className = "icon-btn copy-btn";
+    btn.id = "copyAddrBtn";
+    btn.type = "button";
+    btn.title = "Copy address";
+    btn.textContent = "⧉";
+
+    // ricostruisci contenuto
+    host.innerHTML = "";
+    wrap.appendChild(tag);
+    wrap.appendChild(btn);
+    host.appendChild(wrap);
+
+    // handler copy
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const a = (window.address || "").trim();
+      if (!a) return;
+
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(a);
+        ok = true;
+      } catch {
+        // fallback
+        try{
+          const ta = document.createElement("textarea");
+          ta.value = a;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+        } catch {}
+      }
+
+      if (ok){
+        btn.classList.add("copied");
+        const prev = btn.textContent;
+        btn.textContent = "✓";
+        setTimeout(() => { btn.textContent = prev; btn.classList.remove("copied"); }, 900);
+      }
+    }, { passive:false });
+  };
+
+  // refresh immediato se c’è già address
+  try { window.setAddressDisplay?.(window.address || ""); } catch {}
+})();
+
+
+/* ---------- 2) EVENTS: badge count + pagination + filters ---------- */
+/*
+  HTML hook consigliati nella pagina Events (se vuoi paginazione/filtri):
+  - Un wrapper filtri:
+    <div id="eventsFilters" class="events-filters">
+      <div class="filter-row">
+        <label>Type</label>
+        <select id="eventsFilterKind">
+          <option value="all">All</option>
+          <option value="tx">TX</option>
+          <option value="price">PRICE</option>
+          <option value="info">INFO</option>
+        </select>
+        <label>Status</label>
+        <select id="eventsFilterStatus">
+          <option value="all">All</option>
+          <option value="ok">OK</option>
+          <option value="pending">Pending</option>
+          <option value="err">Error</option>
+        </select>
+      </div>
+    </div>
+
+  - Un pager:
+    <div class="events-pager">
+      <div class="events-pages" id="eventsPages"></div>
+    </div>
+
+  - Un badge nel menu (dentro il bottone Events):
+    <span class="nav-badge" id="eventsBadge" hidden>0</span>
+
+  - (Opzionale) pulsante show/hide filtri:
+    <button class="mini-btn" id="eventsFiltersBtn">Filters</button>
+*/
+
+(function patchEventsPaging(){
+  const PAGE_SIZE = 25;
+
+  // stato UI
+  let evPage = 1;
+  let evKind = "all";
+  let evStatus = "all";
+
+  function $(id){ return document.getElementById(id); }
+
+  function updateEventsBadge(){
+    const badge = $("eventsBadge");
+    if (!badge) return;
+    const n = Array.isArray(window.eventsAll) ? window.eventsAll.length : 0;
+    badge.textContent = String(n);
+    badge.hidden = n <= 0;
+  }
+
+  function getFilteredEvents(){
+    const list = Array.isArray(window.eventsAll) ? window.eventsAll : [];
+    return list.filter(ev => {
+      if (evKind !== "all" && String(ev.kind || "") !== evKind) return false;
+      if (evStatus !== "all" && String(ev.status || "") !== evStatus) return false;
+      return true;
+    });
+  }
+
+  function renderPager(totalPages){
+    const host = $("eventsPages");
+    if (!host) return;
+    host.innerHTML = "";
+    if (totalPages <= 1) return;
+
+    // render pagine compatte (max 7 bottoni)
+    const maxBtns = 7;
+    let start = Math.max(1, evPage - Math.floor(maxBtns/2));
+    let end = Math.min(totalPages, start + maxBtns - 1);
+    start = Math.max(1, end - maxBtns + 1);
+
+    for (let p = start; p <= end; p++){
+      const b = document.createElement("button");
+      b.className = "page-btn" + (p === evPage ? " active" : "");
+      b.type = "button";
+      b.textContent = String(p);
+      b.addEventListener("click", () => {
+        evPage = p;
+        window.renderEvents?.(); // richiama renderEvents patchata sotto
+      }, { passive:true });
+      host.appendChild(b);
+    }
+  }
+
+  // patch renderEvents: mantiene il tuo rendering ma aggiunge filtro/pagina
+  const _origRenderEvents = window.renderEvents;
+
+  window.renderEvents = function(){
+    try { updateEventsBadge(); } catch {}
+
+    const body = $("eventsTableBody");
+    const empty = $("eventsEmpty");
+    if (!body) {
+      // fallback: se manca tabella, usa il tuo originale
+      try { _origRenderEvents?.(); } catch {}
+      return;
+    }
+
+    const all = getFilteredEvents();
+    const total = all.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    evPage = Math.min(Math.max(1, evPage), totalPages);
+
+    const start = (evPage - 1) * PAGE_SIZE;
+    const slice = all.slice(start, start + PAGE_SIZE);
+
+    body.innerHTML = "";
+    if (empty) empty.style.display = slice.length ? "none" : "block";
+    if (!slice.length){
+      renderPager(totalPages);
+      return;
+    }
+
+    // copia della tua logica, ma su "slice"
+    for (const ev of slice){
+      const tr = document.createElement("tr");
+
+      const dt = new Date(ev.ts || Date.now());
+      const when = `${dt.toLocaleDateString()} ${window.fmtHHMMSS ? window.fmtHHMMSS(ev.ts || Date.now()) : dt.toLocaleTimeString()}`;
+
+      const pillDotClass =
+        (ev.status === "ok") ? "ev-dot ok" :
+        (ev.status === "err") ? "ev-dot err" : "ev-dot";
+
+      const arrow =
+        ev.dir === "up" ? `<span class="ev-arrow up">▲</span>` :
+        ev.dir === "down" ? `<span class="ev-arrow down">▼</span>` : "";
+
+      const kind = (ev.kind || "info").toUpperCase();
+
+      tr.innerHTML = `
+        <td><span class="ev-pill"><span class="${pillDotClass}"></span>${kind}</span></td>
+        <td>${ev.title || "Event"}</td>
+        <td style="white-space:nowrap">${when}</td>
+        <td>${arrow} ${ev.detail || ""}</td>
+      `;
+      body.appendChild(tr);
+    }
+
+    renderPager(totalPages);
+  };
+
+  // bind filtri (se esistono)
+  function bindFilters(){
+    const kindSel = $("eventsFilterKind");
+    const statusSel = $("eventsFilterStatus");
+    const filtersBtn = $("eventsFiltersBtn");
+    const filtersWrap = $("eventsFilters");
+
+    if (filtersBtn && filtersWrap){
+      filtersBtn.addEventListener("click", () => {
+        filtersWrap.classList.toggle("show");
+      }, { passive:true });
+    }
+
+    if (kindSel){
+      kindSel.addEventListener("change", () => {
+        evKind = String(kindSel.value || "all");
+        evPage = 1;
+        window.renderEvents?.();
+      }, { passive:true });
+    }
+    if (statusSel){
+      statusSel.addEventListener("change", () => {
+        evStatus = String(statusSel.value || "all");
+        evPage = 1;
+        window.renderEvents?.();
+      }, { passive:true });
+    }
+  }
+
+  // aggiorna badge quando pushi un evento
+  const _origPushEvent = window.pushEvent;
+  if (typeof _origPushEvent === "function"){
+    window.pushEvent = function(ev){
+      const out = _origPushEvent.call(this, ev);
+      try { updateEventsBadge(); } catch {}
+      return out;
+    };
+  }
+
+  // aggiorna badge quando carichi
+  const _origLoadEvents = window.loadEvents;
+  if (typeof _origLoadEvents === "function"){
+    window.loadEvents = function(){
+      const out = _origLoadEvents.call(this);
+      try { updateEventsBadge(); } catch {}
+      return out;
+    };
+  }
+
+  // bind una volta appena DOM pronto
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", () => { bindFilters(); updateEventsBadge(); }, { passive:true });
+  } else {
+    bindFilters();
+    updateEventsBadge();
+  }
+})();
+
+
+/* ---------- 3) SAFETY: prevent multiple NetWorth TF handler binds ---------- */
+(function patchNwBindOnce(){
+  const _origAttach = window.attachNWTFHandlers;
+  let done = false;
+  if (typeof _origAttach !== "function") return;
+
+  window.attachNWTFHandlers = function(){
+    if (done) return;
+    done = true;
+    return _origAttach.apply(this, arguments);
+  };
+})();
