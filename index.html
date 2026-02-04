@@ -243,7 +243,7 @@
               <button class="mini-btn" id="stakeScaleToggle" type="button" aria-label="Scala Staked">LIN</button>
 
               <!-- NEW: settings range (gear) -->
-              <button class="icon-btn gear-btn" id="stakeRangeBtn" type="button" aria-label="Imposta range Staked" title="Imposta range">
+              <button class="icon-btn gear-btn" type="button" aria-label="Imposta range Staked" title="Imposta range">
                 ⚙︎
               </button>
             </div>
@@ -251,11 +251,16 @@
             <div class="value-row"><span id="stake">0.0000</span></div>
             <div class="sub-row" id="stakeUsd">≈ $0.00</div>
 
-            <div class="stake-bar-container bar-container stake-container">
-              <div id="stakeBar" class="bar-fill stake-fill"></div>
-              <div id="stakeLine" class="bar-line"></div>
-              <span id="stakePercent" class="stake-percent">0%</span>
-            </div>
+            <div class="bar-row">
+  <div class="stake-bar-container bar-container stake-container">
+    <div id="stakeBar" class="bar-fill stake-fill"></div>
+    <div id="stakeLine" class="bar-line"></div>
+    <span id="stakePercent" class="stake-percent">0%</span>
+  </div>
+
+  <button class="icon-btn gear-btn bar-gear" id="stakeRangeBtn" type="button"
+    aria-label="Imposta range Staked" title="Imposta range">⚙︎</button>
+</div>
 
             <div class="bar-values stake-values">
               <span id="stakeMin" class="left">0</span>
