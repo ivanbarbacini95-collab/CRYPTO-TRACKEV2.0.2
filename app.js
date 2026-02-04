@@ -3889,5 +3889,146 @@ animate();
     try{ cloudRenderMeta && cloudRenderMeta(); }catch{}
   }, 900);
 
+   /* =========================================================
+   RANGE: Staked & Rewards — gear next to bar + set max + persist
+   Incolla in fondo a app.js
+   ========================================================= */
+(function rangePatch(){
+  const $ = (id)=>document.getElementById(id);
+  const safe = (n)=> (Number.isFinite(+n) ? +n : 0);
+
+  // per-wallet keys
+  function keyFor(kind){
+    const a = (typeof address === "string" ? address.trim() : "");
+    return a ? `inj_${kind}_range_${a}` : `inj_${kind}_range_global`;
+  }
+
+  // default: staked usa STAKE_TARGET_MAX, rewards usa auto (0 = auto)
+  let stakeRangeMax = 0;
+  let rewardRangeMax = 0;
+
+  function loadRanges(){
+    try{
+      stakeRangeMax = safe(localStorage.getItem(keyFor("stakeMax"))) || 0;
+      rewardRangeMax = safe(localStorage.getItem(keyFor("rewardMax"))) || 0;
+    }catch{}
+  }
+  function saveRanges(){
+    try{
+      localStorage.setItem(keyFor("stakeMax"), String(stakeRangeMax || 0));
+      localStorage.setItem(keyFor("rewardMax"), String(rewardRangeMax || 0));
+    }catch{}
+  }
+
+  function applyStakeRangeToChart(){
+    if (!window.stakeChart) return;
+    // se 0 -> auto
+    stakeChart.options.scales.y.max = (stakeRangeMax > 0) ? stakeRangeMax : undefined;
+    stakeChart.update("none");
+  }
+
+  function applyRewardRangeToChart(){
+    if (!window.rewardChart) return;
+    rewardChart.options.scales.y.max = (rewardRangeMax > 0) ? rewardRangeMax : undefined;
+    rewardChart.update("none");
+  }
+
+  // expose current max for animate loop (we patch a helper read)
+  window.__getStakeMaxRange = () => stakeRangeMax;
+  window.__getRewardMaxRange = () => rewardRangeMax;
+
+  /* ---------- Modals open/close/apply ---------- */
+  function openModal(modalId, inputId, current){
+    const m = $(modalId);
+    const inp = $(inputId);
+    if (!m || !inp) return;
+    m.setAttribute("aria-hidden","false");
+    m.classList.add("open");
+    inp.value = current > 0 ? String(current) : "";
+    setTimeout(()=>inp.focus(), 40);
+  }
+
+  function closeModal(modalId){
+    const m = $(modalId);
+    if (!m) return;
+    m.classList.remove("open");
+    m.setAttribute("aria-hidden","true");
+  }
+
+  // Staked modal
+  $("stakeRangeBtn")?.addEventListener("click", (e)=>{
+    e.preventDefault();
+    openModal("stakeRangeModal", "stakeRangeValue", stakeRangeMax);
+  }, { passive:false });
+
+  $("stakeRangeCancel")?.addEventListener("click", (e)=>{
+    e.preventDefault();
+    closeModal("stakeRangeModal");
+  }, { passive:false });
+
+  $("stakeRangeApply")?.addEventListener("click", (e)=>{
+    e.preventDefault();
+    const v = safe($("stakeRangeValue")?.value);
+    stakeRangeMax = (v > 0) ? v : 0; // 0 = auto
+    saveRanges();
+    applyStakeRangeToChart();
+    closeModal("stakeRangeModal");
+  }, { passive:false });
+
+  // Rewards modal
+  $("rewardRangeBtn")?.addEventListener("click", (e)=>{
+    e.preventDefault();
+    openModal("rewardRangeModal", "rewardRangeValue", rewardRangeMax);
+  }, { passive:false });
+
+  $("rewardRangeCancel")?.addEventListener("click", (e)=>{
+    e.preventDefault();
+    closeModal("rewardRangeModal");
+  }, { passive:false });
+
+  $("rewardRangeApply")?.addEventListener("click", (e)=>{
+    e.preventDefault();
+    const v = safe($("rewardRangeValue")?.value);
+    rewardRangeMax = (v > 0) ? v : 0; // 0 = auto
+    saveRanges();
+    applyRewardRangeToChart();
+    closeModal("rewardRangeModal");
+  }, { passive:false });
+
+  // click outside card closes modal
+  $("stakeRangeModal")?.addEventListener("click", (e)=>{
+    if (e.target === $("stakeRangeModal")) closeModal("stakeRangeModal");
+  }, { passive:true });
+
+  $("rewardRangeModal")?.addEventListener("click", (e)=>{
+    if (e.target === $("rewardRangeModal")) closeModal("rewardRangeModal");
+  }, { passive:true });
+
+  // load at boot + whenever address changes (best-effort)
+  loadRanges();
+  setTimeout(()=>{
+    applyStakeRangeToChart();
+    applyRewardRangeToChart();
+  }, 800);
+
+  /* =========================================================
+     Patch animate() BAR MAX:
+     - Staked: usa stakeRangeMax se >0, altrimenti STAKE_TARGET_MAX
+     - Rewards: usa rewardRangeMax se >0, altrimenti auto come già fai
+     ========================================================= */
+  const _animate = window.animate;
+  if (typeof _animate !== "function") return;
+
+  // Non possiamo sostituire facilmente la tua animate() già in loop,
+  // quindi patchiamo i “max” via variabili globali lette nel tuo loop:
+  // -> ti basta fare 2 micro modifiche manuali nel tuo animate:
+  //    1) sostituisci STAKE_TARGET_MAX con (window.__getStakeMaxRange?.()||STAKE_TARGET_MAX)
+  //    2) per rewards sostituisci maxR con:
+  //       const maxR = (window.__getRewardMaxRange?.()||0) || Math.max(0.1, Math.ceil(displayed.rewards*10)/10);
+  //
+  // Così non tocchiamo la logica restante.
+})();
+
+
 })();
 
