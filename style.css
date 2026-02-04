@@ -522,10 +522,6 @@ body[data-theme="light"] .coming-close{
 /* =========================
    Pages + cards grid
    ========================= */
-.pages{ margin-top: 10px; }
-.page{ display:none; }
-.page.active{ display:block; }
-
 .cards-wrapper{
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -533,25 +529,18 @@ body[data-theme="light"] .coming-close{
 }
 
 /* Layout */
-.cards-wrapper > .card:nth-child(1){ grid-column: span 12; } /* INJ Price big */
-.cards-wrapper > .card:nth-child(2){ grid-column: span 4; }  /* Available */
-.cards-wrapper > .card:nth-child(3){ grid-column: span 4; }  /* Staked */
-.cards-wrapper > .card:nth-child(4){ grid-column: span 4; }  /* Rewards */
-.cards-wrapper > .card:nth-child(5){ grid-column: span 12; } /* Net Worth */
-.cards-wrapper > .card:nth-child(6){ grid-column: span 4; }  /* APR */
+.cards-wrapper > .card:nth-child(1){ grid-column: span 12; }
+.cards-wrapper > .card:nth-child(2){ grid-column: span 4; }
+.cards-wrapper > .card:nth-child(3){ grid-column: span 4; }
+.cards-wrapper > .card:nth-child(4){ grid-column: span 4; }
+.cards-wrapper > .card:nth-child(5){ grid-column: span 12; }
+.cards-wrapper > .card:nth-child(6){ grid-column: span 4; }
 
 @media (max-width: 980px){
-  .cards-wrapper > .card:nth-child(2),
-  .cards-wrapper > .card:nth-child(3),
-  .cards-wrapper > .card:nth-child(4),
-  .cards-wrapper > .card:nth-child(6){
-    grid-column: span 6;
-  }
+  ...
 }
 @media (max-width: 640px){
-  .cards-wrapper > .card{
-    grid-column: span 12 !important;
-  }
+  ...
 }
 
 .card{
