@@ -22,13 +22,21 @@
       <div class="drawer-title">Menu</div>
 
       <div class="drawer-toggles">
-        <button class="toggle-btn" id="themeToggle" aria-label="Tema">
-          <span id="themeIcon">🌙</span>
-        </button>
 
-        <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
-          <span id="liveIcon">📡</span>
-        </button>
+        <div class="toggle-pack">
+          <button class="toggle-btn" id="themeToggle" aria-label="Tema">
+            <span id="themeIcon">🌙</span>
+          </button>
+          <div class="toggle-label">Theme</div>
+        </div>
+
+        <div class="toggle-pack">
+          <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
+            <span id="liveIcon">📡</span>
+          </button>
+          <div class="toggle-label">Mode</div>
+        </div>
+
       </div>
     </div>
 
@@ -58,15 +66,7 @@
 
         <div class="drawer-meta-row">
           <span class="drawer-meta-label">Cloud Sync</span>
-          <span class="drawer-meta-value">
-            <span class="cloud-dot" id="cloudMenuDot" aria-hidden="true"></span>
-            <span id="cloudMenuStatus">—</span>
-          </span>
-        </div>
-
-        <div class="drawer-meta-row">
-          <span class="drawer-meta-label">Last sync</span>
-          <span class="drawer-meta-value" id="cloudMenuLast">—</span>
+          <span class="drawer-meta-value" id="drawerCloudStatus">—</span>
         </div>
       </div>
     </div>
@@ -80,9 +80,6 @@
       <button class="coming-close" id="comingClose" type="button">Chiudi</button>
     </div>
   </div>
-
-  <!-- EVENT TOAST (compare dall’alto, dura ~2s) -->
-  <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
 
   <!-- APP ROOT -->
   <div class="container loading" id="appRoot">
@@ -112,8 +109,11 @@
       </div>
 
       <div class="header-meta-right">
-        <!-- Wallet “in evidenza” a sinistra di status -->
-        <div id="addressDisplay" class="address-display"></div>
+        <!-- Wallet visible + copy -->
+        <div class="wallet-pill">
+          <div id="addressDisplay" class="address-display"></div>
+          <button class="copy-btn" id="copyAddrBtn" type="button" aria-label="Copy address">⧉</button>
+        </div>
 
         <div class="connection-status" id="connectionStatus">
           <span class="status-dot" id="statusDot"></span>
@@ -136,18 +136,13 @@
             <div class="networth-top">
               <div class="label networth-title">Net Worth</div>
 
-              <!-- expand icon (piccola, non invade) -->
+              <!-- expand icon -->
               <button class="card-expand" id="nwExpand" type="button" aria-label="Expand Net Worth">⤢</button>
             </div>
 
-            <!-- scale toggle sotto (separato dall’expand) -->
+            <!-- scale toggle (LIN/LOG) -->
             <div class="networth-top2">
               <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
-
-              <!-- LIVE toggle dedicato al net worth -->
-              <button class="nw-live-btn" id="nwLiveToggle" type="button" aria-label="Net worth live toggle">
-                LIVE
-              </button>
             </div>
 
             <div class="networth-metrics">
@@ -169,7 +164,7 @@
                 <button class="tf-btn" data-tf="all" type="button">ALL</button>
               </div>
 
-              <!-- mini asset row: logo Injective + qty/price/usd -->
+              <!-- mini asset row (nota: verrà rimossa più avanti come da tua richiesta, ma ora non rompe nulla) -->
               <div class="networth-asset">
                 <img
                   class="inj-logo"
@@ -209,7 +204,7 @@
                 </div>
               </div>
 
-              <!-- box 2: Validator (solo UI, i dati arrivano dal JS) -->
+              <!-- box 2: Validator (match JS ids) -->
               <div class="nw-mini nw-mini-validator" id="validatorCard">
                 <div class="nw-mini-left">
                   <img
@@ -220,7 +215,7 @@
                   />
                   <div class="nw-mini-meta">
                     <div class="nw-mini-title">Validator</div>
-                    <div class="nw-mini-sub" id="validatorName">—</div>
+                    <div class="nw-mini-sub" id="validatorLine">—</div>
                   </div>
                 </div>
 
@@ -311,7 +306,7 @@
             </div>
           </div>
 
-          <!-- 5) APR (card separata) -->
+          <!-- 5) APR -->
           <div class="card">
             <div class="label">APR</div>
             <div class="value-row"><span id="apr">0%</span></div>
@@ -389,12 +384,12 @@
         </div>
       </section>
 
-      <!-- ========== EVENTS PAGE (dedicata) ========== -->
+      <!-- ========== EVENTS PAGE (scaffold per versione “pubblicabile”) ========== -->
       <section class="page page-events" id="pageEvents" data-page="event" aria-hidden="true">
         <div class="events-head">
           <div class="events-title">
             <h2>Event</h2>
-            <div class="events-sub">On-chain actions + key price moves (24h)</div>
+            <div class="events-sub">On-chain actions + key price moves</div>
           </div>
 
           <button class="events-clear" id="eventsClearBtn" type="button">Clear</button>
@@ -411,9 +406,7 @@
                   <th>Status</th>
                 </tr>
               </thead>
-              <tbody id="eventsTbody">
-                <!-- rows injected by JS -->
-              </tbody>
+              <tbody id="eventsTbody"></tbody>
             </table>
           </div>
 
@@ -439,17 +432,5 @@
     </div>
 
   </div>
-
-  <!--
-    ✅ HTML changes (v2.0.2):
-    - Added dedicated Events page (pageEvents + events table + clear button)
-    - Added toastHost for “event arrived” slide-down notifications
-    - Added Cloud Sync status area inside drawer menu (cloudMenuDot/cloudMenuStatus/cloudMenuLast)
-    - Fixed Coming Soon overlay structure (comingClose always present)
-    - Restored centered title layout
-    - Replaced purple dot with Injective high-res logo (Wikimedia PNG)
-    - Prepared expand buttons inside cards (⤢) without overlapping metrics
-    - Last update moved to bottom of the app
-  -->
 </body>
-</html>
+</html
