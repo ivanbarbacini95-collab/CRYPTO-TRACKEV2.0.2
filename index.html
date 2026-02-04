@@ -453,3 +453,536 @@
   -->
 </body>
 </html>
+
+*** Begin Patch
+*** Update File: index.html
+@@
+   <aside class="drawer" id="drawer" aria-hidden="true">
+     <div class="drawer-top">
+       <div class="drawer-title">Menu</div>
+ 
+       <div class="drawer-toggles">
+-        <button class="toggle-btn" id="themeToggle" aria-label="Tema">
+-          <span id="themeIcon">🌙</span>
+-        </button>
+-
+-        <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
+-          <span id="liveIcon">📡</span>
+-        </button>
++        <div class="toggle-wrap">
++          <button class="toggle-btn" id="themeToggle" aria-label="Tema">
++            <span id="themeIcon">🌙</span>
++          </button>
++          <div class="toggle-label" id="themeLabel">Theme</div>
++        </div>
++
++        <div class="toggle-wrap">
++          <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
++            <span id="liveIcon">📡</span>
++          </button>
++          <div class="toggle-label" id="modeLabel">LIVE</div>
++        </div>
+       </div>
+     </div>
+ 
+     <nav class="drawer-nav" id="drawerNav">
+       <button class="nav-item" data-page="home">HOME</button>
+       <button class="nav-item" data-page="market">MARKET</button>
+       <button class="nav-item active" data-page="dashboard">MY DASHBOARD</button>
+-      <button class="nav-item" data-page="event">EVENT</button>
++      <button class="nav-item" data-page="event">
++        EVENT
++        <span class="nav-badge" id="eventBadge" aria-label="New events" title="New events">0</span>
++      </button>
+ 
+       <div class="nav-spacer"></div>
+ 
++      <div class="nav-section-label">TOOLS</div>
++      <button class="nav-item" data-page="tools-converter">INJECTIVE CONVERTER</button>
++      <button class="nav-item" data-page="tools-marketcap">MARKET CAP OF</button>
++
++      <div class="nav-spacer"></div>
++
+       <button class="nav-item settings-item" data-page="settings">
+         SETTINGS
+         <span class="nav-version">v2.0.2</span>
+       </button>
+     </nav>
+@@
+         <div class="header-meta-right">
+         <!-- Wallet “in evidenza” a sinistra di status -->
+-        <div id="addressDisplay" class="address-display"></div>
++        <div class="address-display-wrap">
++          <div id="addressDisplay" class="address-display"></div>
++          <button class="addr-copy-btn" id="copyAddrBtn" type="button" aria-label="Copy address" title="Copy address">⧉</button>
++        </div>
+ 
+         <div class="connection-status" id="connectionStatus">
+           <span class="status-dot" id="statusDot"></span>
+           <span class="status-text" id="statusText">Offline</span>
+         </div>
+       </div>
+     </div>
+ 
++    <!-- Refresh spinner (mode REFRESH / manual refresh feedback) -->
++    <div class="top-spinner" id="topSpinner" aria-hidden="true">
++      <div class="top-spinner-wheel" aria-hidden="true"></div>
++      <div class="top-spinner-text" id="topSpinnerText">Refreshing…</div>
++    </div>
++
+     <!-- PAGES -->
+     <main class="pages" id="pages">
+@@
+           <div class="card networth-card" id="netWorthCard">
+ 
+             <div class="networth-top">
+               <div class="label networth-title">Net Worth</div>
+ 
+               <!-- expand icon (piccola, non invade) -->
+               <button class="card-expand" id="nwExpand" type="button" aria-label="Expand Net Worth">⤢</button>
+             </div>
+ 
+-            <!-- scale toggle sotto (separato dall’expand) -->
+-            <div class="networth-top2">
+-              <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
+-
+-              <!-- LIVE toggle dedicato al net worth -->
+-              <button class="nw-live-btn" id="nwLiveToggle" type="button" aria-label="Net worth live toggle">
+-                LIVE
+-              </button>
+-            </div>
+-
+             <div class="networth-metrics">
+-              <div class="networth-usd" id="netWorthUsd">$0.00</div>
+-              <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
++              <div class="networth-metrics-left">
++                <div class="networth-usd" id="netWorthUsd">$0.00</div>
++                <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
++              </div>
++              <div class="networth-metrics-right">
++                <!-- ✅ Only LIN/LOG near the value -->
++                <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
++              </div>
+             </div>
+ 
+             <div class="networth-chart">
+               <canvas id="netWorthChart"></canvas>
+             </div>
+ 
+             <div class="networth-tf">
+               <div class="tf-switch" id="nwTfSwitch">
+-                <button class="tf-btn active" data-tf="live" type="button" id="tfLiveBtn">LIVE</button>
++                <button class="tf-btn active" data-tf="live" type="button" id="tfLiveBtn">LIVE</button>
+                 <button class="tf-btn" data-tf="1d" type="button">1D</button>
+                 <button class="tf-btn" data-tf="1w" type="button">1W</button>
+                 <button class="tf-btn" data-tf="1m" type="button">1M</button>
+                 <button class="tf-btn" data-tf="1y" type="button">1Y</button>
+                 <button class="tf-btn" data-tf="all" type="button">ALL</button>
+               </div>
+-
+-              <!-- mini asset row: logo Injective + qty/price/usd -->
+-              <div class="networth-asset">
+-                <img
+-                  class="inj-logo"
+-                  src="https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png"
+-                  alt="Injective"
+-                  loading="lazy"
+-                />
+-                <span class="nw-asset-name">Injective</span>
+-
+-                <span class="nw-asset-qty" id="nwAssetQty">0.0000</span>
+-                <span class="nw-asset-mid">INJ</span>
+-                <span class="nw-asset-sep">·</span>
+-                <span class="nw-asset-price" id="nwAssetPrice">$0.00</span>
+-                <span class="nw-asset-sep">→</span>
+-                <span class="nw-asset-usd" id="nwAssetUsd">$0.00</span>
+-              </div>
+             </div>
+@@
+               <div class="nw-mini nw-mini-validator" id="validatorCard">
+                 <div class="nw-mini-left">
+                   <img
+                     class="nw-coin-logo-img"
+                     src="https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png"
+                     alt="Validator"
+                     loading="lazy"
+                   />
+                   <div class="nw-mini-meta">
+                     <div class="nw-mini-title">Validator</div>
+-                    <div class="nw-mini-sub" id="validatorName">—</div>
++                    <div class="nw-mini-sub" id="validatorLine">—</div>
+                   </div>
+                 </div>
+ 
+                 <div class="nw-mini-right validator-right">
+                   <span class="validator-dot" id="validatorDot" aria-hidden="true"></span>
+                 </div>
+               </div>
+@@
+           <div class="card stake-card">
+             <div class="label">Staked</div>
+             <div class="value-row"><span id="stake">0.0000</span></div>
+             <div class="sub-row" id="stakeUsd">≈ $0.00</div>
+ 
+             <div class="stake-bar-container bar-container stake-container">
++              <button class="bar-gear" id="stakeRangeBtn" type="button" aria-label="Stake range settings" title="Range settings">⚙︎</button>
+               <div id="stakeBar" class="bar-fill stake-fill"></div>
+               <div id="stakeLine" class="bar-line"></div>
+               <span id="stakePercent" class="stake-percent">0%</span>
+             </div>
+ 
+             <div class="bar-values stake-values">
+               <span id="stakeMin" class="left">0</span>
+               <span id="stakeMax" class="right">1000</span>
+             </div>
+ 
+             <div class="card-tools">
+               <button class="card-expand" id="stakeExpand" type="button" aria-label="Expand Staked">⤢</button>
++              <button class="scale-btn" id="stakeScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
+             </div>
+ 
++            <div class="tf-switch small" id="stakeTfSwitch">
++              <button class="tf-btn active" data-tf="1d" type="button">1D</button>
++              <button class="tf-btn" data-tf="1w" type="button">1W</button>
++              <button class="tf-btn" data-tf="1m" type="button">1M</button>
++              <button class="tf-btn" data-tf="all" type="button">ALL</button>
++            </div>
++
+             <div class="stake-chart-wrap">
+               <canvas id="stakeChart"></canvas>
+             </div>
+           </div>
+@@
+           <div class="card reward-card">
+             <div class="label">Rewards</div>
+             <div class="value-row"><span id="rewards">0.0000000</span></div>
+             <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
+ 
+             <div class="reward-bar-container bar-container reward-container">
++              <button class="bar-gear" id="rewardRangeBtn" type="button" aria-label="Reward range settings" title="Range settings">⚙︎</button>
+               <div id="rewardBar" class="bar-fill reward-fill"></div>
+               <div id="rewardLine" class="bar-line"></div>
+               <span id="rewardPercent" class="reward-percent">0%</span>
+             </div>
+ 
+             <div class="bar-values reward-values">
+               <span id="rewardMin" class="left">0</span>
+               <span id="rewardMax" class="right">0.1</span>
+             </div>
+ 
+             <div class="card-tools">
+               <button class="card-expand" id="rewardExpand" type="button" aria-label="Expand Rewards">⤢</button>
++              <button class="scale-btn" id="rewardScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
+             </div>
+ 
+             <div class="reward-chart-wrap">
+               <canvas id="rewardChart"></canvas>
+             </div>
+ 
++            <div class="tf-switch small" id="rewardTfSwitch">
++              <button class="tf-btn active" data-tf="1d" type="button">1D</button>
++              <button class="tf-btn" data-tf="1w" type="button">1W</button>
++              <button class="tf-btn" data-tf="1m" type="button">1M</button>
++              <button class="tf-btn" data-tf="all" type="button">ALL</button>
++            </div>
++
++            <div class="reward-estimates" id="rewardEstimates">
++              <div class="est-pill"><span class="est-l">Daily</span><span class="est-v" id="rwEstDay">—</span></div>
++              <div class="est-pill"><span class="est-l">Weekly</span><span class="est-v" id="rwEstWeek">—</span></div>
++              <div class="est-pill"><span class="est-l">Monthly</span><span class="est-v" id="rwEstMonth">—</span></div>
++            </div>
++
+             <div class="reward-tools">
+-              <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
+-
+               <div class="mini-select-wrap">
+                 <span class="mini-select-label">Filtro</span>
+                 <select id="rewardFilter" class="mini-select">
+                   <option value="0">Tutti</option>
+-                  <option value="0.00001">≥ 0.00001</option>
+-                  <option value="0.00005">≥ 0.00005</option>
+-                  <option value="0.0001">≥ 0.0001</option>
+-                  <option value="0.0002">≥ 0.0002</option>
++                  <option value="lt:0.05">Minori di 0.05</option>
++                  <option value="gte:0.05">Maggiori di 0.05</option>
++                  <option value="gte:0.1">0.1 in su</option>
+                 </select>
+               </div>
+             </div>
+@@
+-          <!-- 5) APR (card separata) -->
+-          <div class="card">
+-            <div class="label">APR</div>
+-            <div class="value-row"><span id="apr">0%</span></div>
+-          </div>
+-
+           <!-- 6) 1D PRICE CHART -->
+           <div class="card chart-card">
+             <div class="label">1D Price Chart</div>
+ 
+             <div class="card-tools">
+               <button class="card-expand" id="priceChartExpand" type="button" aria-label="Expand 1D Price Chart">⤢</button>
++              <button class="scale-btn" id="priceScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
+             </div>
+ 
++            <div class="tf-switch small" id="priceTfSwitch">
++              <button class="tf-btn active" data-tf="1d" type="button">1D</button>
++              <button class="tf-btn" data-tf="1w" type="button">1W</button>
++              <button class="tf-btn" data-tf="1m" type="button">1M</button>
++              <button class="tf-btn" data-tf="1y" type="button">1Y</button>
++              <button class="tf-btn" data-tf="all" type="button">ALL</button>
++            </div>
++
++            <div class="interval-switch" id="priceIntervalSwitch">
++              <button class="mini-btn active" id="priceInt1m" type="button" data-int="1m">1m</button>
++              <button class="mini-btn" id="priceInt5m" type="button" data-int="5m">5m</button>
++            </div>
++
+             <div class="chart-overlay" id="chartOverlay">
+               <span id="chartPrice">--</span>
+             </div>
+ 
+             <canvas id="priceChart"></canvas>
+           </div>
+@@
+           <div class="card price-card">
+             <div class="label">INJ Price</div>
+             <div class="value-row"><span id="price">0.0000</span></div>
+ 
+             <div class="sub-row perf">
+               <span class="arrow" id="arrow24h">►</span>
+               <span class="pct" id="pct24h">0.00%</span>
+             </div>
++            <div class="bar-head"><span class="bar-label">1D</span></div>
+             <div class="price-bar-container bar-container">
+-              <span class="bar-label">1D</span>
+               <div id="priceBar" class="bar-fill"></div>
+               <div class="open-marker" aria-hidden="true"></div>
+               <div id="priceLine" class="bar-line"></div>
+             </div>
+             <div class="bar-values">
+               <span id="priceMin" class="left">--</span>
+               <span id="priceOpen" class="center">--</span>
+               <span id="priceMax" class="right">--</span>
+             </div>
+ 
+             <div class="sub-row perf">
+               <span class="arrow" id="arrowWeek">►</span>
+               <span class="pct" id="pctWeek">0.00%</span>
+             </div>
++            <div class="bar-head"><span class="bar-label">1W</span></div>
+             <div class="week-bar-container bar-container">
+-              <span class="bar-label">1W</span>
+               <div id="weekBar" class="bar-fill"></div>
+               <div class="open-marker" aria-hidden="true"></div>
+               <div id="weekLine" class="bar-line"></div>
+             </div>
+             <div class="bar-values">
+               <span id="weekMin" class="left">--</span>
+               <span id="weekOpen" class="center">--</span>
+               <span id="weekMax" class="right">--</span>
+             </div>
+ 
+             <div class="sub-row perf">
+               <span class="arrow" id="arrowMonth">►</span>
+               <span class="pct" id="pctMonth">0.00%</span>
+             </div>
++            <div class="bar-head"><span class="bar-label">1M</span></div>
+             <div class="month-bar-container bar-container">
+-              <span class="bar-label">1M</span>
+               <div id="monthBar" class="bar-fill"></div>
+               <div class="open-marker" aria-hidden="true"></div>
+               <div id="monthLine" class="bar-line"></div>
+             </div>
+             <div class="bar-values">
+               <span id="monthMin" class="left">--</span>
+               <span id="monthOpen" class="center">--</span>
+               <span id="monthMax" class="right">--</span>
+             </div>
+           </div>
+ 
++          <!-- 8) APR (moved to bottom + chart) -->
++          <div class="card apr-card" id="aprCard">
++            <div class="label-row">
++              <div class="label">APR</div>
++              <div class="card-tools">
++                <button class="card-expand" id="aprExpand" type="button" aria-label="Expand APR">⤢</button>
++                <button class="scale-btn" id="aprScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
++              </div>
++            </div>
++            <div class="value-row"><span id="apr">0%</span></div>
++            <div class="apr-chart-wrap">
++              <canvas id="aprChart"></canvas>
++            </div>
++          </div>
++
+         </div>
+       </section>
+@@
+       <section class="page page-events" id="pageEvents" data-page="event" aria-hidden="true">
+         <div class="events-head">
+           <div class="events-title">
+             <h2>Event</h2>
+             <div class="events-sub">On-chain actions + key price moves (24h)</div>
+           </div>
+ 
+-          <button class="events-clear" id="eventsClearBtn" type="button">Clear</button>
++          <div class="events-actions">
++            <button class="events-filter" id="eventsFilterBtn" type="button" aria-label="Filters" title="Filters">⛭</button>
++            <button class="events-clear" id="eventsClearBtn" type="button">Reset</button>
++          </div>
+         </div>
+ 
+         <div class="events-card">
++          <div class="events-filters" id="eventsFilters" aria-hidden="true">
++            <div class="events-filter-row">
++              <span class="events-filter-label">Category</span>
++              <select id="eventsCategoryFilter" class="events-filter-select">
++                <option value="all">All</option>
++                <option value="reward">Reward</option>
++                <option value="stake">Staked</option>
++                <option value="apr">APR</option>
++                <option value="price">Price</option>
++                <option value="exchange">Exchange</option>
++                <option value="ui">UI</option>
++              </select>
++            </div>
++          </div>
++
+           <div class="events-table-wrap" id="eventsTableWrap">
+             <table class="events-table" aria-label="Event table">
+               <thead>
+                 <tr>
+                   <th>Event</th>
+@@
+               <tbody id="eventsTbody">
+                 <!-- rows injected by JS -->
+               </tbody>
+             </table>
+           </div>
+ 
++          <div class="events-pager" id="eventsPager" aria-label="Pagination">
++            <!-- JS injects pages -->
++          </div>
++
+           <div class="events-empty" id="eventsEmpty">
+             No events yet. They will appear here automatically.
+           </div>
+         </div>
+       </section>
+ 
++      <!-- ========== TOOLS: INJECTIVE CONVERTER ========== -->
++      <section class="page page-tools" id="pageToolsConverter" data-page="tools-converter" aria-hidden="true">
++        <div class="tools-head">
++          <h2>Injective Converter</h2>
++          <div class="tools-sub">EUR → USD → INJ (real time)</div>
++        </div>
++
++        <div class="card tools-card">
++          <div class="label">Amount</div>
++          <div class="tools-row">
++            <input class="tools-input" id="convEurInput" type="number" min="0" step="0.01" placeholder="EUR" />
++            <button class="mini-btn" id="convMaxBtn" type="button">MAX</button>
++          </div>
++
++          <div class="tools-kpis">
++            <div class="tools-kpi"><span class="k">EUR</span><span class="v" id="convEur">—</span></div>
++            <div class="tools-kpi"><span class="k">USD</span><span class="v" id="convUsd">—</span></div>
++            <div class="tools-kpi"><span class="k">INJ</span><span class="v" id="convInj">—</span></div>
++          </div>
++
++          <div class="tools-footnote" id="convMeta">Rate: — · Price: —</div>
++        </div>
++      </section>
++
++      <!-- ========== TOOLS: MARKET CAP OF ========== -->
++      <section class="page page-tools" id="pageToolsMarketcap" data-page="tools-marketcap" aria-hidden="true">
++        <div class="tools-head">
++          <h2>Market Cap Of</h2>
++          <div class="tools-sub">Compare INJ with custom caps</div>
++        </div>
++
++        <div class="card tools-card">
++          <div class="label">Target market cap</div>
++          <div class="tools-row">
++            <input class="tools-input" id="mcValueInput" type="number" min="0" step="0.01" placeholder="Value" />
++            <select class="tools-select" id="mcUnitSelect">
++              <option value="k">Thousands</option>
++              <option value="m" selected>Millions</option>
++              <option value="b">Billions</option>
++              <option value="t">Trillions</option>
++            </select>
++          </div>
++
++          <div class="tools-kpis">
++            <div class="tools-kpi"><span class="k">Target Cap</span><span class="v" id="mcTarget">—</span></div>
++            <div class="tools-kpi"><span class="k">Implied INJ</span><span class="v" id="mcImplied">—</span></div>
++            <div class="tools-kpi"><span class="k">Multiplier</span><span class="v" id="mcMult">—</span></div>
++          </div>
++
++          <div class="tools-footnote" id="mcMeta">Supply model: —</div>
++        </div>
++      </section>
++
+     </main>
+@@
+   <div class="pro-footer" id="proFooter">
+@@
+   </div>
+ 
+   </div>
++
++  <!-- SETTINGS MODAL (structure only – JS will drive tabs + actions) -->
++  <div class="modal" id="settingsModal" aria-hidden="true">
++    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Settings">
++      <div class="modal-head">
++        <div class="modal-title">Settings</div>
++        <button class="modal-close" id="settingsCloseBtn" type="button" aria-label="Close">✕</button>
++      </div>
++
++      <div class="modal-tabs" id="settingsTabs">
++        <button class="tab-btn active" data-tab="general" type="button">Generali</button>
++        <button class="tab-btn" data-tab="view" type="button">Vedi Opzioni</button>
++        <button class="tab-btn" data-tab="advanced" type="button">Advance</button>
++      </div>
++
++      <div class="modal-body">
++        <div class="tab-panel show" data-panel="general">
++          <div class="setting-row">
++            <div class="setting-label">Theme</div>
++            <div class="setting-value" id="setThemeState">—</div>
++          </div>
++          <div class="setting-row">
++            <div class="setting-label">Mode</div>
++            <div class="setting-value" id="setModeState">—</div>
++          </div>
++        </div>
++
++        <div class="tab-panel" data-panel="view">
++          <div class="setting-row">
++            <div class="setting-label">Charts</div>
++            <div class="setting-hint">Auto scaling + log/linear per-card</div>
++          </div>
++        </div>
++
++        <div class="tab-panel" data-panel="advanced">
++          <div class="setting-row">
++            <div class="setting-label">Reset data</div>
++            <div class="setting-hint">Irreversible. Choose what to clear for this wallet.</div>
++          </div>
++
++          <div class="reset-grid">
++            <label class="chk"><input id="resetStakeChk" type="checkbox" /> <span>Staked</span></label>
++            <label class="chk"><input id="resetRewardChk" type="checkbox" /> <span>Reward</span></label>
++            <label class="chk"><input id="resetAprChk" type="checkbox" /> <span>APR</span></label>
++            <label class="chk"><input id="resetEventsChk" type="checkbox" /> <span>Events</span></label>
++            <label class="chk"><input id="resetNetWorthChk" type="checkbox" /> <span>Net Worth</span></label>
++          </div>
++
++          <div class="modal-warn" id="resetWarn">⚠️ This action is irreversible.</div>
++          <button class="danger-btn" id="applyResetBtn" type="button">Apply</button>
++        </div>
++      </div>
++    </div>
++  </div>
+*** End Patch
