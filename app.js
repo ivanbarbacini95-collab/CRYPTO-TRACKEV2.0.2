@@ -314,6 +314,8 @@ function setAddressDisplay(addr) {
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
   addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${shortAddr(addr)}</span>`;
+  const dw = $("drawerWallet");
+  if (dw) dw.textContent = shortAddr(addr);
 }
 setAddressDisplay(address);
 
@@ -502,7 +504,6 @@ function ensureEventPage(){
   `;
   document.body.appendChild(eventPage);
 
-  // style theme switch for button
   const btn = eventPage.querySelector("#eventCloseBtn");
   if (btn) {
     btn.style.color = (document.body.dataset.theme === "light") ? "rgba(15,23,42,.88)" : "rgba(249,250,251,.92)";
@@ -515,7 +516,6 @@ function ensureEventPage(){
     hideEventPage();
   }, { passive:false });
 
-  // click outside not used (it's full page), but Esc closes
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideEventPage();
   });
@@ -531,7 +531,6 @@ function showEventPage(){
   eventPage.style.display = "block";
   eventPage.setAttribute("aria-hidden","false");
 
-  // update subtitle
   const sub = eventPage.querySelector("#eventPageSub");
   if (sub) sub.textContent = address ? `Wallet: ${shortAddr(address)}` : "No wallet selected";
 
@@ -569,7 +568,7 @@ drawerNav?.addEventListener("click", (e) => {
   }
 
   if (page === "event") {
-    showEventPage(); // ✅ dedicated page
+    showEventPage();
     return;
   }
 
@@ -674,7 +673,6 @@ let cloudLastOk = 0;
 function cloudSetState(state){
   cloudState = state || "synced";
 
-  // footer
   const root = $("appRoot");
   const st = $("cloudStatus");
   if (root) root.classList.remove("cloud-synced","cloud-saving","cloud-error");
@@ -689,7 +687,6 @@ function cloudSetState(state){
     else st.textContent = "Cloud: Synced";
   }
 
-  // drawer (optional)
   const ds = $("drawerCloudStatus");
   if (ds) {
     if (!hasInternet()) ds.textContent = "Offline cache";
@@ -784,8 +781,6 @@ function uniqMergeByKey(items, keyFn){
 }
 
 function mergeSeriesArrays(localArrs, remoteArrs, max){
-  // merge by index alignment + clamp.
-  // For stake/wd (string labels), we merge by label+value key.
   const { labelsL, dataL, extra1L, extra2L } = localArrs;
   const { labelsR, dataR, extra1R, extra2R } = remoteArrs;
 
@@ -847,7 +842,6 @@ function mergeEvents(localItems, remoteItems){
 async function cloudHydrateAndMerge(){
   if (!address) return;
 
-  // local already loaded by normal loaders; now pull remote and merge
   cloudSetState(hasInternet() ? "saving" : "offline");
 
   const remote = await cloudPull();
@@ -857,7 +851,6 @@ async function cloudHydrateAndMerge(){
     return;
   }
 
-  // stake
   if (remote.stake) {
     const m = mergeSeriesArrays(
       { labelsL: stakeLabels, dataL: stakeData, extra1L: stakeMoves, extra2L: stakeTypes },
@@ -872,9 +865,7 @@ async function cloudHydrateAndMerge(){
     drawStakeChart();
   }
 
-  // wd
   if (remote.wd) {
-    // merge by time (best key)
     const LR = [];
     for (let i=0;i<wdTimesAll.length;i++) LR.push({t:safe(wdTimesAll[i]), l:String(wdLabelsAll[i]||""), v:safe(wdValuesAll[i])});
     const RR = [];
@@ -894,14 +885,12 @@ async function cloudHydrateAndMerge(){
     goRewardLive();
   }
 
-  // nw
   if (remote.nw) {
     mergeNW(null, remote.nw);
     saveNWLocalOnly();
     drawNW();
   }
 
-  // events
   if (remote.ev?.items) {
     eventsAll = mergeEvents(eventsAll, remote.ev.items);
     saveEventsLocalOnly();
@@ -910,8 +899,6 @@ async function cloudHydrateAndMerge(){
 
   cloudSetState("synced");
   cloudRenderCounts();
-
-  // if local seems newer, push back (light)
   cloudSchedulePush();
 }
 
@@ -1220,13 +1207,10 @@ function renderEventRows(){
 
 /* ================= INJECTIVE LOGO SWAP ================= */
 function swapInjectiveLogos(){
-  // net worth asset icon
   const icons = document.querySelectorAll(".nw-asset-icon, .nw-coin-logo");
   icons.forEach((el) => {
-    // if already an img, skip
     if (el.querySelector && el.querySelector("img")) return;
 
-    // keep size if it's a square wrapper
     const img = document.createElement("img");
     img.src = INJ_LOGO_PNG;
     img.alt = "Injective";
@@ -1236,7 +1220,6 @@ function swapInjectiveLogos(){
     img.style.objectFit = "cover";
     img.style.borderRadius = "inherit";
 
-    // if element is span with no dimensions, set a reasonable
     const cs = getComputedStyle(el);
     const w = parseFloat(cs.width || "0");
     const h = parseFloat(cs.height || "0");
@@ -1272,7 +1255,6 @@ function ensureValidatorCard(){
   let card = document.querySelector(".validator-card");
   if (card) return card;
 
-  // if not present, create one (safe)
   const cardsWrap = document.querySelector(".cards-wrapper");
   if (!cardsWrap) return null;
 
@@ -1294,7 +1276,6 @@ function ensureValidatorCard(){
       </div>
     </div>
   `;
-  // put it under Net Worth card, if exists
   const nw = document.getElementById("netWorthCard");
   if (nw && nw.parentElement === cardsWrap) {
     nw.insertAdjacentElement("afterend", card);
@@ -1302,12 +1283,11 @@ function ensureValidatorCard(){
     cardsWrap.insertAdjacentElement("afterbegin", card);
   }
 
-  ensureToastCSS(); // for pulse animation reuse
+  ensureToastCSS();
   return card;
 }
 
 function setValidatorDot(state){
-  // state: loading | ok | fail
   const dot = document.getElementById("validatorDot") || document.querySelector(".validator-card #validatorDot");
   if (!dot) return;
 
@@ -1557,7 +1537,6 @@ async function loadAccount(isRefresh=false) {
   const delgs = (s.delegation_responses || []);
   stakeInj = delgs.reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
 
-  // validator addr (first delegation)
   const firstVal = delgs?.[0]?.delegation?.validator_address || "";
   if (firstVal && firstVal !== validatorAddr) {
     loadValidatorInfo(firstVal);
@@ -1574,7 +1553,6 @@ async function loadAccount(isRefresh=false) {
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj, prevRewards);
 
-  /* ✅ NET WORTH: record point once account updates */
   recordNetWorthPoint();
 
   setUIReady(true);
@@ -2009,7 +1987,6 @@ function maybeAddStakePoint(currentStake) {
   const typ = delta > 0 ? "Delegate / Compound" : "Undelegate";
   stakeTypes.push(typ);
 
-  // ✅ event
   pushEvent({
     type: "stake",
     title: delta > 0 ? "Stake increased" : "Stake decreased",
@@ -2252,7 +2229,6 @@ function maybeRecordRewardWithdrawal(newRewards, prevRewardsForEvent=null) {
     rebuildWdView();
     goRewardLive();
 
-    // ✅ event (reward withdrawn)
     pushEvent({
       type: "reward",
       title: "Rewards withdrawn",
@@ -2261,7 +2237,6 @@ function maybeRecordRewardWithdrawal(newRewards, prevRewardsForEvent=null) {
     });
   }
 
-  // if rewards increased a lot (compound / accrual), optional
   const prev = safe(prevRewardsForEvent);
   if (prev && (r - prev) > 0.002) {
     pushEvent({
@@ -2285,7 +2260,6 @@ let netWorthChart = null;
 let nwHoverActive = false;
 let nwHoverIndex = null;
 
-/* window ms */
 function nwWindowMs(tf){
   if (tf === "live") return NW_LIVE_WINDOW_MS;
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
@@ -2295,7 +2269,6 @@ function nwWindowMs(tf){
   return 24 * 60 * 60 * 1000;
 }
 
-/* ✅ view builder */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
@@ -2336,7 +2309,6 @@ function nwApplySignStyling(sign){
   netWorthChart.update("none");
 }
 
-/* ✅ Vertical line while interacting */
 const nwVerticalLinePlugin = {
   id: "nwVerticalLinePlugin",
   afterDraw(ch){
@@ -2356,7 +2328,6 @@ const nwVerticalLinePlugin = {
   }
 };
 
-/* ✅ Blinking yellow dot at last point */
 const nwLastDotPlugin = {
   id: "nwLastDotPlugin",
   afterDatasetsDraw(ch) {
@@ -2461,7 +2432,6 @@ function drawNW(){
   netWorthChart.data.datasets[0].data = view.data;
   netWorthChart.update("none");
 
-  // PnL only for non-live
   const pnlEl = $("netWorthPnl");
   if (pnlEl && view.data.length >= 2 && nwTf !== "live") {
     const first = safe(view.data[0]);
@@ -2542,11 +2512,11 @@ function attachNWInteractions(){
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
 
+/* ✅ FIX: no double listener on timeframe */
 function attachNWTFHandlers(){
   const wrap = $("nwTfSwitch");
   if (!wrap) return;
 
-  // ensure LIVE button exists (without editing HTML)
   const existing = Array.from(wrap.querySelectorAll(".tf-btn")).map(b => b.dataset.tf);
   if (!existing.includes("live")) {
     const liveBtn = document.createElement("button");
@@ -2560,18 +2530,20 @@ function attachNWTFHandlers(){
   const btns = wrap.querySelectorAll(".tf-btn");
   btns.forEach(b => b.classList.toggle("active", b.dataset.tf === nwTf));
 
+  if (wrap.dataset.bound === "1") return;
+  wrap.dataset.bound = "1";
+
   wrap.addEventListener("click", (e) => {
     const btn = e.target?.closest(".tf-btn");
     if (!btn) return;
     const tf = btn.dataset.tf || "1d";
     if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
 
-    // ✅ lock: if timeframe not enough data, block selection (except live/1d)
     if (tf !== "live" && tf !== "1d") {
       const oldest = nwTAll.length ? safe(nwTAll[0]) : 0;
       const span = Date.now() - oldest;
       const need = nwWindowMs(tf);
-      if (span < need * 0.25) { // soft lock
+      if (span < need * 0.25) {
         pushEvent({ type:"ui", title:"Timeframe locked", value:`Not enough data for ${tf.toUpperCase()}`, status:"pending" });
         return;
       }
@@ -2639,14 +2611,11 @@ function refreshChartsTheme(){
       netWorthChart.update("none");
     }
 
-    // event page theme
     if (eventPage) {
       eventPage.style.background = (document.body.dataset.theme === "light")
         ? "rgba(231,234,240,0.96)"
         : "rgba(0,0,0,0.82)";
     }
-
-    // validator line/dot uses inline + animation -> ok
   } catch {}
 }
 
@@ -2661,11 +2630,9 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
-  // reset numeric targets
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0;
 
-  // series load local
   if (RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -2691,10 +2658,8 @@ async function commitAddress(newAddr) {
   setValidatorDot(hasInternet() ? "loading" : "fail");
   setValidatorLine("Loading…");
 
-  // swap logos
   swapInjectiveLogos();
 
-  // cloud hydrate from backend -> merge -> push
   await cloudHydrateAndMerge();
 
   modeLoading = true;
@@ -2763,7 +2728,6 @@ function ensurePullUI(){
   `;
   document.body.appendChild(pullWrap);
 
-  // animation
   const st = document.createElement("style");
   st.textContent = `@keyframes spin { to { transform: rotate(360deg); } }`;
   document.head.appendChild(st);
@@ -2784,9 +2748,8 @@ function pullSpin(on){
 }
 
 function attachPullToRefresh(){
-  // only mobile-like gestures
   window.addEventListener("touchstart", (e) => {
-    if (liveMode) return; // ✅ only refresh mode
+    if (liveMode) return;
     if (isDrawerOpen || isEventPageOpen()) return;
     if (window.scrollY > 0) return;
 
@@ -2813,7 +2776,6 @@ function attachPullToRefresh(){
 
     if (liveMode) { pullSet(-64); return; }
 
-    // threshold
     if (pullDist > 90) {
       pullSet(0);
       pullSpin(true);
@@ -2829,31 +2791,35 @@ function attachPullToRefresh(){
   }, { passive: true });
 }
 
+/* ================= FULLSCREEN EXPAND (optional) ================= */
+function attachExpandHandlers(){
+  document.addEventListener("click", (e) => {
+    const btn = e.target?.closest(".card-expand");
+    if (!btn) return;
+
+    const id = btn.dataset.expand;
+    const card = id ? document.getElementById(id) : btn.closest(".card");
+    if (!card) return;
+
+    const isFull = card.classList.contains("fullscreen");
+    document.querySelectorAll(".card.fullscreen").forEach(c => c.classList.remove("fullscreen"));
+    document.body.classList.remove("card-expanded");
+
+    if (!isFull) {
+      card.classList.add("fullscreen");
+      document.body.classList.add("card-expanded");
+    }
+  }, { passive:true });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll(".card.fullscreen").forEach(c => c.classList.remove("fullscreen"));
+    document.body.classList.remove("card-expanded");
+  });
+}
+
 /* ================= BOOT ================= */
 (async function boot() {
-  // menu drawer cloud status elements (optional) – create if missing
-  const drawerFoot = drawer?.querySelector(".drawer-foot");
-  if (drawerFoot && !document.getElementById("drawerCloudRow")) {
-    const row = document.createElement("div");
-    row.id = "drawerCloudRow";
-    row.style.marginTop = "10px";
-    row.style.display = "flex";
-    row.style.justifyContent = "space-between";
-    row.style.alignItems = "center";
-    row.style.gap = "10px";
-    row.style.fontSize = ".78rem";
-    row.style.opacity = ".86";
-    row.innerHTML = `
-      <div style="font-weight:900;">App v2.0.2</div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="opacity:.8;font-weight:850;">Cloud</span>
-        <span id="drawerCloudStatus" style="font-weight:950;">—</span>
-      </div>
-    `;
-    drawerFoot.appendChild(row);
-  }
-
-  // initial states
   cloudSetState(hasInternet() ? "synced" : "offline");
   cloudRenderCounts();
 
@@ -2864,19 +2830,17 @@ function attachPullToRefresh(){
   attachRewardLiveHandler();
   attachRewardFilterHandler();
   attachPullToRefresh();
+  attachExpandHandlers();
 
-  // ensure pages
-  ensureEventPage(); // ready for rendering rows
+  ensureEventPage();
   hideEventPage();
 
-  // load current address
   setAddressDisplay(address);
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // stake load
   if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
     clearStakeSeriesStorage();
     resetStakeSeriesFromNow();
@@ -2885,7 +2849,6 @@ function attachPullToRefresh(){
     drawStakeChart();
   }
 
-  // reward + nw + events
   if (address) {
     loadWdAll();
     rebuildWdView();
@@ -2902,7 +2865,6 @@ function attachPullToRefresh(){
     drawNW();
   }
 
-  // validator + logos
   ensureValidatorCard();
   swapInjectiveLogos();
   if (address) setValidatorDot(hasInternet() ? "loading" : "fail");
@@ -2910,7 +2872,6 @@ function attachPullToRefresh(){
   modeLoading = true;
   refreshConnUI();
 
-  // hydrate cloud first (so charts don't reset across devices)
   if (address) await cloudHydrateAndMerge();
 
   await loadCandleSnapshot(liveMode ? false : true);
@@ -2936,12 +2897,10 @@ function attachPullToRefresh(){
 
 /* ================= LOOP ================= */
 function animate() {
-  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
-  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -2950,7 +2909,6 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
@@ -2967,7 +2925,6 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -3008,13 +2965,11 @@ function animate() {
     setText("monthMin", "--"); setText("monthOpen", "--"); setText("monthMax", "--");
   }
 
-  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
   setText("availableUsd", `≈ $${(displayed.available * displayed.price).toFixed(2)}`);
 
-  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
@@ -3032,7 +2987,6 @@ function animate() {
   setText("stakeMin", "0");
   setText("stakeMax", String(STAKE_TARGET_MAX));
 
-  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
@@ -3052,11 +3006,9 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  // APR + time
   setText("apr", safe(apr).toFixed(2) + "%");
   setText("updated", "Last update: " + nowLabel());
 
-  /* ================= NET WORTH UI ================= */
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
@@ -3065,1317 +3017,22 @@ function animate() {
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
 
-    // only update pnl when not live
     if (nwTf !== "live") drawNW();
   }
 
-  // networth mini (ids from your HTML: netWorthInj + nwAssetQty/Price/Usd)
   setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
   setText("nwAssetQty", totalInj.toFixed(4));
   setText("nwAssetPrice", `$${safe(displayed.price).toFixed(2)}`);
   setText("nwAssetUsd", `$${totalUsd.toFixed(2)}`);
 
-  // record points often in live
   if (address && liveMode) recordNetWorthPoint();
 
   refreshConnUI();
 
-  // keep blinking dot smooth
-  if (netWorthChart) netWorthChart.draw();
+  if (netWorthChart && typeof netWorthChart.draw === "function") netWorthChart.draw();
 
-  // keep event page updated
   if (isEventPageOpen()) renderEventRows();
 
   requestAnimationFrame(animate);
 }
 animate();
-
-/* ================= ADDON PACK v2.1 (append-only) ================= */
-(() => {
-  "use strict";
-
-  const _$ = (id) => document.getElementById(id);
-  const _safe = (n) => (Number.isFinite(+n) ? +n : 0);
-  const _clamp = (n, a, b) => Math.min(Math.max(n, a), b);
-
-  const ADDON = {
-    unreadEvents: 0,
-    eventState: { filter: "all", page: 1, pageSize: 25 },
-    overlays: {},
-    priceDayTrigger: { t: 0, level: 0 },
-    lastAprSeen: null,
-    aprSeries: { t: [], v: [] },
-    keys: {
-      scaleNW: "inj_scale_nw",
-      scaleStake: "inj_scale_stake",
-      scaleReward: "inj_scale_reward",
-      scalePrice: "inj_scale_price",
-      scaleApr: "inj_scale_apr",
-      stakeTarget: (addr) => `inj_target_stake_${(addr||"global")}`,
-      rewardTarget: (addr) => `inj_target_reward_${(addr||"global")}`,
-      aprStore: (addr) => `inj_apr_v1_${(addr||"")}`,
-    }
-  };
-
-  function when(cond, fn, tries = 80, ms = 150) {
-    let i = 0;
-    const t = setInterval(() => {
-      i++;
-      if (cond()) { clearInterval(t); fn(); }
-      else if (i >= tries) clearInterval(t);
-    }, ms);
-  }
-
-  /* ---------- Top spinner (refresh mode nicer) ---------- */
-  function ensureTopSpinner(){
-    if (document.getElementById("addonTopSpinner")) return;
-    const el = document.createElement("div");
-    el.id = "addonTopSpinner";
-    el.className = "addon-top-spinner";
-    el.innerHTML = `<div class="addon-spin"></div><div style="font-weight:950">Refreshing…</div><div class="addon-muted" id="addonTopSpinnerSub">Fetching data</div>`;
-    document.body.appendChild(el);
-  }
-  function showTopSpinner(msg){
-    ensureTopSpinner();
-    const el = document.getElementById("addonTopSpinner");
-    const sub = document.getElementById("addonTopSpinnerSub");
-    if (sub) sub.textContent = msg || "Fetching data";
-    el?.classList.add("show");
-  }
-  function hideTopSpinner(){
-    document.getElementById("addonTopSpinner")?.classList.remove("show");
-  }
-
-  /* ---------- Chart helpers ---------- */
-  function isLogKey(key){
-    return localStorage.getItem(key) === "log";
-  }
-  function setLogKey(key, val){
-    localStorage.setItem(key, val ? "log" : "linear");
-  }
-
-  function squeezeRightAxis(ch, px = 34){
-    try{
-      const y = ch?.options?.scales?.y;
-      if (!y) return;
-      y.afterFit = (scale) => { scale.width = px; };
-      ch.options.layout = ch.options.layout || {};
-      ch.options.layout.padding = ch.options.layout.padding || {};
-      ch.options.layout.padding.right = Math.min(ch.options.layout.padding.right ?? 34, 18);
-    } catch {}
-  }
-
-  function applyYScale(ch, useLog){
-    if (!ch?.options?.scales?.y) return;
-
-    const ds = ch.data?.datasets?.[0];
-    const data = Array.isArray(ds?.data) ? ds.data.map(_safe).filter(v => v > 0) : [];
-    const minV = data.length ? Math.min(...data) : 0.000001;
-    const maxV = data.length ? Math.max(...data) : 1;
-
-    if (useLog) {
-      ch.options.scales.y.type = "logarithmic";
-      ch.options.scales.y.min = Math.max(1e-6, minV * 0.92);
-      ch.options.scales.y.max = maxV * 1.10;
-    } else {
-      ch.options.scales.y.type = "linear";
-      ch.options.scales.y.min = undefined;
-      ch.options.scales.y.max = undefined;
-    }
-    ch.update("none");
-  }
-
-  const lastDotGreenPlugin = {
-    id: "addonLastDotGreen",
-    afterDatasetsDraw(ch){
-      const ds = ch.data?.datasets?.[0];
-      if (!ds) return;
-      const meta = ch.getDatasetMeta(0);
-      const pts = meta?.data || [];
-      if (!pts.length) return;
-      const el = pts[pts.length - 1];
-      if (!el) return;
-
-      const t = Date.now();
-      const pulse = 0.35 + 0.65 * Math.abs(Math.sin(t / 320));
-
-      const ctx = ch.ctx;
-      ctx.save();
-      ctx.shadowColor = `rgba(34,197,94,${0.35 * pulse})`;
-      ctx.shadowBlur = 10;
-
-      ctx.beginPath();
-      ctx.arc(el.x, el.y, 6.5, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(34,197,94,${0.18 * pulse})`;
-      ctx.fill();
-
-      ctx.shadowBlur = 0;
-      ctx.beginPath();
-      ctx.arc(el.x, el.y, 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(34,197,94,${0.95 * pulse})`;
-      ctx.fill();
-
-      ctx.restore();
-    }
-  };
-
-  function ensurePlugin(ch, pluginId){
-    const cfg = ch?.config;
-    if (!cfg) return;
-    cfg.plugins = cfg.plugins || [];
-    const has = cfg.plugins.some(p => p && p.id === pluginId);
-    if (!has) cfg.plugins.push(lastDotGreenPlugin);
-  }
-
-  function removePluginById(ch, id){
-    const cfg = ch?.config;
-    if (!cfg?.plugins) return;
-    cfg.plugins = cfg.plugins.filter(p => p && p.id !== id);
-  }
-
-  function findCardByCanvasId(canvasId){
-    const c = _$(canvasId);
-    return c ? c.closest(".card") : null;
-  }
-
-  function ensureCardTools(card){
-    if (!card) return null;
-    let tools = card.querySelector(".card-tools");
-    if (!tools){
-      tools = document.createElement("div");
-      tools.className = "card-tools";
-      card.appendChild(tools);
-    }
-    return tools;
-  }
-
-  function makeBtn(label, title){
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "btn-ico small";
-    b.textContent = label;
-    if (title) b.title = title;
-    return b;
-  }
-
-  function attachScaleToggle({ key, chartGetter, card, label = "LOG" }){
-    if (!card) return;
-    const tools = ensureCardTools(card);
-    if (!tools) return;
-
-    if (tools.querySelector(`[data-addon-scale="${key}"]`)) return;
-
-    const btn = makeBtn(label, "Switch Linear/Log scale");
-    btn.dataset.addonScale = key;
-
-    const syncUI = () => {
-      const on = isLogKey(key);
-      btn.classList.toggle("active", on);
-      btn.textContent = on ? "LOG" : "LIN";
-      const ch = chartGetter();
-      if (ch) applyYScale(ch, on);
-    };
-
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      const on = !isLogKey(key);
-      setLogKey(key, on);
-      syncUI();
-    }, { passive:false });
-
-    tools.appendChild(btn);
-    syncUI();
-  }
-
-  /* ---------- Net Worth: move Validator into card + hide extra info row ---------- */
-  function tweakNetWorthLayout(){
-    const nwCard = document.getElementById("netWorthCard") || findCardByCanvasId("netWorthChart");
-    if (!nwCard) return;
-
-    // Hide “non-essential” assets row if present
-    const a = _$("#nwAssetQty");
-    if (a){
-      const wrap = a.closest(".nw-asset-row") || a.closest(".nw-asset") || a.closest("div");
-      if (wrap) wrap.style.display = "none";
-    }
-    const p = _$("#nwAssetPrice"); if (p){ const w = p.closest(".nw-asset-row") || p.closest("div"); if (w) w.style.display="none"; }
-    const u = _$("#nwAssetUsd");   if (u){ const w = u.closest(".nw-asset-row") || u.closest("div"); if (w) w.style.display="none"; }
-
-    // Move validator-card inside net worth card, under “INJ Total Owned”
-    const vcard = document.querySelector(".validator-card");
-    if (vcard && vcard.closest("#netWorthCard") !== nwCard){
-      const anchor = document.getElementById("netWorthInj")?.closest("div") || nwCard;
-      vcard.style.marginTop = "10px";
-      vcard.style.marginBottom = "2px";
-      // avoid double border stacking
-      vcard.style.borderRadius = "16px";
-      vcard.style.border = (document.body.dataset.theme==="light") ? "1px solid rgba(15,23,42,.14)" : "1px solid rgba(255,255,255,.12)";
-      vcard.style.background = (document.body.dataset.theme==="light") ? "rgba(15,23,42,.04)" : "rgba(255,255,255,.06)";
-      anchor.insertAdjacentElement("afterend", vcard);
-    }
-  }
-
-  /* ---------- Stake: add right axis numbers + last-dot + log/lin ---------- */
-  function patchStakeChartOnce(){
-    if (!window.stakeChart) return;
-    const ch = window.stakeChart;
-    ch.options.scales = ch.options.scales || {};
-    ch.options.scales.y = ch.options.scales.y || {};
-    ch.options.scales.y.position = "right";
-    ch.options.scales.y.ticks = ch.options.scales.y.ticks || {};
-    ch.options.scales.y.ticks.mirror = true;
-    ch.options.scales.y.ticks.padding = 6;
-    ch.options.scales.y.ticks.callback = (v) => (typeof fmtSmart === "function" ? fmtSmart(v) : String(v));
-    squeezeRightAxis(ch, 34);
-    ensurePlugin(ch, "addonLastDotGreen");
-    ch.update("none");
-  }
-
-  /* ---------- Reward: point click shows value + timestamp; log/lin + last-dot ---------- */
-  function patchRewardChartOnce(){
-    if (!window.rewardChart) return;
-    const ch = window.rewardChart;
-
-    // Make tooltip include full date+time if available
-    ch.options.plugins = ch.options.plugins || {};
-    ch.options.plugins.tooltip = ch.options.plugins.tooltip || {};
-    ch.options.plugins.tooltip.callbacks = ch.options.plugins.tooltip.callbacks || {};
-    ch.options.plugins.tooltip.callbacks.title = (items) => {
-      const i = items?.[0]?.dataIndex ?? 0;
-      const t = (Array.isArray(window.wdTimes) ? window.wdTimes[i] : 0) || 0;
-      if (t) return new Date(t).toLocaleString();
-      return (Array.isArray(window.wdLabels) ? window.wdLabels[i] : "") || "";
-    };
-    ch.options.plugins.tooltip.callbacks.label = (item) => {
-      const v = _safe(item.raw);
-      return `Withdrawn • +${v.toFixed(6)} INJ`;
-    };
-
-    // Click point -> toast
-    ch.options.onClick = (evt) => {
-      const pts = ch.getElementsAtEventForMode(evt, "nearest", { intersect: true }, false);
-      if (!pts?.length) return;
-      const i = pts[0].index;
-      const v = _safe(ch.data.datasets[0].data[i]);
-      const t = (Array.isArray(window.wdTimes) ? window.wdTimes[i] : 0) || 0;
-      if (typeof showToastEvent === "function") {
-        showToastEvent({
-          title: "Reward point",
-          t: t || Date.now(),
-          value: `+${v.toFixed(6)} INJ`,
-          status: "ok"
-        });
-      }
-    };
-
-    squeezeRightAxis(ch, 34);
-    ensurePlugin(ch, "addonLastDotGreen");
-    ch.update("none");
-  }
-
-  /* ---------- Price chart: add last-dot + log/lin toggle (timeframes TODO scaffold) ---------- */
-  function patchPriceChartOnce(){
-    if (!window.chart) return;
-    const ch = window.chart;
-
-    squeezeRightAxis(ch, 34);
-    ensurePlugin(ch, "addonLastDotGreen");
-    ch.update("none");
-
-    const priceCard = findCardByCanvasId("priceChart") || findCardByCanvasId("priceChartCanvas") || findCardByCanvasId("priceChartWrap");
-    if (!priceCard) return;
-
-    attachScaleToggle({
-      key: ADDON.keys.scalePrice,
-      chartGetter: () => window.chart,
-      card: priceCard
-    });
-  }
-
-  /* ---------- NetWorth chart: remove yellow last dot plugin, use green; add log/lin ---------- */
-  function patchNWChartOnce(){
-    if (!window.netWorthChart) return;
-    const ch = window.netWorthChart;
-
-    // remove old yellow plugin if present
-    removePluginById(ch, "nwLastDotPlugin");
-    ensurePlugin(ch, "addonLastDotGreen");
-
-    squeezeRightAxis(ch, 34);
-    ch.update("none");
-
-    const nwCard = document.getElementById("netWorthCard") || findCardByCanvasId("netWorthChart");
-    attachScaleToggle({
-      key: ADDON.keys.scaleNW,
-      chartGetter: () => window.netWorthChart,
-      card: nwCard
-    });
-  }
-
-  /* ---------- Targets (gear) for Stake/Reward bars (override bar widths post-animate) ---------- */
-  function ensureTargetModal(){
-    if (document.getElementById("addonTargetOverlay")) return;
-
-    const ov = document.createElement("div");
-    ov.id = "addonTargetOverlay";
-    ov.className = "addon-overlay";
-    ov.setAttribute("aria-hidden","true");
-    ov.innerHTML = `
-      <div class="addon-panel">
-        <div class="addon-row" style="padding:10px 2px 12px 2px;">
-          <div>
-            <div style="font-weight:950;font-size:1.05rem;">Set Range</div>
-            <div class="addon-muted" id="addonTargetSub">—</div>
-          </div>
-          <button class="btn-ico" id="addonTargetClose">Close</button>
-        </div>
-
-        <div class="addon-panel-card">
-          <div class="addon-row">
-            <strong>Target max</strong>
-            <span class="addon-muted">Starting from 0</span>
-          </div>
-          <div style="padding: 0 14px 14px 14px;">
-            <input class="addon-input" id="addonTargetInput" inputmode="decimal" placeholder="e.g. 250" />
-            <div style="display:flex;gap:10px;margin-top:12px;">
-              <button class="btn-ico" id="addonTargetApply">Apply</button>
-              <button class="btn-ico" id="addonTargetReset">Reset</button>
-            </div>
-            <div class="addon-muted" style="margin-top:10px;">
-              Saved per-wallet and will not reset unless you change it.
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(ov);
-
-    document.getElementById("addonTargetClose")?.addEventListener("click", () => {
-      ov.classList.remove("show");
-      ov.setAttribute("aria-hidden","true");
-    });
-
-    ov.addEventListener("click", (e) => {
-      if (e.target === ov) {
-        ov.classList.remove("show");
-        ov.setAttribute("aria-hidden","true");
-      }
-    });
-
-    ADDON.overlays.target = ov;
-  }
-
-  function openTargetModal(kind){
-    ensureTargetModal();
-    const ov = ADDON.overlays.target;
-    if (!ov) return;
-
-    const sub = document.getElementById("addonTargetSub");
-    const input = document.getElementById("addonTargetInput");
-    const addr = (typeof window.address === "string" ? window.address : "") || "global";
-    const key = (kind === "stake") ? ADDON.keys.stakeTarget(addr) : ADDON.keys.rewardTarget(addr);
-
-    if (sub) sub.textContent = `Editing: ${kind.toUpperCase()} range`;
-    if (input) input.value = localStorage.getItem(key) || "";
-
-    const apply = document.getElementById("addonTargetApply");
-    const reset = document.getElementById("addonTargetReset");
-
-    const applyFn = () => {
-      const v = _safe(input?.value);
-      if (v > 0) localStorage.setItem(key, String(v));
-      ov.classList.remove("show");
-      ov.setAttribute("aria-hidden","true");
-    };
-    const resetFn = () => {
-      localStorage.removeItem(key);
-      ov.classList.remove("show");
-      ov.setAttribute("aria-hidden","true");
-    };
-
-    apply.onclick = applyFn;
-    reset.onclick = resetFn;
-
-    ov.classList.add("show");
-    ov.setAttribute("aria-hidden","false");
-    setTimeout(() => input?.focus(), 30);
-  }
-
-  function injectGearNextToBar(barId, kind){
-    const bar = _$(barId);
-    if (!bar) return;
-    const host = bar.closest(".bar-wrap") || bar.parentElement;
-    if (!host) return;
-
-    if (host.querySelector(`[data-addon-gear="${kind}"]`)) return;
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn-ico small";
-    btn.textContent = "⚙";
-    btn.title = "Set range";
-    btn.dataset.addonGear = kind;
-
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openTargetModal(kind);
-    }, { passive:false });
-
-    host.appendChild(btn);
-  }
-
-  function postTickTargetsLoop(){
-    // Stake
-    const addr = (typeof window.address === "string" ? window.address : "") || "global";
-    const stakeTarget = _safe(localStorage.getItem(ADDON.keys.stakeTarget(addr)));
-    const rewardTarget = _safe(localStorage.getItem(ADDON.keys.rewardTarget(addr)));
-
-    if (stakeTarget > 0 && window.displayed?.stake != null){
-      const stakePct = _clamp((_safe(window.displayed.stake) / stakeTarget) * 100, 0, 100);
-      const bar = _$("#stakeBar");
-      const line = _$("#stakeLine");
-      if (bar) bar.style.width = stakePct + "%";
-      if (line) line.style.left = stakePct + "%";
-      const max = _$("#stakeMax");
-      if (max) max.textContent = String(stakeTarget);
-      const pct = _$("#stakePercent");
-      if (pct) pct.textContent = stakePct.toFixed(1) + "%";
-    }
-
-    if (rewardTarget > 0 && window.displayed?.rewards != null){
-      const rp = _clamp((_safe(window.displayed.rewards) / rewardTarget) * 100, 0, 100);
-      const bar = _$("#rewardBar");
-      const line = _$("#rewardLine");
-      if (bar) bar.style.width = rp + "%";
-      if (line) line.style.left = rp + "%";
-      const max = _$("#rewardMax");
-      if (max) max.textContent = rewardTarget.toFixed(2);
-      const pct = _$("#rewardPercent");
-      if (pct) pct.textContent = rp.toFixed(1) + "%";
-    }
-
-    requestAnimationFrame(postTickTargetsLoop);
-  }
-
-  /* ---------- Reward estimates row ---------- */
-  function injectRewardEstimates(){
-    const rewardsEl = _$("#rewards");
-    if (!rewardsEl) return;
-    const card = rewardsEl.closest(".card");
-    if (!card) return;
-    if (card.querySelector("#addonRewardEst")) return;
-
-    const row = document.createElement("div");
-    row.id = "addonRewardEst";
-    row.style.display = "grid";
-    row.style.gridTemplateColumns = "repeat(3, 1fr)";
-    row.style.gap = "10px";
-    row.style.marginTop = "10px";
-    row.style.padding = "0 2px";
-    row.innerHTML = `
-      <div class="addon-panel-card" style="padding:10px 12px;border-radius:16px;">
-        <div class="addon-muted">Daily est.</div>
-        <div id="addonDailyEst" style="font-weight:950">—</div>
-      </div>
-      <div class="addon-panel-card" style="padding:10px 12px;border-radius:16px;">
-        <div class="addon-muted">Weekly est.</div>
-        <div id="addonWeeklyEst" style="font-weight:950">—</div>
-      </div>
-      <div class="addon-panel-card" style="padding:10px 12px;border-radius:16px;">
-        <div class="addon-muted">Monthly est.</div>
-        <div id="addonMonthlyEst" style="font-weight:950">—</div>
-      </div>
-    `;
-
-    // place it under reward bar area if possible
-    const anchor = _$("#rewardBar")?.closest(".card") || card;
-    anchor.appendChild(row);
-
-    // update loop (approx using APR + stake)
-    const loop = () => {
-      const st = _safe(window.stakeInj);
-      const a = _safe(window.apr) / 100;
-      const daily = st * a / 365;
-      const weekly = daily * 7;
-      const monthly = daily * 30;
-
-      const d = _$("#addonDailyEst"), w = _$("#addonWeeklyEst"), m = _$("#addonMonthlyEst");
-      if (d) d.textContent = `${daily.toFixed(6)} INJ`;
-      if (w) w.textContent = `${weekly.toFixed(6)} INJ`;
-      if (m) m.textContent = `${monthly.toFixed(6)} INJ`;
-      requestAnimationFrame(loop);
-    };
-    loop();
-  }
-
-  /* ---------- Address copy icon ---------- */
-  function patchAddressCopy(){
-    if (typeof window.setAddressDisplay !== "function") return;
-    if (window.setAddressDisplay.__addonPatched) return;
-
-    const orig = window.setAddressDisplay;
-    window.setAddressDisplay = function(addr){
-      orig(addr);
-      const host = _$("#addressDisplay");
-      if (!host) return;
-      const tag = host.querySelector(".tag");
-      if (!tag) return;
-
-      if (!tag.querySelector(".addr-copy-btn")) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "addr-copy-btn";
-        b.title = "Copy full address";
-        b.innerHTML = "📋";
-        b.addEventListener("click", async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const full = (typeof window.address === "string" ? window.address : addr) || "";
-          if (!full) return;
-          try {
-            await navigator.clipboard.writeText(full);
-            if (typeof showToastEvent === "function") {
-              showToastEvent({ title:"Copied", t: Date.now(), value: full, status:"ok" });
-            }
-          } catch {
-            // fallback
-            const ta = document.createElement("textarea");
-            ta.value = full; document.body.appendChild(ta); ta.select();
-            try { document.execCommand("copy"); } catch {}
-            ta.remove();
-          }
-        }, { passive:false });
-        tag.appendChild(b);
-      }
-    };
-    window.setAddressDisplay.__addonPatched = true;
-  }
-
-  /* ---------- Menu labels + Tools + Settings intercept ---------- */
-  function addMenuLabels(){
-    const themeToggle = _$("#themeToggle");
-    const liveToggle  = _$("#liveToggle");
-    if (themeToggle && !themeToggle.dataset.addonLabel){
-      themeToggle.dataset.addonLabel = "1";
-      themeToggle.title = "Theme";
-      const span = document.createElement("span");
-      span.style.marginLeft = "8px";
-      span.style.fontWeight = "900";
-      span.style.opacity = ".85";
-      span.style.fontSize = ".82rem";
-      span.textContent = "Theme";
-      themeToggle.appendChild(span);
-    }
-    if (liveToggle && !liveToggle.dataset.addonLabel){
-      liveToggle.dataset.addonLabel = "1";
-      liveToggle.title = "Mode";
-      const span = document.createElement("span");
-      span.style.marginLeft = "8px";
-      span.style.fontWeight = "900";
-      span.style.opacity = ".85";
-      span.style.fontSize = ".82rem";
-      span.textContent = "Mode";
-      liveToggle.appendChild(span);
-    }
-  }
-
-  function ensureEventBadge(){
-    const nav = _$("#drawerNav");
-    if (!nav) return;
-    const btn = nav.querySelector('.nav-item[data-page="event"]');
-    if (!btn) return;
-    if (btn.querySelector(".badge")) return;
-    const b = document.createElement("span");
-    b.className = "badge";
-    b.textContent = "0";
-    b.style.display = "none";
-    btn.appendChild(b);
-  }
-
-  function setEventBadge(n){
-    const nav = _$("#drawerNav");
-    const btn = nav?.querySelector('.nav-item[data-page="event"]');
-    const b = btn?.querySelector(".badge");
-    if (!b) return;
-    const v = Math.max(0, Math.floor(n||0));
-    b.textContent = String(v);
-    b.style.display = v > 0 ? "inline-flex" : "none";
-  }
-
-  function patchPushEventUnread(){
-    if (typeof window.pushEvent !== "function") return;
-    if (window.pushEvent.__addonPatched) return;
-
-    const orig = window.pushEvent;
-    window.pushEvent = function(ev){
-      orig(ev);
-      ADDON.unreadEvents++;
-      setEventBadge(ADDON.unreadEvents);
-    };
-    window.pushEvent.__addonPatched = true;
-  }
-
-  /* ---------- Event page: filter + reset + pagination (25 rows) ---------- */
-  function upgradeEventPageUI(){
-    const ep = document.getElementById("eventPage");
-    if (!ep) return;
-    if (ep.querySelector("#addonEventToolbar")) return;
-
-    const head = ep.querySelector("#eventTableWrap");
-    if (!head) return;
-
-    const toolbar = document.createElement("div");
-    toolbar.id = "addonEventToolbar";
-    toolbar.style.display = "flex";
-    toolbar.style.alignItems = "center";
-    toolbar.style.justifyContent = "space-between";
-    toolbar.style.gap = "10px";
-    toolbar.style.marginBottom = "10px";
-    toolbar.style.padding = "0 2px";
-    toolbar.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <button class="btn-ico small" id="addonEventReset">Reset</button>
-        <select class="addon-input" id="addonEventFilter" style="height:34px;border-radius:12px;max-width:260px;">
-          <option value="all">All categories</option>
-          <option value="stake">Stake</option>
-          <option value="reward">Reward</option>
-          <option value="apr">APR</option>
-          <option value="price">Price</option>
-          <option value="ui">UI</option>
-        </select>
-      </div>
-      <div class="addon-muted" id="addonEventPagerMeta">—</div>
-    `;
-
-    head.parentElement.insertAdjacentElement("beforebegin", toolbar);
-
-    document.getElementById("addonEventReset")?.addEventListener("click", () => {
-      if (!confirm("Reset events for this wallet? This is irreversible.")) return;
-      window.eventsAll = [];
-      try { window.saveEventsLocalOnly?.(); } catch {}
-      ADDON.unreadEvents = 0;
-      setEventBadge(0);
-      window.renderEventRows?.();
-    });
-
-    document.getElementById("addonEventFilter")?.addEventListener("change", (e) => {
-      ADDON.eventState.filter = String(e.target.value || "all");
-      ADDON.eventState.page = 1;
-      window.renderEventRows?.();
-    });
-
-    // Patch renderEventRows to paginate/filter
-    if (typeof window.renderEventRows === "function" && !window.renderEventRows.__addonPatched){
-      const orig = window.renderEventRows;
-      window.renderEventRows = function(){
-        const ep = document.getElementById("eventPage");
-        if (!ep) return orig();
-
-        const rows = ep.querySelector("#eventRows");
-        if (!rows) return orig();
-
-        const all = Array.isArray(window.eventsAll) ? window.eventsAll.slice().reverse() : [];
-        const f = ADDON.eventState.filter;
-
-        const filtered = (f === "all") ? all : all.filter(x => String(x?.type||"").toLowerCase() === f);
-
-        const ps = ADDON.eventState.pageSize;
-        const total = filtered.length;
-        const pages = Math.max(1, Math.ceil(total / ps));
-        ADDON.eventState.page = _clamp(ADDON.eventState.page, 1, pages);
-
-        const start = (ADDON.eventState.page - 1) * ps;
-        const slice = filtered.slice(start, start + ps);
-
-        if (!slice.length){
-          rows.innerHTML = `<div style="padding:14px;opacity:.75;font-weight:850;">No events.</div>`;
-        } else {
-          // reuse original renderer style by temporarily swapping eventsAll (safe)
-          const tmp = window.eventsAll;
-          window.eventsAll = slice.slice().reverse(); // keep newest first in original
-          orig();
-          window.eventsAll = tmp;
-        }
-
-        const meta = document.getElementById("addonEventPagerMeta");
-        if (meta) meta.textContent = `Page ${ADDON.eventState.page}/${pages} · ${total} rows`;
-
-        // pager buttons
-        let pager = ep.querySelector("#addonEventPager");
-        if (!pager){
-          pager = document.createElement("div");
-          pager.id = "addonEventPager";
-          pager.style.display = "flex";
-          pager.style.justifyContent = "center";
-          pager.style.gap = "10px";
-          pager.style.padding = "12px 0 0 0";
-          ep.querySelector("#eventTableWrap")?.insertAdjacentElement("afterend", pager);
-        }
-
-        pager.innerHTML = `
-          <button class="btn-ico small" id="addonPrevPage" ${ADDON.eventState.page<=1?"disabled":""}>Prev</button>
-          <button class="btn-ico small" id="addonNextPage" ${ADDON.eventState.page>=pages?"disabled":""}>Next</button>
-        `;
-        document.getElementById("addonPrevPage")?.addEventListener("click", () => { ADDON.eventState.page--; window.renderEventRows?.(); });
-        document.getElementById("addonNextPage")?.addEventListener("click", () => { ADDON.eventState.page++; window.renderEventRows?.(); });
-      };
-      window.renderEventRows.__addonPatched = true;
-    }
-  }
-
-  function patchShowEventPageUnreadReset(){
-    if (typeof window.showEventPage !== "function") return;
-    if (window.showEventPage.__addonPatched) return;
-    const orig = window.showEventPage;
-    window.showEventPage = function(){
-      orig();
-      ADDON.unreadEvents = 0;
-      setEventBadge(0);
-      upgradeEventPageUI();
-    };
-    window.showEventPage.__addonPatched = true;
-  }
-
-  /* ---------- Settings overlay + Tools overlays ---------- */
-  function ensureOverlay(id, title){
-    if (document.getElementById(id)) return document.getElementById(id);
-
-    const ov = document.createElement("div");
-    ov.id = id;
-    ov.className = "addon-overlay";
-    ov.setAttribute("aria-hidden","true");
-    ov.innerHTML = `
-      <div class="addon-panel">
-        <div class="addon-row" style="padding:10px 2px 12px 2px;">
-          <div>
-            <div style="font-weight:950;font-size:1.05rem;">${title}</div>
-            <div class="addon-muted" id="${id}Sub">—</div>
-          </div>
-          <button class="btn-ico" id="${id}Close">Close</button>
-        </div>
-        <div class="addon-panel-card" id="${id}Body"></div>
-      </div>
-    `;
-    document.body.appendChild(ov);
-
-    document.getElementById(`${id}Close`)?.addEventListener("click", () => {
-      ov.classList.remove("show");
-      ov.setAttribute("aria-hidden","true");
-    });
-    ov.addEventListener("click", (e) => {
-      if (e.target === ov) {
-        ov.classList.remove("show");
-        ov.setAttribute("aria-hidden","true");
-      }
-    });
-
-    return ov;
-  }
-
-  function openOverlay(id, sub){
-    const ov = document.getElementById(id);
-    if (!ov) return;
-    const s = document.getElementById(`${id}Sub`);
-    if (s) s.textContent = sub || "—";
-    ov.classList.add("show");
-    ov.setAttribute("aria-hidden","false");
-  }
-
-  async function buildToolsConverter(){
-    const ov = ensureOverlay("addonToolsConverter", "Injective Converter");
-    const body = document.getElementById("addonToolsConverterBody");
-    if (!body) return;
-
-    body.innerHTML = `
-      <div class="addon-row"><strong>Convert EUR → USD → INJ</strong><span class="addon-muted">Real-time</span></div>
-      <div class="addon-grid">
-        <div>
-          <div class="addon-muted" style="margin:0 0 6px 2px;">EUR amount</div>
-          <input class="addon-input" id="addonEur" inputmode="decimal" placeholder="e.g. 1000" />
-        </div>
-        <div>
-          <div class="addon-muted" style="margin:0 0 6px 2px;">EUR→USD rate</div>
-          <div class="addon-panel-card" style="padding:12px 14px;border-radius:16px;">
-            <div style="font-weight:950" id="addonFx">—</div>
-            <div class="addon-muted">source: exchangerate.host</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="addon-grid" style="padding-top:0;">
-        <div class="addon-panel-card" style="padding:12px 14px;border-radius:16px;">
-          <div class="addon-muted">USD value</div>
-          <div style="font-weight:950;font-size:1.2rem;" id="addonUsdOut">—</div>
-        </div>
-        <div class="addon-panel-card" style="padding:12px 14px;border-radius:16px;">
-          <div class="addon-muted">INJ buyable (using live price)</div>
-          <div style="font-weight:950;font-size:1.2rem;" id="addonInjOut">—</div>
-        </div>
-      </div>
-    `;
-
-    const eurInput = document.getElementById("addonEur");
-    if (eurInput) eurInput.value = localStorage.getItem("addon_eur") || "1000";
-
-    let fx = 1.10;
-
-    async function fetchFx(){
-      try{
-        const r = await fetch("https://api.exchangerate.host/latest?base=EUR&symbols=USD", { cache:"no-store" });
-        const j = await r.json();
-        const v = _safe(j?.rates?.USD);
-        if (v > 0) fx = v;
-      } catch {}
-    }
-
-    await fetchFx();
-    const fxEl = document.getElementById("addonFx");
-    if (fxEl) fxEl.textContent = fx.toFixed(4);
-
-    const loop = async () => {
-      const eur = _safe(eurInput?.value);
-      localStorage.setItem("addon_eur", String(eurInput?.value || ""));
-      const usd = eur * fx;
-      const px = _safe(window.displayed?.price || window.targetPrice || 0);
-      const inj = px > 0 ? (usd / px) : 0;
-
-      const u = document.getElementById("addonUsdOut");
-      const i = document.getElementById("addonInjOut");
-      if (u) u.textContent = usd > 0 ? `$${usd.toFixed(2)}` : "—";
-      if (i) i.textContent = inj > 0 ? `${inj.toFixed(6)} INJ` : "—";
-
-      requestAnimationFrame(loop);
-    };
-    loop();
-
-    // refresh fx occasionally
-    setInterval(fetchFx, 60_000);
-  }
-
-  async function buildToolsMarketCap(){
-    const ov = ensureOverlay("addonToolsMcap", "Market Cap of");
-    const body = document.getElementById("addonToolsMcapBody");
-    if (!body) return;
-
-    body.innerHTML = `
-      <div class="addon-row"><strong>Compare INJ vs target market cap</strong><span class="addon-muted">Real-time</span></div>
-
-      <div class="addon-grid">
-        <div>
-          <div class="addon-muted" style="margin:0 0 6px 2px;">Target market cap</div>
-          <input class="addon-input" id="addonCapVal" inputmode="decimal" placeholder="e.g. 5" />
-        </div>
-        <div>
-          <div class="addon-muted" style="margin:0 0 6px 2px;">Unit</div>
-          <select class="addon-input" id="addonCapUnit">
-            <option value="1e3">Thousands</option>
-            <option value="1e6" selected>Millions</option>
-            <option value="1e9">Billions</option>
-            <option value="1e12">Trillions</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="addon-grid" style="padding-top:0;">
-        <div class="addon-panel-card" style="padding:12px 14px;border-radius:16px;">
-          <div class="addon-muted">Current INJ market cap</div>
-          <div style="font-weight:950;font-size:1.1rem;" id="addonCurCap">—</div>
-          <div class="addon-muted" id="addonSupply">—</div>
-        </div>
-        <div class="addon-panel-card" style="padding:12px 14px;border-radius:16px;">
-          <div class="addon-muted">Implied INJ price at target cap</div>
-          <div style="font-weight:950;font-size:1.1rem;" id="addonImpPrice">—</div>
-          <div class="addon-muted" id="addonMultiple">—</div>
-        </div>
-      </div>
-    `;
-
-    const capVal = document.getElementById("addonCapVal");
-    const capUnit = document.getElementById("addonCapUnit");
-    if (capVal) capVal.value = localStorage.getItem("addon_cap") || "5";
-    if (capUnit) capUnit.value = localStorage.getItem("addon_unit") || "1e6";
-
-    let circ = 0;
-    let curCap = 0;
-
-    async function fetchInjData(){
-      try{
-        const r = await fetch("https://api.coingecko.com/api/v3/coins/injective-protocol?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false", { cache:"no-store" });
-        const j = await r.json();
-        circ = _safe(j?.market_data?.circulating_supply);
-        curCap = _safe(j?.market_data?.market_cap?.usd);
-      } catch {}
-    }
-    await fetchInjData();
-    setInterval(fetchInjData, 120_000);
-
-    const loop = () => {
-      localStorage.setItem("addon_cap", String(capVal?.value || ""));
-      localStorage.setItem("addon_unit", String(capUnit?.value || ""));
-
-      const v = _safe(capVal?.value);
-      const unit = _safe(capUnit?.value);
-      const targetCap = v * unit;
-
-      const px = _safe(window.displayed?.price || window.targetPrice || 0);
-
-      const curCapEl = document.getElementById("addonCurCap");
-      const supEl = document.getElementById("addonSupply");
-      const impEl = document.getElementById("addonImpPrice");
-      const mulEl = document.getElementById("addonMultiple");
-
-      if (curCapEl) curCapEl.textContent = curCap > 0 ? `$${curCap.toLocaleString()}` : "—";
-      if (supEl) supEl.textContent = circ > 0 ? `Circulating supply: ${circ.toLocaleString()} INJ` : "Supply: —";
-
-      const implied = (circ > 0 && targetCap > 0) ? (targetCap / circ) : 0;
-      if (impEl) impEl.textContent = implied > 0 ? `$${implied.toFixed(4)}` : "—";
-
-      const mult = (curCap > 0 && targetCap > 0) ? (targetCap / curCap) : 0;
-      if (mulEl) mulEl.textContent = mult > 0 ? `Multiple vs current cap: ${mult.toFixed(2)}x` : "—";
-
-      requestAnimationFrame(loop);
-    };
-    loop();
-  }
-
-  function addToolsToMenu(){
-    const nav = _$("#drawerNav");
-    if (!nav) return;
-    if (nav.querySelector('[data-page="tools_converter"]')) return;
-
-    const hr = document.createElement("div");
-    hr.style.margin = "10px 0";
-    hr.style.opacity = ".5";
-    hr.style.borderTop = (document.body.dataset.theme==="light") ? "1px solid rgba(15,23,42,.12)" : "1px solid rgba(255,255,255,.10)";
-
-    const title = document.createElement("div");
-    title.textContent = "TOOLS";
-    title.style.fontWeight = "950";
-    title.style.letterSpacing = ".08em";
-    title.style.fontSize = ".74rem";
-    title.style.opacity = ".70";
-    title.style.margin = "6px 0 8px 2px";
-
-    const b1 = document.createElement("button");
-    b1.className = "nav-item";
-    b1.dataset.page = "tools_converter";
-    b1.type = "button";
-    b1.textContent = "Injective converter";
-
-    const b2 = document.createElement("button");
-    b2.className = "nav-item";
-    b2.dataset.page = "tools_mcap";
-    b2.type = "button";
-    b2.textContent = "Market Cap of";
-
-    nav.appendChild(hr);
-    nav.appendChild(title);
-    nav.appendChild(b1);
-    nav.appendChild(b2);
-
-    // capture click before existing handler
-    nav.addEventListener("click", async (e) => {
-      const btn = e.target?.closest(".nav-item");
-      if (!btn) return;
-      const page = btn.dataset.page || "";
-      if (!page.startsWith("tools_")) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (typeof closeDrawer === "function") closeDrawer();
-      if (page === "tools_converter") {
-        await buildToolsConverter();
-        openOverlay("addonToolsConverter", "Real-time EUR → USD → INJ");
-      } else if (page === "tools_mcap") {
-        await buildToolsMarketCap();
-        openOverlay("addonToolsMcap", "Compare INJ vs target market cap");
-      }
-    }, true);
-  }
-
-  function addSettingsOverlay(){
-    const nav = _$("#drawerNav");
-    if (!nav || nav.dataset.addonSettings) return;
-    nav.dataset.addonSettings = "1";
-
-    nav.addEventListener("click", (e) => {
-      const btn = e.target?.closest('.nav-item[data-page="settings"]');
-      if (!btn) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (typeof closeDrawer === "function") closeDrawer();
-
-      const ov = ensureOverlay("addonSettings", "Settings");
-      const body = document.getElementById("addonSettingsBody");
-      const sub = document.getElementById("addonSettingsSub");
-      if (sub) sub.textContent = (typeof window.address === "string" && window.address) ? `Wallet: ${window.address}` : "No wallet selected";
-      if (!body) return;
-
-      body.innerHTML = `
-        <div class="addon-row"><strong>Generali</strong><span class="addon-muted">Theme / Mode from menu</span></div>
-        <div style="padding: 0 14px 14px 14px;" class="addon-muted">
-          These settings are append-only and do not break your structure.
-        </div>
-
-        <div style="border-top:1px solid rgba(255,255,255,.10)"></div>
-
-        <div class="addon-row"><strong>Vedi Opzioni</strong><span class="addon-muted">Scales</span></div>
-        <div style="padding: 0 14px 14px 14px;" class="addon-muted">
-          Use LIN/LOG buttons on each chart card.
-        </div>
-
-        <div style="border-top:1px solid rgba(255,255,255,.10)"></div>
-
-        <div class="addon-row"><strong>Advance</strong><span class="addon-muted">Reset (irreversible)</span></div>
-        <div style="padding: 0 14px 16px 14px;">
-          <label style="display:flex;align-items:center;gap:10px;font-weight:900;">
-            <input type="checkbox" id="addonResetStake"/> Reset Staked series
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;font-weight:900;margin-top:10px;">
-            <input type="checkbox" id="addonResetReward"/> Reset Reward series
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;font-weight:900;margin-top:10px;">
-            <input type="checkbox" id="addonResetApr"/> Reset APR series
-          </label>
-
-          <button class="btn-ico" id="addonResetApply" style="margin-top:14px;">Apply</button>
-          <div class="addon-muted" style="margin-top:10px;">
-            Action is irreversible for the selected wallet.
-          </div>
-        </div>
-      `;
-
-      document.getElementById("addonResetApply")?.addEventListener("click", () => {
-        const addr = (typeof window.address === "string" ? window.address : "") || "";
-        if (!addr) { alert("No wallet selected."); return; }
-
-        const doStake = !!document.getElementById("addonResetStake")?.checked;
-        const doRew = !!document.getElementById("addonResetReward")?.checked;
-        const doApr = !!document.getElementById("addonResetApr")?.checked;
-
-        if (!doStake && !doRew && !doApr) return;
-
-        if (!confirm("Reset selected series? This is irreversible.")) return;
-
-        try{
-          if (doStake){
-            const k = `inj_stake_series_v${window.STAKE_LOCAL_VER || 2}_${addr}`;
-            localStorage.removeItem(k);
-          }
-          if (doRew){
-            const k = `inj_reward_withdrawals_v${window.REWARD_WD_LOCAL_VER || 2}_${addr}`;
-            localStorage.removeItem(k);
-          }
-          if (doApr){
-            localStorage.removeItem(ADDON.keys.aprStore(addr));
-          }
-        } catch {}
-
-        if (typeof window.commitAddress === "function") window.commitAddress(addr); // reload everything
-        document.getElementById("addonSettings")?.classList.remove("show");
-      });
-
-      openOverlay("addonSettings", "Advanced reset available");
-    }, true);
-  }
-
-  /* ---------- Expand card fullscreen ---------- */
-  const CardFS = {
-    active: null,
-    restore: null
-  };
-
-  function makeCardFullscreen(card){
-    if (!card || CardFS.active) return;
-    const parent = card.parentElement;
-    const next = card.nextSibling;
-
-    const ov = ensureOverlay("addonCardFS", "Card");
-    const body = document.getElementById("addonCardFSBody");
-    if (!body) return;
-
-    body.innerHTML = "";
-    body.appendChild(card);
-
-    CardFS.active = card;
-    CardFS.restore = { parent, next };
-
-    openOverlay("addonCardFS", "Tap Close to return");
-    // remove panel card styling so canvas has space
-    body.className = "";
-    card.style.margin = "0";
-    card.style.width = "100%";
-  }
-
-  function exitCardFullscreen(){
-    const card = CardFS.active;
-    const r = CardFS.restore;
-    if (!card || !r?.parent) return;
-
-    if (r.next) r.parent.insertBefore(card, r.next);
-    else r.parent.appendChild(card);
-
-    CardFS.active = null;
-    CardFS.restore = null;
-
-    document.getElementById("addonCardFS")?.classList.remove("show");
-  }
-
-  function injectExpandButtons(){
-    const cards = Array.from(document.querySelectorAll(".card"));
-    cards.forEach((card) => {
-      const hasCanvas = !!card.querySelector("canvas");
-      if (!hasCanvas) return;
-      if (card.querySelector('[data-addon-expand="1"]')) return;
-
-      const tools = ensureCardTools(card);
-      const btn = makeBtn("⤢", "Expand");
-      btn.dataset.addonExpand = "1";
-
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        makeCardFullscreen(card);
-      }, { passive:false });
-
-      tools.appendChild(btn);
-    });
-
-    // close handler
-    const close = document.getElementById("addonCardFSClose");
-    if (close && !close.dataset.bound){
-      close.dataset.bound = "1";
-      close.addEventListener("click", () => exitCardFullscreen());
-    }
-    // clicking close on overlay already exists; hook after creation
-    when(() => !!document.getElementById("addonCardFSClose"), () => {
-      document.getElementById("addonCardFSClose")?.addEventListener("click", exitCardFullscreen);
-    });
-  }
-
-  /* ---------- Price / APR / big events generation ---------- */
-  function bigEventsLoop(){
-    // Price movement thresholds (5/10/15/20...) based on daily open
-    try{
-      if (typeof window.tfReady !== "object" || !window.tfReady?.d) return;
-      const open = _safe(window.candle?.d?.open);
-      const px = _safe(window.targetPrice);
-      if (!open || !px) return;
-
-      const pct = ((px - open) / open) * 100;
-      const ap = Math.abs(pct);
-
-      const dayT = _safe(window.candle?.d?.t);
-      if (dayT && ADDON.priceDayTrigger.t !== dayT){
-        ADDON.priceDayTrigger.t = dayT;
-        ADDON.priceDayTrigger.level = 0;
-      }
-
-      const levels = [5,10,15,20,25,30,40,50];
-      let maxLevel = 0;
-      for (const lv of levels) if (ap >= lv) maxLevel = lv;
-
-      if (maxLevel > ADDON.priceDayTrigger.level){
-        ADDON.priceDayTrigger.level = maxLevel;
-        if (typeof window.pushEvent === "function") {
-          window.pushEvent({
-            type: "price",
-            title: "Big price move",
-            value: `${pct>0?"+":""}${pct.toFixed(2)}% (24h)`,
-            status: (typeof window.hasInternet === "function" && window.hasInternet()) ? "ok" : "pending"
-          });
-        }
-      }
-    } catch {}
-
-    requestAnimationFrame(bigEventsLoop);
-  }
-
-  /* ---------- Wrap refreshLoadAllOnce to show nicer spinner ---------- */
-  function patchRefreshSpinner(){
-    if (typeof window.refreshLoadAllOnce !== "function") return;
-    if (window.refreshLoadAllOnce.__addonPatched) return;
-
-    const orig = window.refreshLoadAllOnce;
-    window.refreshLoadAllOnce = async function(){
-      showTopSpinner("Refreshing (REFRESH mode)...");
-      try{
-        return await orig();
-      } finally {
-        hideTopSpinner();
-      }
-    };
-    window.refreshLoadAllOnce.__addonPatched = true;
-  }
-
-  /* ---------- Init ---------- */
-  function initAddon(){
-    ensureTopSpinner();
-
-    patchAddressCopy();
-    addMenuLabels();
-
-    ensureEventBadge();
-    patchPushEventUnread();
-    patchShowEventPageUnreadReset();
-
-    addToolsToMenu();
-    addSettingsOverlay();
-
-    // inject gears near bars (ids must exist)
-    injectGearNextToBar("stakeBar", "stake");
-    injectGearNextToBar("rewardBar", "reward");
-
-    // Reward estimates
-    injectRewardEstimates();
-
-    // Patch charts when they exist
-    when(() => !!window.netWorthChart, () => {
-      const nwCard = document.getElementById("netWorthCard") || findCardByCanvasId("netWorthChart");
-      attachScaleToggle({ key: ADDON.keys.scaleNW, chartGetter: () => window.netWorthChart, card: nwCard });
-      patchNWChartOnce();
-      tweakNetWorthLayout();
-    });
-
-    when(() => !!window.stakeChart, () => {
-      const stakeCard = findCardByCanvasId("stakeChart");
-      attachScaleToggle({ key: ADDON.keys.scaleStake, chartGetter: () => window.stakeChart, card: stakeCard });
-      patchStakeChartOnce();
-    });
-
-    when(() => !!window.rewardChart, () => {
-      const rewardCard = findCardByCanvasId("rewardChart");
-      attachScaleToggle({ key: ADDON.keys.scaleReward, chartGetter: () => window.rewardChart, card: rewardCard });
-      patchRewardChartOnce();
-    });
-
-    when(() => !!window.chart, () => {
-      patchPriceChartOnce();
-    });
-
-    // Expand buttons
-    when(() => document.querySelectorAll(".card").length > 0, () => injectExpandButtons());
-
-    // Post-tick target bars
-    postTickTargetsLoop();
-
-    // Refresh spinner in refresh mode
-    patchRefreshSpinner();
-
-    // Keep event page upgraded
-    when(() => !!document.getElementById("eventPage"), () => upgradeEventPageUI());
-
-    // Start big events monitor
-    bigEventsLoop();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initAddon, { once: true });
-  } else {
-    initAddon();
-  }
-})();
