@@ -1452,291 +1452,17 @@ body.card-expanded{
   - Added fullscreen card style (JS toggles .fullscreen + body.card-expanded)
 */
 
-/* ================= PATCH v2.0.3 — responsiveness + cleanup ================= */
+/* ================= PATCH V2 UI (safe) ================= */
 
-/* Net Worth: elimina blocchi non essenziali */
-.networth-asset{ display:none !important; }                 /* riga Injective + qty/price/usd */
-.networth-foot .nw-mini:nth-child(2){ display:none !important; } /* seconda mini-card vuota */
-
-/* Net Worth: tieni SOLO toggle scala (nascondi eventuale LIVE button vecchio) */
-.nw-live-btn{ display:none !important; }
-
-/* Più area plot: comprimi padding interno dei wrap grafici */
-.networth-chart{ margin-top:.85rem; }
-.stake-chart-wrap{ height: 190px; }
-.reward-chart-wrap{ height: 210px; }
-
-/* Assi più “attaccati” al bordo (aiuta su mobile) */
-canvas{ touch-action: pan-y; } /* evita pinch/scroll conflitti */
-
-/* Bottoni piccoli pro */
-.pill-btn{
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.06);
-  color: rgba(249,250,251,.88);
-  font-weight: 950;
-  font-size: .74rem;
-  cursor: pointer;
-}
-body[data-theme="light"] .pill-btn{
-  border-color: rgba(15,23,42,.12);
-  background: rgba(15,23,42,.05);
-  color: rgba(15,23,42,.86);
-}
-.pill-btn:active{ transform: translateY(1px); }
-
-/* Timeframe rows (stake/reward/apr/price) */
-.tf-row{
-  display:flex;
-  justify-content:center;
-  gap:8px;
-  flex-wrap:wrap;
-  margin-top:.75rem;
-}
-
-/* “gear” vicino alle barre */
-.bar-gear{
-  width: 30px;
-  height: 30px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.06);
-  display:grid;
-  place-items:center;
-  cursor:pointer;
-}
-body[data-theme="light"] .bar-gear{
-  border-color: rgba(15,23,42,.12);
-  background: rgba(15,23,42,.05);
-}
-.bar-gear:active{ transform: translateY(1px); }
-
-/* Copy address button */
-.addr-copy{
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.06);
-  display:grid;
-  place-items:center;
-  cursor:pointer;
-  margin-left: .45rem;
-}
-body[data-theme="light"] .addr-copy{
-  border-color: rgba(15,23,42,.12);
-  background: rgba(15,23,42,.05);
-}
-
-/* ===== PATCH: Validator tag (responsive) ===== */
-.validator-tag{
-  margin-top: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.06);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  max-width: 100%;
-}
-body[data-theme="light"] .validator-tag{
-  border-color: rgba(15,23,42,.14);
-  background: rgba(15,23,42,.04);
-}
-
-.validator-tag__k{
-  font-weight: 900;
-  opacity: .75;
-  white-space: nowrap;
-}
-.validator-tag__v{
-  font-weight: 950;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: min(62vw, 340px);
-}
-
-/* mobile tighten */
-@media (max-width: 520px){
-  .validator-tag{ padding: 6px 9px; }
-  .validator-tag__v{ max-width: 64vw; }
-}
-
-/* ===== PATCH: Scale toggle buttons (responsive) ===== */
-.scale-toggle-btn{
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
-  color: rgba(249,250,251,.92);
-  font-weight: 950;
-  font-size: .78rem;
-  letter-spacing: .02em;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-body[data-theme="light"] .scale-toggle-btn{
-  border-color: rgba(15,23,42,.14);
-  background: rgba(15,23,42,.05);
-  color: rgba(15,23,42,.90);
-}
-.scale-toggle-btn:active{ transform: translateY(1px); }
-
-/* opzionale: se vuoi proprio togliere il LIVE button nella Reward card */
-#rewardLiveBtn{ display:none !important; }
-
-/* ===== PATCH UI: card controls under the card (non invasive) ===== */
-.card-actions{
-  display:flex;
-  gap:10px;
-  justify-content:flex-end;
-  align-items:center;
-  margin-top:10px;
-  padding-top:10px;
-  border-top:1px solid rgba(255,255,255,.10);
-}
-body[data-theme="light"] .card-actions{
-  border-top:1px solid rgba(15,23,42,.10);
-}
-
-.icon-btn{
-  height:34px;
-  min-width:44px;
-  padding:0 12px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,.14);
-  background:rgba(255,255,255,.06);
-  color:rgba(249,250,251,.92);
-  font-weight:950;
-  letter-spacing:.02em;
-  cursor:pointer;
-  user-select:none;
-}
-body[data-theme="light"] .icon-btn{
-  border:1px solid rgba(15,23,42,.14);
-  background:rgba(15,23,42,.06);
-  color:rgba(15,23,42,.92);
-}
-.icon-btn:active{ transform: translateY(1px); }
-
-/* ===== Fullscreen card (responsive on pc/mobile) ===== */
-.card-zoom-backdrop{
-  position:fixed;
-  inset:0;
-  z-index:9998;
-  background: rgba(0,0,0,.55);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-body[data-theme="light"] .card-zoom-backdrop{
-  background: rgba(231,234,240,.70);
-}
-
-.card.card-zoomed{
-  position:fixed !important;
-  z-index:9999 !important;
-  inset: min(12px, 2vh) min(12px, 2vw) min(12px, 2vh) min(12px, 2vw);
-  width:auto !important;
-  height:auto !important;
-  max-width:none !important;
-  max-height:none !important;
-  overflow:hidden;
-}
-body.card-zoom-lock{
-  overflow:hidden;
-}
-
-/* Make charts breathe when zoomed */
-.card.card-zoomed canvas{
-  max-height: 100% !important;
-
-  /* ================= PATCH v2.0.2.1 — Controls down / Titles clean ================= */
-
-/* Titoli card più leggibili */
-.card .label,
-.networth-title{
-  font-size: 1.12rem;
-  line-height: 1.15;
-  letter-spacing: .02em;
-}
-
-/* Nascondi controlli in alto (li spostiamo sotto via JS) — EXCEPT APR */
-.card:not(.apr-card) > .card-tools,
-.card:not(.apr-card) .networth-top2{
-  display: none !important;
-}
-
-/* Barra controlli sotto la card */
-.card-actions{
-  margin-top: .9rem;
-  display:flex;
-  justify-content:flex-end;
-  align-items:center;
-  gap:.5rem;
-  flex-wrap: wrap;
-}
-
-/* Se i tools vengono spostati dentro .card-actions, devono tornare visibili */
-.card-actions .card-tools{
-  display:flex !important;
-  position: static !important;
-  top:auto !important;
-  right:auto !important;
-  gap:.45rem;
-}
-
-/* Pulsante LIN/LOG */
-.scale-toggle-btn{
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
-  color: rgba(249,250,251,.92);
-  font-weight: 950;
-  font-size: .74rem;
-  letter-spacing: .06em;
-  cursor: pointer;
-}
-body[data-theme="light"] .scale-toggle-btn{
-  border-color: rgba(15,23,42,.14);
-  background: rgba(15,23,42,.05);
-  color: rgba(15,23,42,.86);
-}
-.scale-toggle-btn:active{ transform: translateY(1px); }
-
-/* overlay chart: evita collisioni */
-.chart-overlay{ right: 12px !important; }
-
-/* Validator card spacing */
-.validator-card{ margin-top: .15rem; }
-
-  /* ================= PATCH UX v2.0.2+ ================= */
-
-/* Copy address button */
+/* Copy button */
 .addr-copy-btn{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  gap:8px;
-  height:28px;
-  padding:0 10px;
+  display:inline-flex; align-items:center; gap:8px;
+  height:28px; padding:0 10px;
   border-radius:12px;
   border:1px solid rgba(255,255,255,.14);
   background:rgba(255,255,255,.06);
   cursor:pointer;
-  font-weight:900;
-  font-size:.78rem;
-  line-height:1;
+  font-weight:950; font-size:.78rem; line-height:1;
   user-select:none;
   -webkit-tap-highlight-color: transparent;
 }
@@ -1744,40 +1470,25 @@ body[data-theme="light"] .addr-copy-btn{
   border:1px solid rgba(15,23,42,.14);
   background:rgba(15,23,42,.06);
 }
-.addr-copy-btn .ico{ font-size:1rem; transform: translateY(1px); }
-.addr-copy-btn.copied{
-  animation: addrCopiedPop 520ms ease both;
-}
+.addr-copy-btn.copied{ animation: addrCopiedPop 520ms ease both; }
 @keyframes addrCopiedPop{
   0%{ transform: scale(.96); opacity:.75; }
   45%{ transform: scale(1.05); opacity:1; }
   100%{ transform: scale(1); opacity:1; }
 }
 
-/* Under-chart controls (Log/Lin + TF) */
+/* Under chart controls (timeframes + lin/log) */
 .patch-under-controls{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  margin-top:10px;
-  flex-wrap:wrap;
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px; margin-top:10px; flex-wrap:wrap;
 }
-.patch-pill-row{
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-}
+.patch-pill-row{ display:flex; flex-wrap:wrap; gap:8px; }
 .patch-pill{
-  height:30px;
-  padding:0 12px;
-  border-radius:999px;
+  height:30px; padding:0 12px; border-radius:999px;
   border:1px solid rgba(255,255,255,.14);
   background:rgba(255,255,255,.06);
-  font-weight:950;
-  font-size:.78rem;
-  cursor:pointer;
-  user-select:none;
+  font-weight:950; font-size:.78rem;
+  cursor:pointer; user-select:none;
 }
 body[data-theme="light"] .patch-pill{
   border:1px solid rgba(15,23,42,.14);
@@ -1788,32 +1499,25 @@ body[data-theme="light"] .patch-pill{
   box-shadow:0 0 0 6px rgba(250,204,21,.08);
 }
 
-/* Gear button near bars */
+/* Gear button for bars */
 .patch-gear{
-  height:28px;
-  width:34px;
+  height:28px; width:34px;
   border-radius:12px;
   border:1px solid rgba(255,255,255,.14);
   background:rgba(255,255,255,.06);
   cursor:pointer;
-  font-size:1rem;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
+  display:inline-flex; align-items:center; justify-content:center;
 }
 body[data-theme="light"] .patch-gear{
   border:1px solid rgba(15,23,42,.14);
   background:rgba(15,23,42,.06);
 }
 
-/* Gear popover */
+/* Popover */
 .patch-pop{
-  position:fixed;
-  inset:0;
-  z-index:160;
+  position:fixed; inset:0; z-index:9999;
   background:rgba(0,0,0,.40);
-  display:grid;
-  place-items:center;
+  display:grid; place-items:center;
   padding:16px;
 }
 .patch-pop-card{
@@ -1828,26 +1532,15 @@ body[data-theme="light"] .patch-pop-card{
   border:1px solid rgba(15,23,42,.14);
   background:rgba(240,242,246,.96);
 }
-.patch-pop-title{
-  font-weight:1000;
-  letter-spacing:.02em;
-  margin-bottom:10px;
-}
-.patch-pop-row{
-  display:flex;
-  gap:10px;
-  align-items:center;
-}
+.patch-pop-title{ font-weight:1000; margin-bottom:10px; }
+.patch-pop-row{ display:flex; gap:10px; align-items:center; }
 .patch-pop-row input{
-  flex:1;
-  height:42px;
+  flex:1; height:42px;
   border-radius:14px;
   border:1px solid rgba(255,255,255,.14);
   background:rgba(255,255,255,.06);
   padding:0 12px;
-  font-weight:900;
-  outline:none;
-  color:inherit;
+  font-weight:900; outline:none; color:inherit;
 }
 body[data-theme="light"] .patch-pop-row input{
   border:1px solid rgba(15,23,42,.14);
@@ -1855,54 +1548,27 @@ body[data-theme="light"] .patch-pop-row input{
 }
 .patch-pop-actions{
   margin-top:12px;
-  display:flex;
-  gap:10px;
+  display:flex; gap:10px;
   justify-content:flex-end;
 }
 .patch-pop-actions button{
-  height:38px;
-  padding:0 14px;
+  height:38px; padding:0 14px;
   border-radius:14px;
   border:1px solid rgba(255,255,255,.14);
   background:rgba(255,255,255,.06);
-  font-weight:950;
-  cursor:pointer;
+  font-weight:950; cursor:pointer;
 }
 body[data-theme="light"] .patch-pop-actions button{
   border:1px solid rgba(15,23,42,.14);
   background:rgba(15,23,42,.06);
 }
 
-/* Reward estimates row */
-.reward-estimates{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  margin-top:10px;
+/* Fullscreen card (expand) */
+.card.is-fullscreen{
+  position:fixed !important;
+  inset:10px !important;
+  z-index:9998 !important;
+  overflow:auto !important;
+  border-radius:18px !important;
 }
-.reward-estimates .est{
-  flex:1 1 140px;
-  border-radius:16px;
-  border:1px solid rgba(255,255,255,.10);
-  background:rgba(255,255,255,.04);
-  padding:10px 12px;
-}
-body[data-theme="light"] .reward-estimates .est{
-  border:1px solid rgba(15,23,42,.10);
-  background:rgba(15,23,42,.03);
-}
-.reward-estimates .k{
-  font-weight:950;
-  opacity:.78;
-  font-size:.78rem;
-}
-.reward-estimates .v{
-  margin-top:4px;
-  font-weight:1000;
-  letter-spacing:.02em;
-}
-
-/* Hide old LIVE button in Reward if present */
-#rewardLiveBtn{ display:none !important; }
-
-}
+body.patch-lock{ overflow:hidden !important; }
