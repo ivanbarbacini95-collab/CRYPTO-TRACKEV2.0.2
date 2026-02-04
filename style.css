@@ -1531,3 +1531,42 @@ body[data-theme="light"] .addr-copy{
   background: rgba(15,23,42,.05);
 }
 
+/* ===== PATCH: Validator tag (responsive) ===== */
+.validator-tag{
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-width: 100%;
+}
+body[data-theme="light"] .validator-tag{
+  border-color: rgba(15,23,42,.14);
+  background: rgba(15,23,42,.04);
+}
+
+.validator-tag__k{
+  font-weight: 900;
+  opacity: .75;
+  white-space: nowrap;
+}
+.validator-tag__v{
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(62vw, 340px);
+}
+
+/* mobile tighten */
+@media (max-width: 520px){
+  .validator-tag{ padding: 6px 9px; }
+  .validator-tag__v{ max-width: 64vw; }
+}
+
+
