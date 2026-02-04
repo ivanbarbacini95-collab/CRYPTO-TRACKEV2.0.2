@@ -5010,3 +5010,380 @@ animate();
 
 })();
 
+/* =====================================================================
+   PATCH — Reward filters + No cross-address bleed + Staked axis like Reward
+   + Linear/Log toggle for Reward & Staked
+   Incolla in fondo ad app.js
+   ===================================================================== */
+(function PATCH_REWARD_STAKE_AXES_AND_FILTERS(){
+  "use strict";
+
+  const _safe = (typeof safe === "function") ? safe : (n)=> (Number.isFinite(+n) ? +n : 0);
+  const _clamp = (typeof clamp === "function") ? clamp : (n,a,b)=>Math.min(Math.max(n,a),b);
+
+  /* ---------------------------
+     1) Reward filter modes (persist)
+     --------------------------- */
+  const REWARD_FILTER_KEY = "inj_reward_filter_mode_v1"; // global (ok)
+  let wdFilterMode = localStorage.getItem(REWARD_FILTER_KEY) || "all";
+  // modes: all | lt0_05 | gte0_05 | gte0_1
+
+  function ensureRewardFilterOptions(){
+    const sel = document.getElementById("rewardFilter");
+    if (!sel) return;
+
+    // If select already has our modes, don't touch
+    const hasModes = Array.from(sel.options).some(o => ["all","lt0_05","gte0_05","gte0_1"].includes(o.value));
+    if (hasModes) return;
+
+    // Replace options safely (user requested these)
+    sel.innerHTML = `
+      <option value="all">Tutti</option>
+      <option value="lt0_05">Minori di 0.05</option>
+      <option value="gte0_05">Maggiori di 0.05</option>
+      <option value="gte0_1">0.1 in su</option>
+    `;
+  }
+
+  function applyRewardFilterModeToSelect(){
+    const sel = document.getElementById("rewardFilter");
+    if (!sel) return;
+    ensureRewardFilterOptions();
+    const opt = Array.from(sel.options).find(o => o.value === wdFilterMode);
+    if (opt) sel.value = wdFilterMode;
+  }
+
+  // Patch rebuildWdView to respect new modes
+  if (typeof rebuildWdView === "function") {
+    const _rebuildWdView = rebuildWdView;
+    rebuildWdView = function(){
+      try{
+        // If the app created numeric filter previously, we override with modes.
+        // We rebuild manually (same output arrays: wdLabels, wdValues, wdTimes)
+        wdLabels = [];
+        wdValues = [];
+        wdTimes  = [];
+
+        const mode = wdFilterMode || "all";
+        for (let i = 0; i < (wdValuesAll?.length || 0); i++){
+          const v = _safe(wdValuesAll[i]);
+          const ok =
+            (mode === "all") ||
+            (mode === "lt0_05"  && v < 0.05) ||
+            (mode === "gte0_05" && v >= 0.05) ||
+            (mode === "gte0_1"  && v >= 0.10);
+
+          if (ok) {
+            wdLabels.push(String(wdLabelsAll[i] || ""));
+            wdValues.push(v);
+            wdTimes.push(_safe(wdTimesAll[i] || 0));
+          }
+        }
+
+        // redraw like original
+        if (typeof drawRewardWdChart === "function") drawRewardWdChart();
+        if (typeof syncRewardTimelineUI === "function") syncRewardTimelineUI(true);
+      } catch (e){
+        // fallback to original if something unexpected
+        try { _rebuildWdView.apply(this, arguments); } catch {}
+      }
+    };
+  }
+
+  // Patch attachRewardFilterHandler to use modes + persist
+  if (typeof attachRewardFilterHandler === "function") {
+    attachRewardFilterHandler = function(){
+      const sel = document.getElementById("rewardFilter");
+      if (!sel) return;
+
+      ensureRewardFilterOptions();
+      applyRewardFilterModeToSelect();
+
+      sel.addEventListener("change", () => {
+        wdFilterMode = String(sel.value || "all");
+        localStorage.setItem(REWARD_FILTER_KEY, wdFilterMode);
+
+        if (typeof rebuildWdView === "function") rebuildWdView();
+        if (typeof goRewardLive === "function") goRewardLive();
+      }, { passive: true });
+    };
+  }
+
+  /* ---------------------------
+     2) No cross-address bleed for Reward data
+     If loadWdAll fails -> clear arrays so old wallet points never show
+     --------------------------- */
+  function clearWdArrays(){
+    try{
+      wdLabelsAll = [];
+      wdValuesAll = [];
+      wdTimesAll  = [];
+      wdLabels = [];
+      wdValues = [];
+      wdTimes  = [];
+    } catch {}
+  }
+
+  if (typeof loadWdAll === "function") {
+    const _loadWdAll = loadWdAll;
+    loadWdAll = function(){
+      const ok = _loadWdAll.apply(this, arguments);
+      if (!ok) {
+        clearWdArrays();
+        try { if (typeof drawRewardWdChart === "function") drawRewardWdChart(); } catch {}
+        try { if (typeof syncRewardTimelineUI === "function") syncRewardTimelineUI(true); } catch {}
+      }
+      return ok;
+    };
+  }
+
+  /* ---------------------------
+     3) Linear / Log scale toggles (Reward & Staked) + persist
+     --------------------------- */
+  const SCALE_KEY_REWARD = "inj_scale_reward_v1"; // linear | log
+  const SCALE_KEY_STAKE  = "inj_scale_stake_v1";  // linear | log
+
+  function getScale(key){
+    const v = localStorage.getItem(key) || "linear";
+    return (v === "log") ? "log" : "linear";
+  }
+  function setScale(key, v){
+    localStorage.setItem(key, (v === "log") ? "log" : "linear");
+  }
+
+  function ensureScaleButton(id, fallbackLabel, attachIntoEl){
+    let btn = document.getElementById(id);
+    if (btn) return btn;
+
+    if (!attachIntoEl) return null;
+
+    btn = document.createElement("button");
+    btn.id = id;
+    btn.className = "scale-toggle-btn";
+    btn.type = "button";
+    btn.textContent = fallbackLabel || "Scale: LINEAR";
+
+    // Put it at the end of the header area if possible
+    attachIntoEl.appendChild(btn);
+    return btn;
+  }
+
+  function findCardHeaderForCanvas(canvasId){
+    const cv = document.getElementById(canvasId);
+    if (!cv) return null;
+
+    // Try common patterns: card -> header row
+    // We'll climb to a card container and append to its first header-like row
+    let p = cv.parentElement;
+    while (p && p !== document.body){
+      if (p.classList && (p.classList.contains("card") || p.id?.toLowerCase().includes("card"))) {
+        // look for an existing header row
+        const header = p.querySelector(".card-head, .card-header, .card-top, .card-title-row, .head, header, .top-row");
+        return header || p;
+      }
+      p = p.parentElement;
+    }
+    return null;
+  }
+
+  function applyRewardScale(){
+    if (!window.rewardChart) return;
+    const type = (getScale(SCALE_KEY_REWARD) === "log") ? "logarithmic" : "linear";
+    rewardChart.options.scales.y.type = type;
+
+    // log needs >0
+    if (type === "logarithmic"){
+      rewardChart.options.scales.y.min = 0.000001;
+    } else {
+      rewardChart.options.scales.y.min = undefined;
+    }
+
+    rewardChart.update("none");
+  }
+
+  function applyStakeScale(){
+    if (!window.stakeChart) return;
+    const type = (getScale(SCALE_KEY_STAKE) === "log") ? "logarithmic" : "linear";
+    stakeChart.options.scales.y.type = type;
+
+    if (type === "logarithmic"){
+      stakeChart.options.scales.y.min = 0.000001;
+    } else {
+      stakeChart.options.scales.y.min = undefined;
+    }
+
+    stakeChart.update("none");
+  }
+
+  function initScaleToggles(){
+    // Reward button
+    const rewardHeader = findCardHeaderForCanvas("rewardChart");
+    const rBtn = ensureScaleButton("rewardScaleToggle", "Scale: LINEAR", rewardHeader);
+    if (rBtn) {
+      const syncLabel = () => {
+        rBtn.textContent = (getScale(SCALE_KEY_REWARD) === "log") ? "Scale: LOG" : "Scale: LINEAR";
+      };
+      syncLabel();
+      rBtn.addEventListener("click", () => {
+        const next = (getScale(SCALE_KEY_REWARD) === "log") ? "linear" : "log";
+        setScale(SCALE_KEY_REWARD, next);
+        syncLabel();
+        applyRewardScale();
+      }, { passive:true });
+    }
+
+    // Stake button
+    const stakeHeader = findCardHeaderForCanvas("stakeChart");
+    const sBtn = ensureScaleButton("stakeScaleToggle", "Scale: LINEAR", stakeHeader);
+    if (sBtn) {
+      const syncLabel = () => {
+        sBtn.textContent = (getScale(SCALE_KEY_STAKE) === "log") ? "Scale: LOG" : "Scale: LINEAR";
+      };
+      syncLabel();
+      sBtn.addEventListener("click", () => {
+        const next = (getScale(SCALE_KEY_STAKE) === "log") ? "linear" : "log";
+        setScale(SCALE_KEY_STAKE, next);
+        syncLabel();
+        applyStakeScale();
+      }, { passive:true });
+    }
+  }
+
+  /* ---------------------------
+     4) Staked y-axis style like Reward + tight autoscale
+     --------------------------- */
+  function tightAutoscaleY(chart, data, padPct=0.06){
+    if (!chart || !Array.isArray(data) || !data.length) return;
+
+    const vals = data.map(_safe).filter(v => Number.isFinite(v) && v > 0);
+    if (!vals.length) return;
+
+    const minV = Math.min(...vals);
+    const maxV = Math.max(...vals);
+
+    // If constant line, give it breathing room
+    const span = Math.max(1e-6, maxV - minV);
+    const pad = Math.max(span * padPct, maxV * 0.002);
+
+    const scaleType = chart.options?.scales?.y?.type || "linear";
+    if (scaleType === "logarithmic"){
+      // log axis must be >0
+      const min = Math.max(1e-6, minV * (1 - padPct));
+      const max = maxV * (1 + padPct);
+      chart.options.scales.y.min = min;
+      chart.options.scales.y.max = max;
+    } else {
+      chart.options.scales.y.min = Math.max(0, minV - pad);
+      chart.options.scales.y.max = maxV + pad;
+    }
+  }
+
+  function patchStakeAxisLikeReward(){
+    if (!window.stakeChart) return;
+
+    // right side ticks like reward
+    stakeChart.options.scales.x.display = false;
+
+    stakeChart.options.scales.y.position = "right";
+    stakeChart.options.scales.y.ticks = stakeChart.options.scales.y.ticks || {};
+    stakeChart.options.scales.y.ticks.mirror = true;
+    stakeChart.options.scales.y.ticks.padding = 6;
+    stakeChart.options.scales.y.ticks.maxTicksLimit = 5;
+
+    // smart number formatting if you have fmtSmart
+    if (typeof fmtSmart === "function"){
+      stakeChart.options.scales.y.ticks.callback = (v)=> fmtSmart(v);
+    }
+
+    // grid colors already handled by refreshChartsTheme; keep consistent
+    stakeChart.update("none");
+  }
+
+  function patchRewardAxisTight(){
+    if (!window.rewardChart) return;
+    // keep your existing right axis, just tighten
+    rewardChart.options.scales.y.position = "right";
+    rewardChart.options.scales.y.ticks = rewardChart.options.scales.y.ticks || {};
+    rewardChart.options.scales.y.ticks.mirror = true;
+    rewardChart.options.scales.y.ticks.padding = 6;
+    rewardChart.options.scales.y.ticks.maxTicksLimit = 5;
+
+    if (typeof fmtSmart === "function"){
+      rewardChart.options.scales.y.ticks.callback = (v)=> fmtSmart(v);
+    }
+
+    rewardChart.update("none");
+  }
+
+  // Hook initStakeChart/initRewardWdChart so patches apply even on first creation
+  if (typeof initStakeChart === "function") {
+    const _initStakeChart = initStakeChart;
+    initStakeChart = function(){
+      _initStakeChart.apply(this, arguments);
+      try{
+        patchStakeAxisLikeReward();
+        applyStakeScale();
+        tightAutoscaleY(stakeChart, stakeData);
+      } catch {}
+    };
+  }
+  if (typeof initRewardWdChart === "function") {
+    const _initRewardWdChart = initRewardWdChart;
+    initRewardWdChart = function(){
+      _initRewardWdChart.apply(this, arguments);
+      try{
+        patchRewardAxisTight();
+        applyRewardScale();
+        tightAutoscaleY(rewardChart, wdValues);
+      } catch {}
+    };
+  }
+
+  // Wrap draw functions to keep autoscaling as points grow
+  if (typeof drawStakeChart === "function") {
+    const _drawStakeChart = drawStakeChart;
+    drawStakeChart = function(){
+      _drawStakeChart.apply(this, arguments);
+      try{
+        patchStakeAxisLikeReward();
+        applyStakeScale();
+        tightAutoscaleY(stakeChart, stakeData);
+        stakeChart.update("none");
+      } catch {}
+    };
+  }
+  if (typeof drawRewardWdChart === "function") {
+    const _drawRewardWdChart = drawRewardWdChart;
+    drawRewardWdChart = function(){
+      _drawRewardWdChart.apply(this, arguments);
+      try{
+        patchRewardAxisTight();
+        applyRewardScale();
+        tightAutoscaleY(rewardChart, wdValues);
+        rewardChart.update("none");
+      } catch {}
+    };
+  }
+
+  /* ---------------------------
+     5) Boot: ensure filters + toggles once UI exists
+     --------------------------- */
+  function bootPatch(){
+    try{
+      ensureRewardFilterOptions();
+      applyRewardFilterModeToSelect();
+      initScaleToggles();
+
+      // if charts already exist, patch immediately
+      if (window.stakeChart) { patchStakeAxisLikeReward(); applyStakeScale(); tightAutoscaleY(stakeChart, stakeData); stakeChart.update("none"); }
+      if (window.rewardChart) { patchRewardAxisTight(); applyRewardScale(); tightAutoscaleY(rewardChart, wdValues); rewardChart.update("none"); }
+    } catch {}
+  }
+
+  // run soon + after a moment (in case DOM builds late)
+  setTimeout(bootPatch, 250);
+  setTimeout(bootPatch, 1200);
+
+})();
+
+
