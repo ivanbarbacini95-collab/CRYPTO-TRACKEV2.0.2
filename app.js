@@ -2988,13 +2988,11 @@ function animate() {
   colorNumber($("stake"), displayed.stake, os, 4);
   setText("stakeUsd", `≈ $${(displayed.stake * displayed.price).toFixed(2)}`);
 
-  const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
-  const stakeBar = $("stakeBar");
-  const stakeLine = $("stakeLine");
-  if (stakeBar) {
-    stakeBar.style.width = stakePct + "%";
-    stakeBar.style.backgroundPosition = `${(100 - stakePct) * 0.6}% 0`;
-  }
+const stakeMax = (window.__getStakeMaxRange?.() || 0) || STAKE_TARGET_MAX;
+const stakePct = clamp((displayed.stake / stakeMax) * 100, 0, 100);
+...
+setText("stakeMax", String(stakeMax));
+ 
   if (stakeLine) stakeLine.style.left = stakePct + "%";
   setText("stakePercent", stakePct.toFixed(1) + "%");
   setText("stakeMin", "0");
@@ -3006,8 +3004,8 @@ function animate() {
   colorNumber($("rewards"), displayed.rewards, or, 7);
   setText("rewardsUsd", `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`);
 
-  const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
-  const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
+  const forcedR = (window.__getRewardMaxRange?.() || 0);
+const maxR = forcedR > 0 ? forcedR : Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
 
   const rewardBar = $("rewardBar");
   const rewardLine = $("rewardLine");
