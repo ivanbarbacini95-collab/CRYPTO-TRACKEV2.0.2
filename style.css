@@ -1658,4 +1658,66 @@ body.card-zoom-lock{
 /* Make charts breathe when zoomed */
 .card.card-zoomed canvas{
   max-height: 100% !important;
+
+  /* ================= PATCH v2.0.2.1 — Controls down / Titles clean ================= */
+
+/* Titoli card più leggibili */
+.card .label,
+.networth-title{
+  font-size: 1.12rem;
+  line-height: 1.15;
+  letter-spacing: .02em;
+}
+
+/* Nascondi controlli in alto (li spostiamo sotto via JS) — EXCEPT APR */
+.card:not(.apr-card) > .card-tools,
+.card:not(.apr-card) .networth-top2{
+  display: none !important;
+}
+
+/* Barra controlli sotto la card */
+.card-actions{
+  margin-top: .9rem;
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  gap:.5rem;
+  flex-wrap: wrap;
+}
+
+/* Se i tools vengono spostati dentro .card-actions, devono tornare visibili */
+.card-actions .card-tools{
+  display:flex !important;
+  position: static !important;
+  top:auto !important;
+  right:auto !important;
+  gap:.45rem;
+}
+
+/* Pulsante LIN/LOG */
+.scale-toggle-btn{
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.92);
+  font-weight: 950;
+  font-size: .74rem;
+  letter-spacing: .06em;
+  cursor: pointer;
+}
+body[data-theme="light"] .scale-toggle-btn{
+  border-color: rgba(15,23,42,.14);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.86);
+}
+.scale-toggle-btn:active{ transform: translateY(1px); }
+
+/* overlay chart: evita collisioni */
+.chart-overlay{ right: 12px !important; }
+
+/* Validator card spacing */
+.validator-card{ margin-top: .15rem; }
+
 }
