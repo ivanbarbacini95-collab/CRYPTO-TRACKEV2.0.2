@@ -3373,3 +3373,24 @@ animate();
     return _origAttach.apply(this, arguments);
   };
 })();
+
+/* ================= PATCH: bind-once utilities ================= */
+(function(){
+  const bound = new Set();
+  window.bindOnce = function(key, fn){
+    if (bound.has(key)) return;
+    bound.add(key);
+    try { fn(); } catch(e){ console.warn("bindOnce failed", key, e); }
+  };
+})();
+
+/* ================= PATCH: wrap your binders to be bindOnce ================= */
+(function(){
+  const _nw = window.attachNWTFHandlers;
+  if (typeof _nw === "function"){
+    window.attachNWTFHandlers = function(){
+      return window.bindOnce("nwTfHandlers", () => _nw());
+    };
+  }
+})();
+
