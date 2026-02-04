@@ -3089,3 +3089,115 @@ function animate() {
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ================= APPEND-ONLY PATCH (paste at end of app.js) =================
+   Patch:
+   1) Disable + remove Validator card UI (no more "Validator" dot)
+   2) Ensure "EVENT" menu item exists in drawer (if missing)
+=============================================================================== */
+(() => {
+  const PATCH_KEY = "__inj_append_patch_2026_02_04__";
+  if (window[PATCH_KEY]) return;
+  window[PATCH_KEY] = true;
+
+  const CFG = {
+    disableValidator: true,
+    ensureEventMenu: true
+  };
+
+  const q = (sel, root = document) => root.querySelector(sel);
+  const qa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  function onReady(fn) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn, { once: true });
+    } else fn();
+  }
+
+  /* ------------------ 1) VALIDATOR OFF ------------------ */
+  function removeValidatorUI() {
+    qa(".validator-card").forEach((el) => el.remove());
+    // in case you had leftovers in custom html:
+    qa("#validatorDot, #validatorLine").forEach((el) => el.remove());
+  }
+
+  function disableValidatorLogic() {
+    // CSS hard-hide (prevents flashes)
+    const styleId = "injPatchValidatorHide";
+    if (!document.getElementById(styleId)) {
+      const st = document.createElement("style");
+      st.id = styleId;
+      st.textContent = `.validator-card{display:none!important}`;
+      document.head.appendChild(st);
+    }
+
+    // Neutralize validator functions (same-file scope)
+    try {
+      if (typeof ensureSingleValidatorCard === "function") ensureSingleValidatorCard = () => {};
+      if (typeof ensureValidatorCard === "function") ensureValidatorCard = () => null;
+      if (typeof setValidatorDot === "function") setValidatorDot = () => {};
+      if (typeof setValidatorLine === "function") setValidatorLine = () => {};
+      if (typeof loadValidatorInfo === "function") loadValidatorInfo = async () => null;
+    } catch {}
+
+    // Block future injections of validator-card (very targeted)
+    try {
+      const orig = Element.prototype.insertAdjacentElement;
+      if (!orig.__injPatchedValidator) {
+        Element.prototype.insertAdjacentElement = function (pos, el) {
+          try {
+            if (el?.classList?.contains("validator-card")) return el;
+          } catch {}
+          return orig.call(this, pos, el);
+        };
+        Element.prototype.insertAdjacentElement.__injPatchedValidator = true;
+      }
+    } catch {}
+
+    // Observer: if something still injects it, remove it immediately
+    try {
+      const mo = new MutationObserver(() => removeValidatorUI());
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+    } catch {}
+
+    removeValidatorUI();
+  }
+
+  /* ------------------ 2) ENSURE "EVENT" MENU ITEM ------------------ */
+  function ensureEventMenuItem() {
+    const nav = document.getElementById("drawerNav") || q(".drawer-nav");
+    if (!nav) return;
+
+    const hasEvent = !!q('.nav-item[data-page="event"]', nav);
+    if (hasEvent) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "nav-item";
+    btn.dataset.page = "event";
+    btn.innerHTML = `<span>EVENT</span><span class="nav-version">View</span>`;
+
+    // Place it after Dashboard if present
+    const dash = q('.nav-item[data-page="dashboard"]', nav);
+    if (dash) dash.insertAdjacentElement("afterend", btn);
+    else nav.insertAdjacentElement("afterbegin", btn);
+
+    // Fallback click (your existing delegated handler will still work)
+    btn.addEventListener(
+      "click",
+      () => {
+        try {
+          if (typeof showEventPage === "function") showEventPage();
+          else if (typeof openComingSoon === "function") openComingSoon("event");
+        } catch {}
+      },
+      { passive: true }
+    );
+  }
+
+  onReady(() => {
+    if (CFG.disableValidator) disableValidatorLogic();
+    if (CFG.ensureEventMenu) ensureEventMenuItem();
+    console.log("[INJ] append-only patch loaded:", CFG);
+  });
+})();
