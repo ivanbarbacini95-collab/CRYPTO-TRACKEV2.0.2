@@ -3394,3 +3394,112 @@ animate();
   }
 })();
 
+/* ================= PATCH: Price Chart timeframes + LIN/LOG ================= */
+(function(){
+  const TF = {
+    "5m":  { interval:"1m", limit: 5 },
+    "15m": { interval:"1m", limit: 15 },
+    "1h":  { interval:"1m", limit: 60 },
+    "6h":  { interval:"1m", limit: 360 },
+    "12h": { interval:"1m", limit: 720 },
+    "1d":  { interval:"1m", limit: 1440 },
+    "7d":  { interval:"5m", limit: 2016 },   // 7d in 5m => 7*24*12 = 2016
+    "1w":  { interval:"15m", limit: 672 },   // 1w in 15m => 7*24*4 = 672
+    "1m":  { interval:"1h", limit: 720 },    // 30d in 1h => 720
+    "1y":  { interval:"1d", limit: 365 },
+    "all": { interval:"1w", limit: 1000 }    // massimo pratico
+  };
+
+  let priceTf = localStorage.getItem("inj_price_tf") || "1d";
+  let priceScale = localStorage.getItem("inj_price_scale") || "linear";
+
+  async function fetchKlines(symbol, interval, limit){
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+    return await window.fetchJSON(url);
+  }
+
+  function applyPriceScale(){
+    if (!window.chart) return;
+    window.chart.options.scales.y.type = (priceScale === "log") ? "logarithmic" : "linear";
+    window.chart.update("none");
+    const b = document.getElementById("priceScaleBtn");
+    if (b) b.textContent = (priceScale === "log") ? "LOG" : "LIN";
+  }
+
+  async function loadPriceTf(tf){
+    if (!window.hasInternet?.()) return;
+    const cfg = TF[tf] || TF["1d"];
+    const kl = await fetchKlines("INJUSDT", cfg.interval, cfg.limit);
+    if (!Array.isArray(kl) || !kl.length) return;
+
+    const labels = kl.map(k => window.fmtHHMM ? window.fmtHHMM(+k[0]) : new Date(+k[0]).toLocaleTimeString());
+    const data   = kl.map(k => Number(k[4])); // close
+
+    window.chartLabels = labels;
+    window.chartData   = data;
+
+    if (!window.chart) window.initChartToday?.();   // crea chart se non esiste
+    if (window.chart){
+      window.chart.data.labels = labels;
+      window.chart.data.datasets[0].data = data;
+      window.chart.update("none");
+      applyPriceScale();
+    }
+
+    localStorage.setItem("inj_price_tf", tf);
+  }
+
+  function bindPriceTfUI(){
+    window.bindOnce("priceTfUI", () => {
+      const wrap = document.getElementById("priceTfSwitch");
+      if (wrap){
+        wrap.addEventListener("click", async (e) => {
+          const btn = e.target.closest(".tf-btn");
+          if (!btn) return;
+          const tf = btn.dataset.ptf;
+          if (!TF[tf]) return;
+
+          // UI active
+          wrap.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b === btn));
+
+          priceTf = tf;
+          await loadPriceTf(priceTf);
+        }, { passive:true });
+      }
+
+      const scaleBtn = document.getElementById("priceScaleBtn");
+      if (scaleBtn){
+        scaleBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          priceScale = (priceScale === "log") ? "linear" : "log";
+          localStorage.setItem("inj_price_scale", priceScale);
+          applyPriceScale();
+        }, { passive:false });
+      }
+
+      // inizializza UI active + load
+      if (wrap){
+        const btn = wrap.querySelector(`.tf-btn[data-ptf="${priceTf}"]`) || wrap.querySelector(`.tf-btn[data-ptf="1d"]`);
+        if (btn) btn.classList.add("active");
+      }
+      applyPriceScale();
+    });
+  }
+
+  // attiva
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", bindPriceTfUI, { passive:true });
+  } else bindPriceTfUI();
+
+  // dopo che il tuo chart esiste, carica timeframe scelto
+  const _init = window.initChartToday;
+  if (typeof _init === "function"){
+    window.initChartToday = function(){
+      const out = _init.apply(this, arguments);
+      try { loadPriceTf(priceTf); } catch {}
+      return out;
+    };
+  }
+})();
+
+
