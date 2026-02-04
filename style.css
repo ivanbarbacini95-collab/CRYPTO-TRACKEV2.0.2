@@ -1442,18 +1442,6 @@ body.card-expanded{
   height: calc(100% - 40px) !important;
 }
 
-/*
-  ✅ CSS changes summary:
-  - Increased spacing between cards and internal padding for a more “pro” breathing layout
-  - Added page system styles (dashboard/events) and responsive event table wrapper
-  - Added toast notification styling (slide down + auto hide)
-  - Added drawer menu cloud sync section styles + status dot classes
-  - Reduced expand button size and placed it safely inside cards
-  - Added fullscreen card style (JS toggles .fullscreen + body.card-expanded)
-*/
-
-/* ================= ADDON PACK UI (append-only) ================= */
-
 .card { position: relative; }
 .card-tools {
   position: absolute;
