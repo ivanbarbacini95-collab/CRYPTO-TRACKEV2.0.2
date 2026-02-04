@@ -4699,3 +4699,314 @@ animate();
 
 })();
 
+/* =====================================================================
+   PATCH v2.0.2x — Validator effettivo + Stake points ONLY on increase
+   Incolla in fondo ad app.js
+   ===================================================================== */
+(function PATCH_VALIDATOR_AND_STAKE_ONLY_INCREASE(){
+  "use strict";
+
+  // ---------- guards ----------
+  const has = (name) => typeof window[name] !== "undefined";
+  const safeFn = (name) => (typeof window[name] === "function" ? window[name] : null);
+
+  // reuse your helpers if present
+  const _fetchJSON   = safeFn("fetchJSON");
+  const _hasInternet = safeFn("hasInternet") || (() => navigator.onLine === true);
+  const _shortAddr   = safeFn("shortAddr") || ((a)=>a);
+  const _safe        = safeFn("safe") || ((n)=> (Number.isFinite(+n) ? +n : 0));
+
+  // your validator UI functions (if present)
+  const _ensureValidatorCard = safeFn("ensureValidatorCard");
+  const _setValidatorDot     = safeFn("setValidatorDot");
+  const _setValidatorLine    = safeFn("setValidatorLine");
+  const _loadValidatorInfo   = safeFn("loadValidatorInfo"); // your existing loader
+
+  // Injective LCD base (same as your code)
+  const LCD_BASE = "https://lcd.injective.network";
+
+  // cache validator lookup per address (avoid hammering LCD)
+  const VAL_CACHE_MS = 10 * 60 * 1000;
+  const VAL_CACHE_KEY = (addr) => `inj_valcache_v1_${(addr||"").trim()}`;
+
+  function ensureValidatorTag(){
+    // If user added HTML patch -> use it. Otherwise try to inject inside addressDisplay.
+    let tag = document.getElementById("validatorTag");
+    let txt = document.getElementById("validatorTagText");
+
+    if (!tag || !txt){
+      const addrDisp = document.getElementById("addressDisplay");
+      if (!addrDisp) return { tag: null, txt: null };
+
+      // create only once
+      tag = document.createElement("div");
+      tag.id = "validatorTag";
+      tag.className = "validator-tag";
+      tag.hidden = true;
+
+      const k = document.createElement("span");
+      k.className = "validator-tag__k";
+      k.textContent = "Validator:";
+
+      txt = document.createElement("span");
+      txt.id = "validatorTagText";
+      txt.className = "validator-tag__v";
+      txt.textContent = "—";
+
+      tag.appendChild(k);
+      tag.appendChild(txt);
+      addrDisp.appendChild(tag);
+    }
+
+    return { tag, txt };
+  }
+
+  function setValidatorTagText(label){
+    const { tag, txt } = ensureValidatorTag();
+    if (!tag || !txt) return;
+    if (!label) {
+      tag.hidden = true;
+      txt.textContent = "—";
+      return;
+    }
+    txt.textContent = label;
+    tag.hidden = false;
+  }
+
+  function pickPrimaryValidatorFromDelegations(delgs){
+    // Choose the validator with the largest delegated balance.amount
+    let bestAddr = "";
+    let bestAmt = 0;
+
+    for (const d of (delgs || [])) {
+      const va = d?.delegation?.validator_address || "";
+      const amt = _safe(d?.balance?.amount) / 1e18; // inj denom uses 1e18
+      if (va && amt > bestAmt) {
+        bestAmt = amt;
+        bestAddr = va;
+      }
+    }
+    return { validator: bestAddr, amount: bestAmt };
+  }
+
+  async function fetchValidatorMoniker(validatorAddr){
+    if (!_fetchJSON || !validatorAddr) return { moniker: "", bonded: null };
+
+    const v = await _fetchJSON(`${LCD_BASE}/cosmos/staking/v1beta1/validators/${encodeURIComponent(validatorAddr)}`);
+    const moniker = v?.validator?.description?.moniker || "";
+    const st = String(v?.validator?.status || "");
+    const bonded = (st.includes("BONDED") || st === "BOND_STATUS_BONDED");
+    return { moniker, bonded };
+  }
+
+  async function resolveValidatorForAddress(addr){
+    const a = (addr || "").trim();
+    if (!a) return null;
+
+    // cache
+    try{
+      const raw = localStorage.getItem(VAL_CACHE_KEY(a));
+      if (raw){
+        const obj = JSON.parse(raw);
+        if (obj?.t && (Date.now() - obj.t) < VAL_CACHE_MS && obj?.validator){
+          return obj;
+        }
+      }
+    } catch {}
+
+    if (!_hasInternet()) return null;
+    if (!_fetchJSON) return null;
+
+    const s = await _fetchJSON(`${LCD_BASE}/cosmos/staking/v1beta1/delegations/${encodeURIComponent(a)}`);
+    const delgs = s?.delegation_responses || [];
+
+    const { validator, amount } = pickPrimaryValidatorFromDelegations(delgs);
+    if (!validator) {
+      const out = { t: Date.now(), validator: "", moniker: "", amount: 0 };
+      try { localStorage.setItem(VAL_CACHE_KEY(a), JSON.stringify(out)); } catch {}
+      return out;
+    }
+
+    const info = await fetchValidatorMoniker(validator);
+    const out = {
+      t: Date.now(),
+      validator,
+      moniker: info.moniker || "",
+      bonded: info.bonded,
+      amount
+    };
+
+    try { localStorage.setItem(VAL_CACHE_KEY(a), JSON.stringify(out)); } catch {}
+    return out;
+  }
+
+  async function refreshValidatorUI(){
+    try{
+      // uses your global "address" if present
+      if (typeof address === "undefined") return;
+      const a = (address || "").trim();
+
+      // show loading
+      if (_ensureValidatorCard) _ensureValidatorCard();
+      if (_setValidatorDot) _setValidatorDot(_hasInternet() ? "loading" : "fail");
+      if (_setValidatorLine) _setValidatorLine(a ? "Loading…" : "No wallet selected");
+      setValidatorTagText(a ? "Loading…" : "");
+
+      if (!a) return;
+      if (!_hasInternet()) {
+        setValidatorTagText("Offline");
+        if (_setValidatorDot) _setValidatorDot("fail");
+        if (_setValidatorLine) _setValidatorLine(`${_shortAddr(a)} · Offline`);
+        return;
+      }
+
+      const r = await resolveValidatorForAddress(a);
+      if (!r) return;
+
+      if (!r.validator){
+        setValidatorTagText("No delegation");
+        if (_setValidatorDot) _setValidatorDot("fail");
+        if (_setValidatorLine) _setValidatorLine("No validator found");
+        return;
+      }
+
+      const label = r.moniker
+        ? `${r.moniker} · ${_shortAddr(r.validator)}`
+        : `${_shortAddr(r.validator)}`;
+
+      setValidatorTagText(label);
+
+      // Update your existing validator card too
+      if (_loadValidatorInfo) {
+        // your function already fetches moniker + bonded + dot styling
+        _loadValidatorInfo(r.validator);
+      } else {
+        if (_setValidatorLine) _setValidatorLine(label);
+        if (_setValidatorDot) _setValidatorDot(r.bonded ? "ok" : "loading");
+      }
+    } catch (e){
+      console.warn("PATCH validator UI error:", e);
+    }
+  }
+
+  // ---------- STAKE: only record on increase + prevent cross-address bleed ----------
+  function hardResetStakeSeries(){
+    try{
+      if (typeof stakeLabels !== "undefined") stakeLabels = [];
+      if (typeof stakeData   !== "undefined") stakeData   = [];
+      if (typeof stakeMoves  !== "undefined") stakeMoves  = [];
+      if (typeof stakeTypes  !== "undefined") stakeTypes  = [];
+      if (typeof lastStakeRecordedRounded !== "undefined") lastStakeRecordedRounded = null;
+      if (typeof stakeBaselineCaptured !== "undefined") stakeBaselineCaptured = false;
+    } catch {}
+  }
+
+  // If loadStakeSeries fails, clear arrays (so you don't keep old address data)
+  if (typeof loadStakeSeries === "function") {
+    const _loadStakeSeries = loadStakeSeries;
+    loadStakeSeries = function(){
+      const ok = _loadStakeSeries.apply(this, arguments);
+      if (!ok) {
+        hardResetStakeSeries();
+        try { if (typeof drawStakeChart === "function") drawStakeChart(); } catch {}
+      }
+      return ok;
+    };
+  }
+
+  // Override stake point recorder: baseline once, then ONLY when it increases
+  if (typeof maybeAddStakePoint === "function") {
+    const EPS = 0.000001; // precision guard (INJ)
+    maybeAddStakePoint = function(currentStake){
+      try{
+        const s = _safe(currentStake);
+        if (!Number.isFinite(s)) return;
+
+        const rounded = Number(s.toFixed(6));
+
+        // baseline (first time only)
+        if (typeof stakeBaselineCaptured !== "undefined" && !stakeBaselineCaptured) {
+          if (typeof nowLabel === "function") stakeLabels.push(nowLabel());
+          else stakeLabels.push(new Date().toLocaleTimeString());
+
+          stakeData.push(rounded);
+          stakeMoves.push(1);
+          stakeTypes.push("Baseline (current)");
+          lastStakeRecordedRounded = rounded;
+          stakeBaselineCaptured = true;
+
+          if (typeof saveStakeSeries === "function") saveStakeSeries();
+          if (typeof drawStakeChart === "function") drawStakeChart();
+          return;
+        }
+
+        // no baseline variable? fallback
+        if (typeof lastStakeRecordedRounded === "undefined" || lastStakeRecordedRounded == null) {
+          lastStakeRecordedRounded = rounded;
+          return;
+        }
+
+        // ONLY record when it increases
+        if (rounded > (lastStakeRecordedRounded + EPS)) {
+          const delta = rounded - lastStakeRecordedRounded;
+          lastStakeRecordedRounded = rounded;
+
+          if (typeof nowLabel === "function") stakeLabels.push(nowLabel());
+          else stakeLabels.push(new Date().toLocaleTimeString());
+
+          stakeData.push(rounded);
+          stakeMoves.push(1);
+          stakeTypes.push("Stake increased");
+
+          // optional: keep your event system if present
+          if (typeof pushEvent === "function") {
+            pushEvent({
+              type: "stake",
+              title: "Stake increased",
+              value: `+${delta.toFixed(6)} INJ`,
+              status: (_hasInternet() ? "ok" : "pending")
+            });
+          }
+
+          if (typeof saveStakeSeries === "function") saveStakeSeries();
+          if (typeof drawStakeChart === "function") drawStakeChart();
+          return;
+        }
+
+        // If it decreases, update reference so future increases are measured correctly,
+        // but DO NOT create a point.
+        if (rounded < lastStakeRecordedRounded) {
+          lastStakeRecordedRounded = rounded;
+        }
+      } catch (e){
+        console.warn("PATCH maybeAddStakePoint error:", e);
+      }
+    };
+  }
+
+  // Wrap commitAddress to ensure no stake data bleed + refresh validator immediately
+  if (typeof commitAddress === "function") {
+    const _commitAddress = commitAddress;
+    commitAddress = async function(newAddr){
+      // pre-clear stake series to prevent old arrays being shown if load fails
+      hardResetStakeSeries();
+      try { if (typeof drawStakeChart === "function") drawStakeChart(); } catch {}
+      const r = await _commitAddress.apply(this, arguments);
+      // refresh validator UI after address is set
+      refreshValidatorUI();
+      return r;
+    };
+  }
+
+  // periodic refresh (safe)
+  setTimeout(refreshValidatorUI, 900);
+  setInterval(() => {
+    try{
+      if (typeof address === "undefined") return;
+      if (!(address || "").trim()) return;
+      refreshValidatorUI();
+    } catch {}
+  }, 45_000);
+
+})();
+
