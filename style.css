@@ -1423,12 +1423,14 @@ body.card-expanded{
 }
 .card.fullscreen{
   position: fixed !important;
-  inset: 10px;
+  inset: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+         max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  height: calc(100dvh - 16px);
   z-index: 200;
   border-radius: 18px;
-  padding: 14px;
   overflow: hidden;
 }
+
 @media (max-width: 520px){
   .card.fullscreen{ inset: 8px; }
 }
