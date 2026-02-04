@@ -1451,3 +1451,83 @@ body.card-expanded{
   - Reduced expand button size and placed it safely inside cards
   - Added fullscreen card style (JS toggles .fullscreen + body.card-expanded)
 */
+
+/* ================= PATCH v2.0.3 — responsiveness + cleanup ================= */
+
+/* Net Worth: elimina blocchi non essenziali */
+.networth-asset{ display:none !important; }                 /* riga Injective + qty/price/usd */
+.networth-foot .nw-mini:nth-child(2){ display:none !important; } /* seconda mini-card vuota */
+
+/* Net Worth: tieni SOLO toggle scala (nascondi eventuale LIVE button vecchio) */
+.nw-live-btn{ display:none !important; }
+
+/* Più area plot: comprimi padding interno dei wrap grafici */
+.networth-chart{ margin-top:.85rem; }
+.stake-chart-wrap{ height: 190px; }
+.reward-chart-wrap{ height: 210px; }
+
+/* Assi più “attaccati” al bordo (aiuta su mobile) */
+canvas{ touch-action: pan-y; } /* evita pinch/scroll conflitti */
+
+/* Bottoni piccoli pro */
+.pill-btn{
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(249,250,251,.88);
+  font-weight: 950;
+  font-size: .74rem;
+  cursor: pointer;
+}
+body[data-theme="light"] .pill-btn{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+  color: rgba(15,23,42,.86);
+}
+.pill-btn:active{ transform: translateY(1px); }
+
+/* Timeframe rows (stake/reward/apr/price) */
+.tf-row{
+  display:flex;
+  justify-content:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:.75rem;
+}
+
+/* “gear” vicino alle barre */
+.bar-gear{
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+}
+body[data-theme="light"] .bar-gear{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+}
+.bar-gear:active{ transform: translateY(1px); }
+
+/* Copy address button */
+.addr-copy{
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+  margin-left: .45rem;
+}
+body[data-theme="light"] .addr-copy{
+  border-color: rgba(15,23,42,.12);
+  background: rgba(15,23,42,.05);
+}
+
