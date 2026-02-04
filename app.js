@@ -3089,3 +3089,38 @@ function animate() {
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ================= PATCH: DISABLE VALIDATOR CARD =================
+   Incolla questo blocco SUBITO PRIMA di:  /* ================= BOOT ================= */
+*/
+const __DISABLE_VALIDATOR_CARD__ = true;
+
+(function disableValidatorCardPatch(){
+  if (!__DISABLE_VALIDATOR_CARD__) return;
+
+  const removeAllValidatorCards = () => {
+    try {
+      document.querySelectorAll(".validator-card").forEach(el => el.remove());
+    } catch {}
+  };
+
+  // ✅ Replace / neutralize validator UI functions (no-op)
+  try { ensureSingleValidatorCard = removeAllValidatorCards; } catch {}
+  try { ensureValidatorCard = () => { removeAllValidatorCards(); return null; }; } catch {}
+  try { setValidatorDot = () => {}; } catch {}
+  try { setValidatorLine = () => {}; } catch {}
+  try { loadValidatorInfo = async () => {}; } catch {}
+
+  // ✅ Hard cleanup (in case an older boot already created it)
+  removeAllValidatorCards();
+
+  // ✅ Safety: if anything injects it later, remove instantly
+  try {
+    const obs = new MutationObserver(() => removeAllValidatorCards());
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+  } catch {}
+
+  // ✅ Also run on load events (extra safe)
+  window.addEventListener("DOMContentLoaded", removeAllValidatorCards, { passive: true });
+  window.addEventListener("load", removeAllValidatorCards, { passive: true });
+})();
