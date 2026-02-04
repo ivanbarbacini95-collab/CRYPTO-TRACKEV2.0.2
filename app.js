@@ -1,6 +1,10 @@
+/* =========================================================
+   Injective Portfolio • v2.0.2
+   app.js — FULL FILE (no cuts)
+   ========================================================= */
+
 /* ================= CONFIG ================= */
 const INITIAL_SETTLE_TIME = 4200;
-let settleStart = Date.now();
 
 const ACCOUNT_POLL_MS = 2000;
 const REST_SYNC_MS = 60000;
@@ -10,41 +14,27 @@ const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
-
-/* persistence */
-const STAKE_LOCAL_VER = 2;
-/* ✅ non resettare più ad ogni refresh: mantieni punti anche se ricarichi pagina */
-const RESET_STAKE_FROM_NOW_ON_BOOT = false;
-
-const REWARD_WD_LOCAL_VER = 2;
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
-/* NET WORTH persistence */
-const NW_LOCAL_VER = 1;
+/* persistence versions */
+const STAKE_LOCAL_VER = 3; // bumped: labels store timestamps for cross-device merge
+const REWARD_WD_LOCAL_VER = 2;
+const NW_LOCAL_VER = 2;    // bumped: allow live window state + scale
+const EV_LOCAL_VER = 1;
+
+/* net worth limits */
 const NW_MAX_POINTS = 4800;
 
-/* EVENTS persistence */
-const EVENTS_LOCAL_VER = 1;
-const EVENTS_MAX = 1200;
+/* Net Worth live window */
+const NW_LIVE_WINDOW_MS = 2 * 60 * 1000; // ✅ 2 minutes (as requested)
 
-/* Cloud API */
-const CLOUD_API = "/api/point"; // GET/POST -> /api/point?address=inj...
-const CLOUD_PUSH_DEBOUNCE_MS = 900;
+/* cloud */
+const CLOUD_API = "/api/point";
+const CLOUD_PUSH_DEBOUNCE_MS = 1200;
+const CLOUD_PULL_INTERVAL_MS = 45_000;
 
-/* NET WORTH live window */
-const NW_LIVE_WINDOW_MS = 5 * 60 * 1000; // 5 minuti LIVE
-
-/* REFRESH mode staging */
+/* refresh mode staging */
 const REFRESH_RED_MS = 220;
-let refreshLoaded = false;
-let refreshLoading = false;
-
-/* ✅ Status dot "mode loading" (switch / data loading) */
-let modeLoading = false;
-
-/* Injective logo (stable PNG) */
-const INJ_LOGO_PNG =
-  "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/nativeinjective/info/logo.png";
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -52,10 +42,30 @@ const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
 
 function pad2(n) { return String(n).padStart(2, "0"); }
-function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+
+function fmtHHMM(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function fmtHHMMSS(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/* storage-label (timestamp) helpers */
+function tsLabel(ms = Date.now()) { return String(Math.floor(ms)); }
+function labelToTs(lbl) {
+  if (lbl == null) return 0;
+  const s = String(lbl).trim();
+  if (/^\d{10,13}$/.test(s)) return safe(s);
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/* UI labels */
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
-function setText(id, txt){ const el = $(id); if (el) el.textContent = txt; }
+function setText(id, txt) { const el = $(id); if (el) el.textContent = txt; }
 
 function fmtSmart(v){
   v = safe(v);
@@ -70,7 +80,153 @@ function fmtSmart(v){
 
 function hasInternet() { return navigator.onLine === true; }
 
-/* ================= MONEY + DIGIT COLORING ================= */
+/* ================= GLOBAL ERROR GUARDS ================= */
+function setStatusError(msg){
+  const statusText = $("statusText");
+  const statusDot = $("statusDot");
+  if (statusText) statusText.textContent = msg || "Error";
+  if (statusDot) statusDot.style.background = "#ef4444";
+}
+
+window.addEventListener("error", (e) => {
+  setStatusError("JS Error");
+  console.error("JS Error:", e?.error || e);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  setStatusError("Promise Error");
+  console.error("Promise Error:", e?.reason || e);
+});
+
+/* ================= THEME / MODE ================= */
+const THEME_KEY = "inj_theme";
+const MODE_KEY  = "inj_mode"; // live | refresh
+
+let theme = localStorage.getItem(THEME_KEY) || "dark";
+let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
+
+function axisGridColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
+}
+function axisTickColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
+}
+
+function applyTheme(t){
+  theme = (t === "light") ? "light" : "dark";
+  document.body.dataset.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  const themeIcon = $("themeIcon");
+  if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
+  refreshChartsTheme();
+}
+
+/* ================= CHARTJS ZOOM REGISTER (NO CRASH) ================= */
+let ZOOM_OK = false;
+function tryRegisterZoom(){
+  try{
+    if (!window.Chart) return false;
+    const plug = window.ChartZoom || window["chartjs-plugin-zoom"];
+    if (plug) Chart.register(plug);
+    const has = !!(Chart?.registry?.plugins?.get && Chart.registry.plugins.get("zoom"));
+    return has;
+  } catch (e){
+    console.warn("Zoom plugin not available:", e);
+    return false;
+  }
+}
+
+/* ================= CONNECTION UI ================= */
+const statusDot  = $("statusDot");
+const statusText = $("statusText");
+
+let wsTradeOnline = false;
+let wsKlineOnline = false;
+let accountOnline = false;
+
+let refreshLoaded = false;
+let refreshLoading = false;
+let modeLoading = false;
+
+function liveReady(){
+  const socketsOk = wsTradeOnline && wsKlineOnline;
+  const accountOk = !address || accountOnline;
+  return socketsOk && accountOk;
+}
+
+function refreshConnUI() {
+  if (!statusDot || !statusText) return;
+
+  if (!hasInternet()) {
+    statusText.textContent = "Offline";
+    statusDot.style.background = "#ef4444";
+    return;
+  }
+
+  const loadingNow =
+    modeLoading ||
+    refreshLoading ||
+    (!liveMode && !refreshLoaded) ||
+    (liveMode && !liveReady());
+
+  if (loadingNow) {
+    statusText.textContent = "Loading...";
+    statusDot.style.background = "#f59e0b";
+    return;
+  }
+
+  statusText.textContent = "Online";
+  statusDot.style.background = "#22c55e";
+}
+
+/* ================= UI READY FAILSAFE ================= */
+function setUIReady(force=false){
+  const root = $("appRoot");
+  if (!root) return;
+  if (root.classList.contains("ready")) return;
+  if (!force && !tfReady.d) return;
+  root.classList.remove("loading");
+  root.classList.add("ready");
+}
+
+/* ================= SAFE FETCH ================= */
+async function fetchJSON(url, opts = {}) {
+  try {
+    const res = await fetch(url, { cache: "no-store", ...opts });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ================= SMOOTH DISPLAY ================= */
+let settleStart = Date.now();
+function scrollSpeed() {
+  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
+  const base = 0.08;
+  const maxExtra = 0.80;
+  return base + (t * t) * maxExtra;
+}
+function tick(cur, tgt) {
+  if (!Number.isFinite(tgt)) return cur;
+  return cur + (tgt - cur) * scrollSpeed();
+}
+
+/* ================= COLORED DIGITS ================= */
+function colorNumber(el, n, o, d) {
+  if (!el) return;
+  n = safe(n); o = safe(o);
+  const ns = n.toFixed(d), os = o.toFixed(d);
+  if (ns === os) { el.textContent = ns; return; }
+  el.innerHTML = [...ns].map((c, i) => {
+    const col = c !== os[i]
+      ? (n > o ? "#22c55e" : "#ef4444")
+      : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
+    return `<span style="color:${col}">${c}</span>`;
+  }).join("");
+}
+
+/* money with digit coloring */
 function colorMoney(el, n, o, decimals = 2){
   if (!el) return;
   n = safe(n); o = safe(o);
@@ -91,152 +247,6 @@ function colorMoney(el, n, o, decimals = 2){
     out.push(`<span style="color:${col}">${c}</span>`);
   }
   el.innerHTML = out.join("");
-}
-
-function colorNumber(el, n, o, d) {
-  if (!el) return;
-  n = safe(n); o = safe(o);
-  const ns = n.toFixed(d), os = o.toFixed(d);
-  if (ns === os) { el.textContent = ns; return; }
-  el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i]
-      ? (n > o ? "#22c55e" : "#ef4444")
-      : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
-    return `<span style="color:${col}">${c}</span>`;
-  }).join("");
-}
-
-/* ================= GLOBAL ERROR GUARDS ================= */
-function setStatusError(msg){
-  const statusText = $("statusText");
-  const statusDot = $("statusDot");
-  if (statusText) statusText.textContent = msg || "Error";
-  if (statusDot) statusDot.style.background = "#ef4444";
-}
-window.addEventListener("error", (e) => {
-  setStatusError("JS Error");
-  console.error("JS Error:", e?.error || e);
-});
-window.addEventListener("unhandledrejection", (e) => {
-  setStatusError("Promise Error");
-  console.error("Promise Error:", e?.reason || e);
-});
-
-/* ================= THEME / MODE (storage) ================= */
-const THEME_KEY = "inj_theme";
-const MODE_KEY  = "inj_mode"; // live | refresh
-let theme   = localStorage.getItem(THEME_KEY) || "dark";
-let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
-
-function axisGridColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
-}
-function axisTickColor() {
-  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
-}
-
-function applyTheme(t){
-  theme = (t === "light") ? "light" : "dark";
-  document.body.dataset.theme = theme;
-  localStorage.setItem(THEME_KEY, theme);
-  const themeIcon = $("themeIcon");
-  if (themeIcon) themeIcon.textContent = theme === "dark" ? "🌙" : "☀️";
-  refreshChartsTheme();
-}
-applyTheme(theme);
-
-/* ================= CHARTJS ZOOM REGISTER (NO CRASH) ================= */
-let ZOOM_OK = false;
-function tryRegisterZoom(){
-  try{
-    if (!window.Chart) return false;
-    const plug = window.ChartZoom || window["chartjs-plugin-zoom"];
-    if (plug) Chart.register(plug);
-    const has = !!(Chart?.registry?.plugins?.get && Chart.registry.plugins.get("zoom"));
-    return has;
-  } catch (e){
-    console.warn("Zoom plugin not available:", e);
-    return false;
-  }
-}
-ZOOM_OK = tryRegisterZoom();
-
-/* ================= CONNECTION UI ================= */
-const statusDot  = $("statusDot");
-const statusText = $("statusText");
-
-let wsTradeOnline = false;
-let wsKlineOnline = false;
-let accountOnline = false;
-
-/* ✅ Determine if LIVE is truly "ready" */
-function liveReady(){
-  const socketsOk = wsTradeOnline && wsKlineOnline;
-  const accountOk = !address || accountOnline; // if no wallet set, don't block green
-  return socketsOk && accountOk;
-}
-
-/* ✅ Status dot logic:
-   - No internet => red
-   - Loading (switching / fetching) => orange
-   - Ready => green
-*/
-function refreshConnUI() {
-  if (!statusDot || !statusText) return;
-
-  if (!hasInternet()) {
-    statusText.textContent = "Offline";
-    statusDot.style.background = "#ef4444";
-    return;
-  }
-
-  const loadingNow =
-    modeLoading ||
-    refreshLoading ||
-    (!liveMode && !refreshLoaded) ||
-    (liveMode && !liveReady());
-
-  if (loadingNow) {
-    statusText.textContent = "Loading...";
-    statusDot.style.background = "#f59e0b"; // orange
-    return;
-  }
-
-  statusText.textContent = "Online";
-  statusDot.style.background = "#22c55e"; // green
-}
-
-/* ================= UI READY FAILSAFE ================= */
-function setUIReady(force=false){
-  const root = $("appRoot");
-  if (!root) return;
-  if (root.classList.contains("ready")) return;
-  if (!force && !tfReady.d) return;
-  root.classList.remove("loading");
-  root.classList.add("ready");
-}
-
-/* ================= SAFE FETCH ================= */
-async function fetchJSON(url, opts={}) {
-  try {
-    const res = await fetch(url, { cache: "no-store", ...opts });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-/* ================= SMOOTH DISPLAY ================= */
-function scrollSpeed() {
-  const t = Math.min((Date.now() - settleStart) / INITIAL_SETTLE_TIME, 1);
-  const base = 0.08;
-  const maxExtra = 0.80;
-  return base + (t * t) * maxExtra;
-}
-function tick(cur, tgt) {
-  if (!Number.isFinite(tgt)) return cur;
-  return cur + (tgt - cur) * scrollSpeed();
 }
 
 /* ================= PERF ================= */
@@ -300,7 +310,7 @@ function flash(el) {
   el.classList.add("flash-yellow");
 }
 
-/* ================= HEADER SEARCH UI ================= */
+/* ================= ADDRESS / SEARCH ================= */
 const searchWrap = $("searchWrap");
 const searchBtn = $("searchBtn");
 const addressInput = $("addressInput");
@@ -308,14 +318,12 @@ const addressDisplay = $("addressDisplay");
 const menuBtn = $("menuBtn");
 
 let address = localStorage.getItem("inj_address") || "";
-let pendingAddress = ""; // 👈 input rimane libero
+let pendingAddress = address || "";
 
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
   addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${shortAddr(addr)}</span>`;
-  const dw = $("drawerWallet");
-  if (dw) dw.textContent = shortAddr(addr);
 }
 setAddressDisplay(address);
 
@@ -332,27 +340,29 @@ function closeSearch() {
   addressInput?.blur();
 }
 
+if (addressInput) addressInput.value = ""; // ✅ start empty (we show wallet in display)
+
 if (searchBtn) {
   searchBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
     if (!searchWrap.classList.contains("open")) openSearch();
     else addressInput?.focus();
   }, { passive: false });
 }
 
 if (addressInput) {
-  addressInput.value = ""; // ✅ sempre vuota per nuova ricerca
-
   addressInput.addEventListener("focus", () => openSearch(), { passive: true });
 
-  addressInput.addEventListener("input", (e) => { pendingAddress = (e.target.value || "").trim(); }, { passive: true });
+  addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
 
-  addressInput.addEventListener("keydown", (e) => {
+  addressInput.addEventListener("keydown", async (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      commitAddress(pendingAddress);
-      addressInput.value = ""; // ✅ torna vuota
+      const v = pendingAddress;
+      await commitAddress(v);
+      // ✅ keep wallet displayed, but clear input for next search
+      addressInput.value = "";
       pendingAddress = "";
       closeSearch();
     } else if (e.key === "Escape") {
@@ -364,7 +374,7 @@ if (addressInput) {
   });
 }
 
-/* ✅ non rompere la lente: chiudi solo se clicchi davvero fuori */
+/* close search only if clicking outside */
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
@@ -379,6 +389,11 @@ const themeToggle = $("themeToggle");
 const liveToggle = $("liveToggle");
 const liveIcon = $("liveIcon");
 const modeHint = $("modeHint");
+
+/* cloud status in menu */
+const cloudDotMenu = $("cloudDotMenu");
+const cloudTextMenu = $("cloudTextMenu");
+const cloudPtsMenu = $("cloudPtsMenu");
 
 let isDrawerOpen = false;
 
@@ -397,19 +412,23 @@ function closeDrawer(){
 function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
 
 menuBtn?.addEventListener("click", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
   toggleDrawer();
 }, { passive: false });
 
 backdrop?.addEventListener("click", () => closeDrawer(), { passive:true });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDrawer();
+  if (e.key === "Escape") {
+    closeDrawer();
+    closeComingSoon();
+    exitFullscreenCard();
+  }
 });
 
 themeToggle?.addEventListener("click", (e) => {
-  e.preventDefault();
+  e?.preventDefault?.();
   applyTheme(theme === "dark" ? "light" : "dark");
 }, { passive:false });
 
@@ -422,10 +441,10 @@ const comingClose = $("comingClose");
 function pageLabel(key){
   if (key === "home") return "HOME";
   if (key === "market") return "MARKET";
-  if (key === "event") return "EVENT";
   if (key === "settings") return "SETTINGS";
   return "PAGE";
 }
+
 function openComingSoon(pageKey){
   if (!comingSoon) return;
   if (comingTitle) comingTitle.textContent = `COMING SOON 🚀`;
@@ -439,10 +458,10 @@ function closeComingSoon(){
   comingSoon.setAttribute("aria-hidden", "true");
 }
 
-/* ✅ robust close handlers */
+/* ✅ close always works: stop propagation, and also close if click outside card */
 comingClose?.addEventListener("click", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
   closeComingSoon();
 }, { passive:false });
 
@@ -450,104 +469,20 @@ comingSoon?.addEventListener("click", (e) => {
   if (e.target === comingSoon) closeComingSoon();
 }, { passive:true });
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeComingSoon();
-});
+/* ================= PAGES (Dashboard / Events) ================= */
+const pageDashboard = $("pageDashboard");
+const pageEvents = $("pageEvents");
 
-/* ================= EVENT PAGE (DYNAMIC) ================= */
-let eventPage = null;
+function showPage(key){
+  // hide all
+  pageDashboard?.classList.remove("active");
+  pageEvents?.classList.remove("active");
 
-function ensureEventPage(){
-  if (eventPage) return eventPage;
-
-  eventPage = document.getElementById("eventPage");
-  if (eventPage) return eventPage;
-
-  eventPage = document.createElement("div");
-  eventPage.id = "eventPage";
-  eventPage.style.position = "fixed";
-  eventPage.style.inset = "0";
-  eventPage.style.zIndex = "130";
-  eventPage.style.display = "none";
-  eventPage.style.overflow = "auto";
-  eventPage.style.background = (document.body.dataset.theme === "light")
-    ? "rgba(231,234,240,0.96)"
-    : "rgba(0,0,0,0.82)";
-  eventPage.style.backdropFilter = "blur(14px)";
-  eventPage.style.webkitBackdropFilter = "blur(14px)";
-  eventPage.innerHTML = `
-    <div style="max-width:900px;margin:0 auto;padding:16px 14px 22px 14px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <img src="${INJ_LOGO_PNG}" alt="Injective" style="width:26px;height:26px;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.25);"/>
-          <div>
-            <div style="font-weight:950;letter-spacing:.02em;font-size:1.05rem;">Events</div>
-            <div id="eventPageSub" style="opacity:.75;font-weight:800;font-size:.82rem;">—</div>
-          </div>
-        </div>
-        <button id="eventCloseBtn" type="button"
-          style="height:40px;padding:0 14px;border-radius:14px;border:1px solid rgba(255,255,255,.14);
-          background:rgba(255,255,255,.06);font-weight:950;cursor:pointer;">
-          Close
-        </button>
-      </div>
-
-      <div id="eventTableWrap"
-        style="border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.05);overflow:hidden;">
-        <div style="display:grid;grid-template-columns: 1.2fr .9fr .9fr .55fr;gap:10px;
-          padding:12px 14px;font-weight:950;letter-spacing:.04em;text-transform:uppercase;font-size:.74rem;opacity:.80;">
-          <div>Event</div><div>Date</div><div>Value</div><div style="text-align:right;">Status</div>
-        </div>
-        <div id="eventRows"></div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(eventPage);
-
-  const btn = eventPage.querySelector("#eventCloseBtn");
-  if (btn) {
-    btn.style.color = (document.body.dataset.theme === "light") ? "rgba(15,23,42,.88)" : "rgba(249,250,251,.92)";
-    btn.style.borderColor = (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.14)";
-    btn.style.background = (document.body.dataset.theme === "light") ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)";
-  }
-
-  eventPage.querySelector("#eventCloseBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    hideEventPage();
-  }, { passive:false });
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hideEventPage();
-  });
-
-  return eventPage;
+  if (key === "events") pageEvents?.classList.add("active");
+  else pageDashboard?.classList.add("active");
 }
 
-function showEventPage(){
-  ensureEventPage();
-  if (!eventPage) return;
-
-  closeComingSoon();
-  eventPage.style.display = "block";
-  eventPage.setAttribute("aria-hidden","false");
-
-  const sub = eventPage.querySelector("#eventPageSub");
-  if (sub) sub.textContent = address ? `Wallet: ${shortAddr(address)}` : "No wallet selected";
-
-  renderEventRows();
-}
-
-function hideEventPage(){
-  if (!eventPage) return;
-  eventPage.style.display = "none";
-  eventPage.setAttribute("aria-hidden","true");
-}
-
-function isEventPageOpen(){
-  return !!eventPage && eventPage.style.display === "block";
-}
-
-/* ================= MENU NAV ================= */
+/* nav active */
 function setActivePage(pageKey){
   const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
@@ -557,36 +492,268 @@ drawerNav?.addEventListener("click", (e) => {
   const btn = e.target?.closest(".nav-item");
   if (!btn) return;
   const page = btn.dataset.page || "dashboard";
-
   setActivePage(page);
   closeDrawer();
 
   if (page === "dashboard") {
-    hideEventPage();
     closeComingSoon();
-    return;
+    showPage("dashboard");
+  } else if (page === "event" || page === "events") {
+    closeComingSoon();
+    showPage("events");
+    renderEvents();
+  } else {
+    showPage("dashboard"); // keep dashboard under overlay
+    openComingSoon(page);
   }
-
-  if (page === "event") {
-    showEventPage();
-    return;
-  }
-
-  hideEventPage();
-  openComingSoon(page);
 }, { passive:true });
 
-/* ================= MODE SWITCH ================= */
+/* ================= FULLSCREEN CARD (expand icon) ================= */
+let expandedCard = null;
+let expandedBackdrop = null;
+const expandedHiddenMap = new Map();
+
+function buildExpandedBackdrop(){
+  if (expandedBackdrop) return;
+  const bd = document.createElement("div");
+  bd.style.position = "fixed";
+  bd.style.inset = "0";
+  bd.style.background = "rgba(0,0,0,0.50)";
+  bd.style.backdropFilter = "blur(10px)";
+  bd.style.zIndex = "190";
+  bd.addEventListener("click", () => exitFullscreenCard(), { passive:true });
+  document.body.appendChild(bd);
+  expandedBackdrop = bd;
+}
+
+function hideNonChartContent(card){
+  const hidden = [];
+  // keep: card-tools + any element that contains a canvas
+  const keepSet = new Set();
+  const tools = card.querySelector(".card-tools");
+  if (tools) keepSet.add(tools);
+
+  const canvases = card.querySelectorAll("canvas");
+  canvases.forEach(cv => {
+    keepSet.add(cv);
+    let p = cv.parentElement;
+    while (p && p !== card) { keepSet.add(p); p = p.parentElement; }
+  });
+
+  // hide direct children not in keep chain
+  [...card.children].forEach(ch => {
+    if (keepSet.has(ch)) return;
+    // if any kept ancestor contains this, don't hide it
+    let ok = false;
+    for (const k of keepSet) {
+      if (k && k !== ch && k.contains && k.contains(ch)) { ok = true; break; }
+    }
+    if (ok) return;
+
+    hidden.push([ch, ch.style.display]);
+    ch.style.display = "none";
+  });
+
+  expandedHiddenMap.set(card, hidden);
+}
+
+function restoreNonChartContent(card){
+  const hidden = expandedHiddenMap.get(card) || [];
+  hidden.forEach(([el, disp]) => { el.style.display = disp || ""; });
+  expandedHiddenMap.delete(card);
+}
+
+function enterFullscreenCard(card){
+  if (!card) return;
+  if (expandedCard) exitFullscreenCard();
+  expandedCard = card;
+
+  buildExpandedBackdrop();
+  expandedBackdrop.style.display = "block";
+
+  document.body.classList.add("card-expanded");
+  card.classList.add("fullscreen");
+  hideNonChartContent(card);
+
+  // ensure charts resize properly
+  setTimeout(() => {
+    try { chart?.resize?.(); } catch {}
+    try { stakeChart?.resize?.(); } catch {}
+    try { rewardChart?.resize?.(); } catch {}
+    try { netWorthChart?.resize?.(); } catch {}
+  }, 120);
+}
+
+function exitFullscreenCard(){
+  if (!expandedCard) return;
+  restoreNonChartContent(expandedCard);
+  expandedCard.classList.remove("fullscreen");
+  document.body.classList.remove("card-expanded");
+  expandedBackdrop && (expandedBackdrop.style.display = "none");
+  expandedCard = null;
+
+  setTimeout(() => {
+    try { chart?.resize?.(); } catch {}
+    try { stakeChart?.resize?.(); } catch {}
+    try { rewardChart?.resize?.(); } catch {}
+    try { netWorthChart?.resize?.(); } catch {}
+  }, 120);
+}
+
+function bindExpandButtons(){
+  const btns = document.querySelectorAll(".card-expand");
+  btns.forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = btn.closest(".card");
+      if (!card) return;
+      if (card === expandedCard) exitFullscreenCard();
+      else enterFullscreenCard(card);
+    }, { passive:false });
+  });
+}
+
+/* ================= EVENTS SYSTEM ================= */
+let eventsAll = [];
+
+function evStoreKey(addr){
+  const a = (addr || "").trim();
+  return a ? `inj_events_v${EV_LOCAL_VER}_${a}` : null;
+}
+
+function loadEvents(){
+  const key = evStoreKey(address);
+  if (!key) { eventsAll = []; return; }
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) { eventsAll = []; return; }
+    const obj = JSON.parse(raw);
+    if (!Array.isArray(obj?.events)) { eventsAll = []; return; }
+    eventsAll = obj.events.slice(0, 1200);
+  } catch {
+    eventsAll = [];
+  }
+}
+
+function saveEvents(){
+  const key = evStoreKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({ v: EV_LOCAL_VER, t: Date.now(), events: eventsAll.slice(0, 1200) }));
+  } catch {}
+}
+
+function showToast(ev){
+  const host = $("toastHost");
+  if (!host) return;
+
+  const el = document.createElement("div");
+  el.className = "toast";
+
+  const when = fmtHHMMSS(ev.ts || Date.now());
+  const title = ev.title || "Event";
+  const sub = ev.detail || "";
+
+  el.innerHTML = `
+    <div class="toast-row">
+      <div class="toast-title">${title}</div>
+      <div style="font-weight:900;opacity:.82;font-size:.82rem">${when}</div>
+    </div>
+    <div class="toast-sub">${sub}</div>
+  `;
+
+  host.appendChild(el);
+
+  setTimeout(() => {
+    try { host.removeChild(el); } catch {}
+  }, 2600);
+}
+
+function pushEvent(ev){
+  if (!address) return;
+  const obj = {
+    id: ev.id || (String(Date.now()) + "_" + Math.random().toString(16).slice(2)),
+    ts: ev.ts || Date.now(),
+    kind: ev.kind || "info",
+    title: ev.title || "Event",
+    detail: ev.detail || "",
+    amount: ev.amount ?? null,
+    dir: ev.dir || null, // up|down|null
+    status: ev.status || "pending" // pending|ok|err
+  };
+  eventsAll.unshift(obj);
+  eventsAll = eventsAll.slice(0, 1200);
+  saveEvents();
+  renderEvents();
+  showToast(obj);
+
+  // simulate “pending → ok” for tx-like events
+  if (obj.status === "pending" && obj.kind !== "price") {
+    setTimeout(() => {
+      const idx = eventsAll.findIndex(x => x.id === obj.id);
+      if (idx >= 0) {
+        eventsAll[idx].status = hasInternet() ? "ok" : "err";
+        saveEvents();
+        renderEvents();
+      }
+    }, 1500);
+  }
+}
+
+function renderEvents(){
+  const body = $("eventsTableBody");
+  const empty = $("eventsEmpty");
+  if (!body) return;
+
+  body.innerHTML = "";
+  const list = eventsAll || [];
+
+  if (empty) empty.style.display = list.length ? "none" : "block";
+  if (!list.length) return;
+
+  for (const ev of list){
+    const tr = document.createElement("tr");
+
+    const dt = new Date(ev.ts || Date.now());
+    const when = `${dt.toLocaleDateString()} ${fmtHHMMSS(ev.ts || Date.now())}`;
+
+    const pillDotClass = (ev.status === "ok") ? "ev-dot ok" : (ev.status === "err") ? "ev-dot err" : "ev-dot";
+    const arrow = ev.dir === "up" ? `<span class="ev-arrow up">▲</span>` : ev.dir === "down" ? `<span class="ev-arrow down">▼</span>` : "";
+    const kind = (ev.kind || "info").toUpperCase();
+
+    tr.innerHTML = `
+      <td>
+        <span class="ev-pill"><span class="${pillDotClass}"></span>${kind}</span>
+      </td>
+      <td>${ev.title || "Event"}</td>
+      <td style="white-space:nowrap">${when}</td>
+      <td>${arrow} ${ev.detail || ""}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+$("eventsClearBtn")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  eventsAll = [];
+  saveEvents();
+  renderEvents();
+}, { passive:false });
+
+/* ================= MODE SWITCH + PULL TO REFRESH ================= */
 let accountPollTimer = null;
 let restSyncTimer = null;
 let chartSyncTimer = null;
 let ensureChartTimer = null;
+let cloudPullTimer = null;
 
 function stopAllTimers(){
   if (accountPollTimer) { clearInterval(accountPollTimer); accountPollTimer = null; }
   if (restSyncTimer) { clearInterval(restSyncTimer); restSyncTimer = null; }
   if (chartSyncTimer) { clearInterval(chartSyncTimer); chartSyncTimer = null; }
   if (ensureChartTimer) { clearInterval(ensureChartTimer); ensureChartTimer = null; }
+  if (cloudPullTimer) { clearInterval(cloudPullTimer); cloudPullTimer = null; }
 }
 function startAllTimers(){
   stopAllTimers();
@@ -594,11 +761,12 @@ function startAllTimers(){
   restSyncTimer = setInterval(loadCandleSnapshot, REST_SYNC_MS);
   chartSyncTimer = setInterval(loadChartToday, CHART_SYNC_MS);
   ensureChartTimer = setInterval(ensureChartBootstrapped, 1500);
+  cloudPullTimer = setInterval(() => { if (address) cloudPull(); }, CLOUD_PULL_INTERVAL_MS);
 }
 
 async function refreshLoadAllOnce(){
   if (refreshLoading) return;
-  if (!hasInternet()) { refreshLoaded = false; refreshConnUI(); cloudSetState("offline"); return; }
+  if (!hasInternet()) { refreshLoaded = false; refreshConnUI(); cloudSetState("synced"); return; }
 
   refreshLoading = true;
   refreshLoaded = false;
@@ -660,710 +828,102 @@ function setMode(isLive){
 }
 
 liveToggle?.addEventListener("click", (e) => {
-  e.preventDefault();
+  e?.preventDefault?.();
   setMode(!liveMode);
 }, { passive:false });
 
-/* ================= CLOUD SYNC (REAL) ================= */
-let cloudState = "synced"; // synced | saving | error | offline
-let cloudInFlight = false;
-let cloudPushTimer = null;
-let cloudLastOk = 0;
+/* ✅ Pull-to-refresh only in REFRESH mode */
+let ptr = { startY: 0, pulling: false, shown: false };
+let ptrEl = null;
 
-function cloudSetState(state){
-  cloudState = state || "synced";
-
-  const root = $("appRoot");
-  const st = $("cloudStatus");
-  if (root) root.classList.remove("cloud-synced","cloud-saving","cloud-error");
-  if (root && cloudState === "saving") root.classList.add("cloud-saving");
-  if (root && cloudState === "error") root.classList.add("cloud-error");
-  if (root && (cloudState === "synced" || cloudState === "offline")) root.classList.add("cloud-synced");
-
-  if (st) {
-    if (!hasInternet()) st.textContent = "Cloud: Offline cache";
-    else if (cloudState === "saving") st.textContent = "Cloud: Syncing…";
-    else if (cloudState === "error") st.textContent = "Cloud: Error";
-    else st.textContent = "Cloud: Synced";
-  }
-
-  const ds = $("drawerCloudStatus");
-  if (ds) {
-    if (!hasInternet()) ds.textContent = "Offline cache";
-    else if (cloudState === "saving") ds.textContent = "Syncing…";
-    else if (cloudState === "error") ds.textContent = "Error";
-    else ds.textContent = "Synced";
-  }
-}
-
-function cloudRenderCounts(){
-  const hist = $("cloudHistory");
-  if (!hist) return;
-  const pts =
-    (stakeData?.length || 0) +
-    (wdValuesAll?.length || 0) +
-    (nwUsdAll?.length || 0) +
-    (eventsAll?.length || 0);
-  hist.textContent = `· ${Math.max(0, Math.floor(pts))} pts`;
-}
-
-function makeCloudPayload(){
-  return {
-    v: 2,
-    t: Date.now(),
-    stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
-    wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll },
-    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll, tf: nwTf },
-    ev: { items: eventsAll }
-  };
-}
-
-async function cloudPull(){
-  if (!address) return null;
-  if (!hasInternet()) return null;
-  const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
-  const r = await fetchJSON(url);
-  if (!r?.ok) return null;
-  return r.data || null;
-}
-
-async function cloudPushNow(){
-  if (!address) return false;
-  if (!hasInternet()) { cloudSetState("offline"); return false; }
-  if (cloudInFlight) return false;
-
-  cloudInFlight = true;
-  cloudSetState("saving");
-  cloudRenderCounts();
-
-  try{
-    const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
-    const payload = makeCloudPayload();
-    const res = await fetchJSON(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res?.ok) throw new Error("cloud push failed");
-    cloudLastOk = Date.now();
-    cloudSetState("synced");
-    cloudRenderCounts();
-    return true;
-  } catch (e){
-    console.warn("Cloud push error:", e);
-    cloudSetState("error");
-    return false;
-  } finally {
-    cloudInFlight = false;
-  }
-}
-
-function cloudSchedulePush(){
-  if (!address) return;
-  if (cloudPushTimer) clearTimeout(cloudPushTimer);
-  cloudPushTimer = setTimeout(() => {
-    cloudPushTimer = null;
-    cloudPushNow();
-  }, CLOUD_PUSH_DEBOUNCE_MS);
-}
-
-function uniqMergeByKey(items, keyFn){
-  const seen = new Set();
-  const out = [];
-  for (const it of items || []){
-    const k = keyFn(it);
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    out.push(it);
-  }
-  return out;
-}
-
-function mergeSeriesArrays(localArrs, remoteArrs, max){
-  const { labelsL, dataL, extra1L, extra2L } = localArrs;
-  const { labelsR, dataR, extra1R, extra2R } = remoteArrs;
-
-  const merged = [];
-  for (let i=0;i<(labelsR?.length||0);i++){
-    merged.push({ l:String(labelsR[i]??""), v:+dataR[i]||0, e1: extra1R?.[i], e2: extra2R?.[i] });
-  }
-  for (let i=0;i<(labelsL?.length||0);i++){
-    merged.push({ l:String(labelsL[i]??""), v:+dataL[i]||0, e1: extra1L?.[i], e2: extra2L?.[i] });
-  }
-
-  const uniq = uniqMergeByKey(merged, (x)=> `${x.l}|${Number(x.v).toFixed(8)}|${x.e1 ?? ""}|${x.e2 ?? ""}`);
-  const tail = uniq.slice(-max);
-
-  return {
-    labels: tail.map(x=>x.l),
-    data: tail.map(x=>x.v),
-    extra1: tail.map(x=>x.e1 ?? 0),
-    extra2: tail.map(x=>x.e2 ?? "Stake update"),
-  };
-}
-
-function mergeNW(local, remote){
-  const L = [];
-  for (let i=0;i<nwTAll.length;i++){
-    const t = safe(nwTAll[i]);
-    const u = safe(nwUsdAll[i]);
-    const inj = safe(nwInjAll[i]);
-    if (t && u) L.push({t,u,inj});
-  }
-  const R = [];
-  const rt = remote?.times || remote?.tAll || [];
-  const ru = remote?.usd || remote?.usdAll || [];
-  const ri = remote?.inj || remote?.injAll || [];
-  for (let i=0;i<rt.length;i++){
-    const t = safe(rt[i]);
-    const u = safe(ru[i]);
-    const inj = safe(ri[i]);
-    if (t && u) R.push({t,u,inj});
-  }
-  const all = [...R, ...L];
-  const uniq = uniqMergeByKey(all, (x)=> String(x.t));
-  uniq.sort((a,b)=>a.t-b.t);
-  const tail = uniq.slice(-NW_MAX_POINTS);
-  nwTAll = tail.map(x=>x.t);
-  nwUsdAll = tail.map(x=>x.u);
-  nwInjAll = tail.map(x=>x.inj);
-}
-
-function mergeEvents(localItems, remoteItems){
-  const L = Array.isArray(localItems) ? localItems : [];
-  const R = Array.isArray(remoteItems) ? remoteItems : [];
-  const all = [...R, ...L];
-  const uniq = uniqMergeByKey(all, (x)=> x?.id ? String(x.id) : "");
-  uniq.sort((a,b)=> safe(a?.t) - safe(b?.t));
-  return uniq.slice(-EVENTS_MAX);
-}
-
-async function cloudHydrateAndMerge(){
-  if (!address) return;
-
-  cloudSetState(hasInternet() ? "saving" : "offline");
-
-  const remote = await cloudPull();
-  if (!remote) {
-    cloudSetState(hasInternet() ? "error" : "offline");
-    cloudRenderCounts();
-    return;
-  }
-
-  if (remote.stake) {
-    const m = mergeSeriesArrays(
-      { labelsL: stakeLabels, dataL: stakeData, extra1L: stakeMoves, extra2L: stakeTypes },
-      { labelsR: remote.stake.labels, dataR: remote.stake.data, extra1R: remote.stake.moves, extra2R: remote.stake.types },
-      2400
-    );
-    stakeLabels = m.labels;
-    stakeData = m.data;
-    stakeMoves = m.extra1;
-    stakeTypes = m.extra2;
-    saveStakeSeriesLocalOnly();
-    drawStakeChart();
-  }
-
-  if (remote.wd) {
-    const LR = [];
-    for (let i=0;i<wdTimesAll.length;i++) LR.push({t:safe(wdTimesAll[i]), l:String(wdLabelsAll[i]||""), v:safe(wdValuesAll[i])});
-    const RR = [];
-    for (let i=0;i<(remote.wd.times||[]).length;i++) RR.push({t:safe(remote.wd.times[i]), l:String(remote.wd.labels?.[i]||""), v:safe(remote.wd.values?.[i])});
-
-    const all = [...RR, ...LR].filter(x=>x.t && x.v>0);
-    const uniq = uniqMergeByKey(all, (x)=> String(x.t));
-    uniq.sort((a,b)=>a.t-b.t);
-    const tail = uniq.slice(-2400);
-
-    wdTimesAll = tail.map(x=>x.t);
-    wdLabelsAll = tail.map(x=>x.l || fmtHHMM(x.t));
-    wdValuesAll = tail.map(x=>x.v);
-
-    saveWdAllLocalOnly();
-    rebuildWdView();
-    goRewardLive();
-  }
-
-  if (remote.nw) {
-    mergeNW(null, remote.nw);
-    saveNWLocalOnly();
-    drawNW();
-  }
-
-  if (remote.ev?.items) {
-    eventsAll = mergeEvents(eventsAll, remote.ev.items);
-    saveEventsLocalOnly();
-    renderEventRows();
-  }
-
-  cloudSetState("synced");
-  cloudRenderCounts();
-  cloudSchedulePush();
-}
-
-/* ================= LOCAL STORAGE (SERIES) ================= */
-function stakeStoreKey(addr) {
-  const a = (addr || "").trim();
-  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
-}
-function saveStakeSeriesLocalOnly() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-  try {
-    localStorage.setItem(key, JSON.stringify({
-      v: STAKE_LOCAL_VER, t: Date.now(),
-      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
-    }));
-  } catch {}
-}
-function saveStakeSeries() {
-  saveStakeSeriesLocalOnly();
-  cloudRenderCounts();
-  cloudSchedulePush();
-}
-function loadStakeSeries() {
-  const key = stakeStoreKey(address);
-  if (!key) return false;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
-
-    stakeLabels = Array.isArray(obj.labels) ? obj.labels : [];
-    stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
-    stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
-    stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
-
-    const n = stakeData.length;
-    stakeLabels = stakeLabels.slice(0, n);
-    stakeMoves  = stakeMoves.slice(0, n);
-    stakeTypes  = stakeTypes.slice(0, n);
-
-    while (stakeMoves.length < n) stakeMoves.push(0);
-    while (stakeTypes.length < n) stakeTypes.push("Stake update");
-
-    stakeBaselineCaptured = stakeData.length > 0;
-    lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
-    return true;
-  } catch {
-    return false;
-  }
-}
-function clearStakeSeriesStorage() {
-  const key = stakeStoreKey(address);
-  if (!key) return;
-  try { localStorage.removeItem(key); } catch {}
-}
-
-/* WD */
-function wdStoreKey(addr) {
-  const a = (addr || "").trim();
-  return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
-}
-function saveWdAllLocalOnly() {
-  const key = wdStoreKey(address);
-  if (!key) return;
-  try {
-    localStorage.setItem(key, JSON.stringify({
-      v: REWARD_WD_LOCAL_VER, t: Date.now(),
-      labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
-    }));
-  } catch {}
-}
-function saveWdAll() {
-  saveWdAllLocalOnly();
-  cloudRenderCounts();
-  cloudSchedulePush();
-}
-function loadWdAll() {
-  const key = wdStoreKey(address);
-  if (!key) return false;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== REWARD_WD_LOCAL_VER) return false;
-
-    wdLabelsAll = Array.isArray(obj.labels) ? obj.labels : [];
-    wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
-    wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
-
-    rebuildWdView();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* NW */
-function nwStoreKey(addr){
-  const a = (addr || "").trim();
-  return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
-}
-function saveNWLocalOnly(){
-  const key = nwStoreKey(address);
-  if (!key) return;
-  try{
-    localStorage.setItem(key, JSON.stringify({
-      v: NW_LOCAL_VER, t: Date.now(),
-      tAll: nwTAll, usdAll: nwUsdAll, injAll: nwInjAll, tf: nwTf
-    }));
-  } catch {}
-}
-function saveNW(){
-  saveNWLocalOnly();
-  cloudRenderCounts();
-  cloudSchedulePush();
-}
-function loadNW(){
-  const key = nwStoreKey(address);
-  if (!key) return false;
-  try{
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== NW_LOCAL_VER) return false;
-
-    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
-    nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
-    nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
-    nwTf = (obj.tf === "1w" || obj.tf === "1m" || obj.tf === "1y" || obj.tf === "all" || obj.tf === "live") ? obj.tf : "1d";
-
-    clampNWArrays();
-    return true;
-  } catch {
-    return false;
-  }
-}
-function clampNWArrays(){
-  const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
-  nwTAll = nwTAll.slice(-n);
-  nwUsdAll = nwUsdAll.slice(-n);
-  nwInjAll = nwInjAll.slice(-n);
-  if (nwTAll.length > NW_MAX_POINTS){
-    nwTAll = nwTAll.slice(-NW_MAX_POINTS);
-    nwUsdAll = nwUsdAll.slice(-NW_MAX_POINTS);
-    nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
-  }
-}
-
-/* EVENTS */
-let eventsAll = [];
-function evStoreKey(addr){
-  const a = (addr || "").trim();
-  return a ? `inj_events_v${EVENTS_LOCAL_VER}_${a}` : null;
-}
-function saveEventsLocalOnly(){
-  const key = evStoreKey(address);
-  if (!key) return;
-  try{
-    localStorage.setItem(key, JSON.stringify({ v: EVENTS_LOCAL_VER, t: Date.now(), items: eventsAll }));
-  } catch {}
-}
-function saveEvents(){
-  saveEventsLocalOnly();
-  cloudRenderCounts();
-  cloudSchedulePush();
-}
-function loadEvents(){
-  const key = evStoreKey(address);
-  if (!key) return false;
-  try{
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== EVENTS_LOCAL_VER) return false;
-    eventsAll = Array.isArray(obj.items) ? obj.items : [];
-    eventsAll = eventsAll.slice(-EVENTS_MAX);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function makeEventId(prefix){
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function pushEvent(ev){
-  if (!address) return;
-  const clean = {
-    id: ev?.id || makeEventId("ev"),
-    t: safe(ev?.t) || Date.now(),
-    type: String(ev?.type || "event"),
-    title: String(ev?.title || "Event"),
-    value: String(ev?.value || ""),
-    status: String(ev?.status || "ok") // ok | pending | fail
-  };
-  eventsAll.push(clean);
-  if (eventsAll.length > EVENTS_MAX) eventsAll = eventsAll.slice(-EVENTS_MAX);
-
-  saveEvents();
-  renderEventRows();
-  showToastEvent(clean);
-}
-
-function statusBadgeHTML(st){
-  const s = String(st||"ok");
-  if (s === "pending") {
-    return `<span style="display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;">
-      <span style="width:9px;height:9px;border-radius:50%;background:#f59e0b;box-shadow:0 0 14px rgba(245,158,11,.45);
-        animation: evPulse 1.1s infinite;"></span>
-    </span>`;
-  }
-  if (s === "fail") {
-    return `<span style="display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;">
-      <span style="width:9px;height:9px;border-radius:50%;background:#ef4444;box-shadow:0 0 14px rgba(239,68,68,.35);"></span>
-    </span>`;
-  }
-  return `<span style="display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;">
-    <span style="width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 14px rgba(34,197,94,.30);"></span>
-  </span>`;
-}
-
-function ensureToastCSS(){
-  if (document.getElementById("toastEventCSS")) return;
+function ensurePullSpinner(){
+  if (ptrEl) return ptrEl;
+  const el = document.createElement("div");
+  el.id = "pullSpinner";
+  el.style.position = "fixed";
+  el.style.top = "10px";
+  el.style.left = "50%";
+  el.style.transform = "translateX(-50%)";
+  el.style.zIndex = "160";
+  el.style.width = "38px";
+  el.style.height = "38px";
+  el.style.borderRadius = "999px";
+  el.style.border = "3px solid rgba(250,204,21,.25)";
+  el.style.borderTopColor = "rgba(250,204,21,.95)";
+  el.style.display = "none";
+  el.style.boxShadow = "0 16px 70px rgba(0,0,0,.45)";
+  el.style.background = "rgba(17,28,47,.65)";
+  el.style.backdropFilter = "blur(8px)";
+  el.style.animation = "spin 1s linear infinite";
   const st = document.createElement("style");
-  st.id = "toastEventCSS";
-  st.textContent = `
-    @keyframes toastSlideDown { 0% { transform: translateY(-18px); opacity: 0; } 12% { opacity: 1; } 100% { transform: translateY(0); opacity: 1; } }
-    @keyframes toastFade { 0% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
-    @keyframes evPulse { 0% { transform: scale(1); opacity: .7; } 50% { transform: scale(1.35); opacity: 1; } 100% { transform: scale(1); opacity: .7; } }
-  `;
+  st.textContent = `@keyframes spin{to{transform:translateX(-50%) rotate(360deg)}}`;
   document.head.appendChild(st);
+  document.body.appendChild(el);
+  ptrEl = el;
+  return el;
 }
 
-function showToastEvent(ev){
-  ensureToastCSS();
-
-  const toast = document.createElement("div");
-  toast.style.position = "fixed";
-  toast.style.left = "50%";
-  toast.style.top = "12px";
-  toast.style.transform = "translateX(-50%)";
-  toast.style.zIndex = "150";
-  toast.style.width = "min(520px, 92vw)";
-  toast.style.borderRadius = "16px";
-  toast.style.border = (document.body.dataset.theme==="light") ? "1px solid rgba(15,23,42,.14)" : "1px solid rgba(255,255,255,.12)";
-  toast.style.background = (document.body.dataset.theme==="light") ? "rgba(240,242,246,.96)" : "rgba(11,18,32,.92)";
-  toast.style.boxShadow = "0 24px 80px rgba(0,0,0,.45)";
-  toast.style.padding = "12px 12px";
-  toast.style.animation = "toastSlideDown 220ms ease both";
-
-  toast.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-        <img src="${INJ_LOGO_PNG}" style="width:22px;height:22px;border-radius:7px;" alt="INJ"/>
-        <div style="min-width:0;">
-          <div style="font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ev.title}</div>
-          <div style="opacity:.75;font-weight:800;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${new Date(ev.t).toLocaleString()} · ${ev.value || ""}</div>
-        </div>
-      </div>
-      <div>${statusBadgeHTML(ev.status)}</div>
-    </div>
-  `;
-
-  document.body.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.animation = "toastFade 260ms ease both";
-    setTimeout(() => toast.remove(), 320);
-  }, 2400);
+function showPullSpinner(on){
+  const el = ensurePullSpinner();
+  el.style.display = on ? "block" : "none";
 }
 
-function renderEventRows(){
-  if (!eventPage) return;
-  const rows = eventPage.querySelector("#eventRows");
-  if (!rows) return;
+function initPullToRefresh(){
+  let touchId = null;
 
-  const items = (eventsAll || []).slice().reverse(); // newest first
-  if (!items.length) {
-    rows.innerHTML = `<div style="padding:14px;opacity:.75;font-weight:850;">No events yet.</div>`;
-    return;
-  }
+  window.addEventListener("touchstart", (e) => {
+    if (liveMode) return;                // ✅ only in refresh mode
+    if (!hasInternet()) return;
+    if (document.body.classList.contains("drawer-open")) return;
+    if (document.body.classList.contains("card-expanded")) return;
 
-  const fg = (document.body.dataset.theme==="light") ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)";
-  const muted = (document.body.dataset.theme==="light") ? "rgba(15,23,42,.62)" : "rgba(249,250,251,.62)";
-  const border = (document.body.dataset.theme==="light") ? "rgba(15,23,42,.10)" : "rgba(255,255,255,.10)";
-  const bgRow = (document.body.dataset.theme==="light") ? "rgba(15,23,42,.03)" : "rgba(255,255,255,.03)";
+    const atTop = (window.scrollY || document.documentElement.scrollTop || 0) <= 2;
+    if (!atTop) return;
 
-  rows.innerHTML = items.map((ev, idx) => {
-    const dt = new Date(safe(ev.t) || Date.now());
-    const dtStr = dt.toLocaleDateString() + " " + dt.toLocaleTimeString();
-    const v = String(ev.value || "—");
-    return `
-      <div style="display:grid;grid-template-columns: 1.2fr .9fr .9fr .55fr;gap:10px;
-        padding:12px 14px;border-top:1px solid ${border};background:${idx%2?bgRow:"transparent"};color:${fg};">
-        <div style="font-weight:950;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${String(ev.title||"Event")}</div>
-        <div style="color:${muted};font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${dtStr}</div>
-        <div style="font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${v}</div>
-        <div style="text-align:right;">${statusBadgeHTML(ev.status)}</div>
-      </div>
-    `;
-  }).join("");
-}
+    const t = e.touches?.[0];
+    if (!t) return;
+    touchId = t.identifier;
+    ptr.startY = t.clientY;
+    ptr.pulling = true;
+    ptr.shown = false;
+  }, { passive: true });
 
-/* ================= INJECTIVE LOGO SWAP ================= */
-function swapInjectiveLogos(){
-  const icons = document.querySelectorAll(".nw-asset-icon, .nw-coin-logo");
-  icons.forEach((el) => {
-    if (el.querySelector && el.querySelector("img")) return;
-
-    const img = document.createElement("img");
-    img.src = INJ_LOGO_PNG;
-    img.alt = "Injective";
-    img.loading = "lazy";
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.objectFit = "cover";
-    img.style.borderRadius = "inherit";
-
-    const cs = getComputedStyle(el);
-    const w = parseFloat(cs.width || "0");
-    const h = parseFloat(cs.height || "0");
-    if (w < 8 || h < 8) {
-      el.style.display = "inline-block";
-      el.style.width = "18px";
-      el.style.height = "18px";
-      el.style.borderRadius = "7px";
-      el.style.overflow = "hidden";
-      el.style.boxShadow = "0 12px 40px rgba(0,0,0,.22)";
+  window.addEventListener("touchmove", (e) => {
+    if (!ptr.pulling) return;
+    const t = [...(e.touches || [])].find(x => x.identifier === touchId) || e.touches?.[0];
+    if (!t) return;
+    const dy = t.clientY - ptr.startY;
+    if (dy > 85 && !ptr.shown) {
+      ptr.shown = true;
+      showPullSpinner(true);
     }
-    el.textContent = "";
-    el.appendChild(img);
-  });
-}
+  }, { passive: true });
 
-/* ================= VALIDATOR CARD (DEDUP + UI) ================= */
-let validatorAddr = "";
-let validatorMoniker = "";
-let validatorBonded = false;
-let validatorLoading = false;
+  window.addEventListener("touchend", async () => {
+    if (!ptr.pulling) return;
+    const doRefresh = ptr.shown;
+    ptr.pulling = false;
+    ptr.shown = false;
 
-function ensureSingleValidatorCard(){
-  const cards = Array.from(document.querySelectorAll(".validator-card"));
-  if (cards.length > 1) {
-    for (let i=1;i<cards.length;i++) cards[i].remove();
-  }
-}
+    if (!doRefresh) return;
+    showPullSpinner(true);
+    try{
+      await refreshLoadAllOnce();
+      pushEvent({ kind:"info", title:"Refresh", detail:"Data refreshed (REFRESH mode).", status:"ok" });
+    } finally {
+      setTimeout(() => showPullSpinner(false), 550);
+    }
+  }, { passive: true });
 
-function ensureValidatorCard(){
-  ensureSingleValidatorCard();
-
-  let card = document.querySelector(".validator-card");
-  if (card) return card;
-
-  const cardsWrap = document.querySelector(".cards-wrapper");
-  if (!cardsWrap) return null;
-
-  card = document.createElement("div");
-  card.className = "card validator-card";
-  card.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-        <div style="width:36px;height:36px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.05);">
-          <img src="${INJ_LOGO_PNG}" alt="Injective" style="width:100%;height:100%;object-fit:cover;"/>
-        </div>
-        <div style="min-width:0;">
-          <div style="font-weight:950;font-size:1.0rem;letter-spacing:.02em;">Validator</div>
-          <div id="validatorLine" style="opacity:.75;font-weight:850;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span id="validatorDot" style="width:10px;height:10px;border-radius:50%;background:#f59e0b;box-shadow:0 0 14px rgba(245,158,11,.45);animation: evPulse 1.1s infinite;"></span>
-      </div>
-    </div>
-  `;
-  const nw = document.getElementById("netWorthCard");
-  if (nw && nw.parentElement === cardsWrap) {
-    nw.insertAdjacentElement("afterend", card);
-  } else {
-    cardsWrap.insertAdjacentElement("afterbegin", card);
-  }
-
-  ensureToastCSS();
-  return card;
-}
-
-function setValidatorDot(state){
-  const dot = document.getElementById("validatorDot") || document.querySelector(".validator-card #validatorDot");
-  if (!dot) return;
-
-  dot.style.animation = "";
-  dot.style.boxShadow = "";
-
-  if (!hasInternet()) state = "fail";
-
-  if (state === "loading") {
-    dot.style.background = "#f59e0b";
-    dot.style.boxShadow = "0 0 16px rgba(245,158,11,.45)";
-    dot.style.animation = "evPulse 1.1s infinite";
-    return;
-  }
-  if (state === "fail") {
-    dot.style.background = "#ef4444";
-    dot.style.boxShadow = "0 0 16px rgba(239,68,68,.35)";
-    return;
-  }
-  dot.style.background = "#22c55e";
-  dot.style.boxShadow = "0 0 16px rgba(34,197,94,.30)";
-}
-
-function setValidatorLine(txt){
-  const line = document.getElementById("validatorLine") || document.querySelector(".validator-card #validatorLine");
-  if (line) line.textContent = txt || "—";
-}
-
-async function loadValidatorInfo(opAddr){
-  ensureValidatorCard();
-  if (!opAddr) {
-    validatorAddr = "";
-    validatorMoniker = "";
-    validatorBonded = false;
-    setValidatorLine("No validator found");
-    setValidatorDot(hasInternet() ? "loading" : "fail");
-    return;
-  }
-
-  if (!hasInternet()) {
-    validatorAddr = opAddr;
-    setValidatorLine(`${shortAddr(opAddr)} · Offline`);
-    setValidatorDot("fail");
-    return;
-  }
-
-  validatorLoading = true;
-  setValidatorDot("loading");
-
-  const base = "https://lcd.injective.network";
-  const v = await fetchJSON(`${base}/cosmos/staking/v1beta1/validators/${encodeURIComponent(opAddr)}`);
-  validatorLoading = false;
-
-  if (!v?.validator) {
-    validatorAddr = opAddr;
-    setValidatorLine(`${shortAddr(opAddr)} · Unknown`);
-    setValidatorDot("fail");
-    return;
-  }
-
-  validatorAddr = opAddr;
-  validatorMoniker = v.validator?.description?.moniker || "";
-  const st = String(v.validator?.status || "");
-  validatorBonded = (st.includes("BONDED") || st === "BOND_STATUS_BONDED");
-
-  const label = validatorMoniker
-    ? `${validatorMoniker} · ${shortAddr(opAddr)}`
-    : `${shortAddr(opAddr)}`;
-
-  setValidatorLine(label);
-  setValidatorDot(validatorBonded ? "ok" : "loading");
+  window.addEventListener("touchcancel", () => {
+    ptr.pulling = false; ptr.shown = false;
+    showPullSpinner(false);
+  }, { passive: true });
 }
 
 /* ================= STATE ================= */
 let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0 };
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0, apr: 0 };
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
@@ -1501,14 +1061,86 @@ function startKlineWS() {
   };
 }
 
-/* ================= ACCOUNT (Injective LCD) ================= */
+/* ================= ACCOUNT (Injective LCD) + VALIDATOR ================= */
+let validator = { addr: "", moniker: "", status: "unknown" };
+let validatorLoading = false;
+
+function setValidatorUI(state){
+  const nameEl = $("validatorName");
+  const addrEl = $("validatorAddr");
+  const dotEl  = $("validatorDot");
+
+  if (nameEl) nameEl.textContent = validator.moniker || "Validator";
+  if (addrEl) addrEl.textContent = validator.addr ? shortAddr(validator.addr) : "—";
+
+  if (!dotEl) return;
+
+  // ✅ request: dot yellow blinking at far right; also color based on state
+  dotEl.classList.remove("ok","err");
+  dotEl.style.background = "#f59e0b";
+
+  if (!hasInternet()) {
+    dotEl.classList.add("err");
+    dotEl.style.background = "#ef4444";
+    return;
+  }
+
+  if (state === "loading" || validatorLoading) {
+    dotEl.style.background = "#f59e0b";
+    return;
+  }
+
+  if (validator.status === "bonded" || validator.status === "active") {
+    dotEl.classList.add("ok");
+    dotEl.style.background = "#22c55e";
+  } else if (validator.status === "unbonded" || validator.status === "jailed") {
+    dotEl.classList.add("err");
+    dotEl.style.background = "#ef4444";
+  } else {
+    dotEl.style.background = "#f59e0b";
+  }
+}
+
+async function fetchValidatorInfo(valAddr){
+  if (!valAddr) return;
+  if (!hasInternet()) return;
+
+  validatorLoading = true;
+  setValidatorUI("loading");
+
+  const base = "https://lcd.injective.network";
+  const v = await fetchJSON(`${base}/cosmos/staking/v1beta1/validators/${valAddr}`);
+  validatorLoading = false;
+
+  if (!v?.validator) {
+    validator.status = "unknown";
+    setValidatorUI("ready");
+    return;
+  }
+
+  const moniker = v.validator?.description?.moniker || "Validator";
+  const jailed = !!v.validator?.jailed;
+  const st = String(v.validator?.status || "").toLowerCase();
+
+  validator.addr = valAddr;
+  validator.moniker = moniker;
+
+  // cosmos status values: BOND_STATUS_BONDED / etc
+  if (jailed) validator.status = "jailed";
+  else if (st.includes("bonded")) validator.status = "bonded";
+  else if (st.includes("unbond")) validator.status = "unbonded";
+  else validator.status = "unknown";
+
+  setValidatorUI("ready");
+}
+
 async function loadAccount(isRefresh=false) {
   if (!isRefresh && !liveMode) return;
 
   if (!address || !hasInternet()) {
     accountOnline = false;
     refreshConnUI();
-    setValidatorDot("fail");
+    setValidatorUI("ready");
     return;
   }
 
@@ -1523,7 +1155,7 @@ async function loadAccount(isRefresh=false) {
   if (!b || !s || !r || !i) {
     accountOnline = false;
     refreshConnUI();
-    setValidatorDot("fail");
+    setValidatorUI("ready");
     return;
   }
 
@@ -1534,25 +1166,31 @@ async function loadAccount(isRefresh=false) {
   const bal = b.balances?.find(x => x.denom === "inj");
   availableInj = safe(bal?.amount) / 1e18;
 
-  const delgs = (s.delegation_responses || []);
-  stakeInj = delgs.reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
-
-  const firstVal = delgs?.[0]?.delegation?.validator_address || "";
-  if (firstVal && firstVal !== validatorAddr) {
-    loadValidatorInfo(firstVal);
-  } else if (!firstVal) {
-    loadValidatorInfo("");
-  }
+  const del = (s.delegation_responses || []);
+  stakeInj = del.reduce((a, d) => a + safe(d?.balance?.amount), 0) / 1e18;
 
   const newRewards = (r.rewards || []).reduce((a, x) => a + (x.reward || []).reduce((s2, y) => s2 + safe(y.amount), 0), 0) / 1e18;
-  const prevRewards = rewardsInj;
   rewardsInj = newRewards;
 
   apr = safe(i.inflation) * 100;
 
-  maybeAddStakePoint(stakeInj);
-  maybeRecordRewardWithdrawal(rewardsInj, prevRewards);
+  // ✅ validator (first delegation)
+  const valAddr = del?.[0]?.delegation?.validator_address || "";
+  if (valAddr && valAddr !== validator.addr) {
+    validator.addr = valAddr;
+    validator.moniker = "Loading…";
+    validator.status = "unknown";
+    setValidatorUI("loading");
+    fetchValidatorInfo(valAddr);
+  } else {
+    setValidatorUI("ready");
+  }
 
+  // series updates
+  maybeAddStakePoint(stakeInj);
+  maybeRecordRewardWithdrawal(rewardsInj);
+
+  // net worth point
   recordNetWorthPoint();
 
   setUIReady(true);
@@ -1878,7 +1516,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-/* ================= STAKE CHART (persist) ================= */
+/* ================= STAKE CHART (persist + cloud-ready labels) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -1887,15 +1525,58 @@ let stakeTypes = [];
 let lastStakeRecordedRounded = null;
 let stakeBaselineCaptured = false;
 
-function resetStakeSeriesFromNow() {
-  stakeLabels = [nowLabel()];
-  stakeData = [0];
-  stakeMoves = [0];
-  stakeTypes = ["Reset start"];
-  lastStakeRecordedRounded = 0;
-  stakeBaselineCaptured = false;
-  saveStakeSeries();
-  drawStakeChart();
+function stakeStoreKey(addr) {
+  const a = (addr || "").trim();
+  return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
+}
+
+function clampArray(arr, max) {
+  if (!Array.isArray(arr)) return [];
+  if (arr.length <= max) return arr;
+  return arr.slice(arr.length - max);
+}
+
+function saveStakeSeriesLocal() {
+  const key = stakeStoreKey(address);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      v: STAKE_LOCAL_VER, t: Date.now(),
+      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
+    }));
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
+}
+
+function loadStakeSeriesLocal() {
+  const key = stakeStoreKey(address);
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== STAKE_LOCAL_VER) return false;
+
+    stakeLabels = Array.isArray(obj.labels) ? obj.labels : [];
+    stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
+    stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
+    stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
+
+    const n = stakeData.length;
+    stakeLabels = stakeLabels.slice(0, n);
+    stakeMoves  = stakeMoves.slice(0, n);
+    stakeTypes  = stakeTypes.slice(0, n);
+
+    while (stakeMoves.length < n) stakeMoves.push(0);
+    while (stakeTypes.length < n) stakeTypes.push("Stake update");
+
+    stakeBaselineCaptured = stakeData.length > 0;
+    lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function initStakeChart() {
@@ -1931,7 +1612,11 @@ function initStakeChart() {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => stakeLabels[items?.[0]?.dataIndex ?? 0] || "",
+            title: (items) => {
+              const lbl = stakeLabels[items?.[0]?.dataIndex ?? 0] || "";
+              const ts = labelToTs(lbl);
+              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : String(lbl);
+            },
             label: (item) => {
               const i = item.dataIndex;
               const v = safe(stakeData[i]);
@@ -1943,12 +1628,25 @@ function initStakeChart() {
         ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
       },
       scales: {
-        x: { display: false },
+        x: {
+          ticks: {
+            color: axisTickColor(),
+            callback: (val, idx) => {
+              const ts = labelToTs(stakeLabels[idx]);
+              return ts ? fmtHHMM(ts) : "";
+            },
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 6
+          },
+          grid: { color: axisGridColor() }
+        },
         y: { ticks: { color: axisTickColor() }, grid: { color: axisGridColor() } }
       }
     }
   });
 }
+
 function drawStakeChart() {
   if (!stakeChart) initStakeChart();
   if (stakeChart) {
@@ -1964,13 +1662,13 @@ function maybeAddStakePoint(currentStake) {
   const rounded = Number(s.toFixed(6));
 
   if (!stakeBaselineCaptured) {
-    stakeLabels.push(nowLabel());
+    stakeLabels.push(tsLabel());
     stakeData.push(rounded);
     stakeMoves.push(1);
     stakeTypes.push("Baseline (current)");
     lastStakeRecordedRounded = rounded;
     stakeBaselineCaptured = true;
-    saveStakeSeries();
+    saveStakeSeriesLocal();
     drawStakeChart();
     return;
   }
@@ -1981,24 +1679,24 @@ function maybeAddStakePoint(currentStake) {
   const delta = rounded - lastStakeRecordedRounded;
   lastStakeRecordedRounded = rounded;
 
-  stakeLabels.push(nowLabel());
+  stakeLabels.push(tsLabel());
   stakeData.push(rounded);
   stakeMoves.push(delta > 0 ? 1 : -1);
-  const typ = delta > 0 ? "Delegate / Compound" : "Undelegate";
-  stakeTypes.push(typ);
+  stakeTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
 
-  pushEvent({
-    type: "stake",
-    title: delta > 0 ? "Stake increased" : "Stake decreased",
-    value: `${delta > 0 ? "+" : ""}${delta.toFixed(6)} INJ`,
-    status: hasInternet() ? "ok" : "pending"
-  });
-
-  saveStakeSeries();
+  saveStakeSeriesLocal();
   drawStakeChart();
+
+  // ✅ event
+  pushEvent({
+    kind: "tx",
+    title: delta > 0 ? "Stake increased" : "Stake decreased",
+    detail: `${delta > 0 ? "+" : ""}${delta.toFixed(6)} INJ`,
+    status: "pending"
+  });
 }
 
-/* ================= REWARD WITHDRAWALS (persist) ================= */
+/* ================= REWARD WITHDRAWALS (persist + cloud) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
@@ -2009,6 +1707,44 @@ let wdTimes  = [];
 
 let wdLastRewardsSeen = null;
 let wdMinFilter = 0;
+
+function wdStoreKey(addr) {
+  const a = (addr || "").trim();
+  return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
+}
+
+function saveWdAllLocal() {
+  const key = wdStoreKey(address);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      v: REWARD_WD_LOCAL_VER, t: Date.now(),
+      labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
+    }));
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
+}
+
+function loadWdAllLocal() {
+  const key = wdStoreKey(address);
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== REWARD_WD_LOCAL_VER) return false;
+
+    wdLabelsAll = Array.isArray(obj.labels) ? obj.labels : [];
+    wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
+    wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
+
+    rebuildWdView();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function rebuildWdView() {
   wdLabels = [];
@@ -2028,7 +1764,6 @@ function rebuildWdView() {
   syncRewardTimelineUI(true);
 }
 
-/* labels over reward points */
 const rewardPointLabelPlugin = {
   id: "rewardPointLabelPlugin",
   afterDatasetsDraw(ch) {
@@ -2123,7 +1858,11 @@ function initRewardWdChart() {
           enabled: true,
           displayColors: false,
           callbacks: {
-            title: (items) => wdLabels[items?.[0]?.dataIndex ?? 0] || "",
+            title: (items) => {
+              const i = items?.[0]?.dataIndex ?? 0;
+              const ts = wdTimes[i] || labelToTs(wdLabels[i]);
+              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : (wdLabels[i] || "");
+            },
             label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
           }
         },
@@ -2183,8 +1922,10 @@ function syncRewardTimelineUI(forceToEnd=false) {
     rewardChart.update("none");
   }
 
-  const from = wdLabels[minIdx] || "";
-  const to = wdLabels[maxIdx] || "";
+  const fromTs = wdTimes[minIdx] || labelToTs(wdLabels[minIdx]);
+  const toTs   = wdTimes[maxIdx] || labelToTs(wdLabels[maxIdx]);
+  const from = fromTs ? fmtHHMM(fromTs) : (wdLabels[minIdx] || "");
+  const to   = toTs ? fmtHHMM(toTs) : (wdLabels[maxIdx] || "");
   meta.textContent = n <= 1 ? `${to}` : `${from} → ${to}`;
 }
 
@@ -2211,68 +1952,118 @@ function attachRewardFilterHandler() {
   }, { passive: true });
 }
 
-function maybeRecordRewardWithdrawal(newRewards, prevRewardsForEvent=null) {
+function maybeRecordRewardWithdrawal(newRewards) {
   const r = safe(newRewards);
-
-  if (wdLastRewardsSeen == null) {
-    wdLastRewardsSeen = r;
-    return;
-  }
+  if (wdLastRewardsSeen == null) { wdLastRewardsSeen = r; return; }
 
   const diff = wdLastRewardsSeen - r;
   if (diff > REWARD_WITHDRAW_THRESHOLD) {
-    const t = Date.now();
-    wdTimesAll.push(t);
-    wdLabelsAll.push(nowLabel());
+    const ts = Date.now();
+    wdTimesAll.push(ts);
+    wdLabelsAll.push(tsLabel(ts));
     wdValuesAll.push(diff);
-    saveWdAll();
+    saveWdAllLocal();
     rebuildWdView();
     goRewardLive();
 
     pushEvent({
-      type: "reward",
+      kind: "tx",
       title: "Rewards withdrawn",
-      value: `+${diff.toFixed(6)} INJ`,
-      status: hasInternet() ? "ok" : "pending"
+      detail: `+${diff.toFixed(6)} INJ`,
+      status: "pending"
     });
   }
-
-  const prev = safe(prevRewardsForEvent);
-  if (prev && (r - prev) > 0.002) {
-    pushEvent({
-      type: "reward",
-      title: "Rewards increased",
-      value: `+${(r - prev).toFixed(6)} INJ`,
-      status: "ok"
-    });
-  }
-
   wdLastRewardsSeen = r;
 }
 
 /* ================= NET WORTH (persist + chart) ================= */
-let nwTf = "1d"; // live | 1d | 1w | 1m | 1y | all
+let nwTf = "1d";         // 1d | 1w | 1m | 1y | all | live
+let nwScale = "linear";  // linear | log
 let nwTAll = [];
 let nwUsdAll = [];
 let nwInjAll = [];
-let netWorthChart = null;
 
+let netWorthChart = null;
 let nwHoverActive = false;
 let nwHoverIndex = null;
+
+function nwStoreKey(addr){
+  const a = (addr || "").trim();
+  return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
+}
+
+function clampNWArrays(){
+  const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
+  nwTAll = nwTAll.slice(-n);
+  nwUsdAll = nwUsdAll.slice(-n);
+  nwInjAll = nwInjAll.slice(-n);
+  if (nwTAll.length > NW_MAX_POINTS){
+    nwTAll = nwTAll.slice(-NW_MAX_POINTS);
+    nwUsdAll = nwUsdAll.slice(-NW_MAX_POINTS);
+    nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
+  }
+}
+
+function saveNWLocal(){
+  const key = nwStoreKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({
+      v: NW_LOCAL_VER, t: Date.now(),
+      tAll: nwTAll,
+      usdAll: nwUsdAll,
+      injAll: nwInjAll,
+      tf: nwTf,
+      scale: nwScale
+    }));
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
+}
+
+function loadNWLocal(){
+  const key = nwStoreKey(address);
+  if (!key) return false;
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== NW_LOCAL_VER) return false;
+
+    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
+    nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
+    nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
+    nwTf = typeof obj.tf === "string" ? obj.tf : "1d";
+    nwScale = (obj.scale === "log") ? "log" : "linear";
+
+    clampNWArrays();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function nwWindowMs(tf){
   if (tf === "live") return NW_LIVE_WINDOW_MS;
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
-  if (tf === "all") return 3650 * 24 * 60 * 60 * 1000;
+  if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000; // big
   return 24 * 60 * 60 * 1000;
 }
 
+function nwHasSpan(tf){
+  if (!nwTAll.length) return false;
+  const first = nwTAll[0];
+  const span = Date.now() - first;
+  return span >= nwWindowMs(tf) * 0.8;
+}
+
+/* build view: always left->right, no scroll except live window */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
-  const minT = now - w;
+  const minT = (tf === "all") ? 0 : (now - w);
 
   const labels = [];
   const data = [];
@@ -2283,9 +2074,19 @@ function nwBuildView(tf){
     const u = safe(nwUsdAll[i]);
     if (t >= minT && Number.isFinite(u) && u > 0) {
       times.push(t);
-      labels.push((tf === "1y" || tf === "all") ? new Date(t).toLocaleDateString() : fmtHHMM(t));
+      labels.push(tsLabel(t)); // store label as ts
       data.push(u);
     }
+  }
+
+  // live: keep only last window (and this will "scroll" by filtering)
+  if (tf === "live") {
+    const liveMin = now - NW_LIVE_WINDOW_MS;
+    const outL = [], outD = [], outT = [];
+    for (let i = 0; i < times.length; i++){
+      if (times[i] >= liveMin) { outT.push(times[i]); outL.push(labels[i]); outD.push(data[i]); }
+    }
+    return { labels: outL, data: outD, times: outT };
   }
 
   return { labels, data, times };
@@ -2395,22 +2196,47 @@ function initNWChart(){
       animation: false,
       normalized: true,
       layout: { padding: { left: 8, right: 34, top: 8, bottom: 12 } },
+
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
-        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
+        ...(ZOOM_OK ? {
+          zoom: {
+            pan: { enabled: true, mode: "x", threshold: 2 },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+          }
+        } : {})
       },
+
       interaction: { mode: "index", intersect: false },
+
       scales: {
         x: {
           display: true,
-          ticks: { color: axisTickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 6, padding: 8 },
+          ticks: {
+            color: axisTickColor(),
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 6,
+            padding: 8,
+            callback: (val, idx) => {
+              const ts = labelToTs(netWorthChart?.data?.labels?.[idx]);
+              return ts ? fmtHHMM(ts) : "";
+            }
+          },
           grid: { display: false },
           border: { display: false }
         },
         y: {
+          type: (nwScale === "log") ? "logarithmic" : "linear",
           position: "right",
-          ticks: { color: axisTickColor(), padding: 10, maxTicksLimit: 5, callback: (v) => `$${fmtSmart(v)}` },
+          ticks: {
+            mirror: false,
+            color: axisTickColor(),
+            padding: 10,
+            maxTicksLimit: 5,
+            callback: (v) => `$${fmtSmart(v)}`
+          },
           grid: { color: axisGridColor() },
           border: { display: false }
         }
@@ -2430,29 +2256,63 @@ function drawNW(){
 
   netWorthChart.data.labels = view.labels;
   netWorthChart.data.datasets[0].data = view.data;
+
+  // update y scale type
+  netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
+
   netWorthChart.update("none");
 
+  // pnl
   const pnlEl = $("netWorthPnl");
-  if (pnlEl && view.data.length >= 2 && nwTf !== "live") {
+  if (view.data.length >= 2){
     const first = safe(view.data[0]);
-    const last = safe(view.data[view.data.length - 1]);
+    const last  = safe(view.data[view.data.length - 1]);
     const pnl = last - first;
     const pnlPct = first ? (pnl / first) * 100 : 0;
 
-    pnlEl.classList.remove("good","bad","flat");
-    const cls = pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat");
-    pnlEl.classList.add(cls);
-    const sign = pnl > 0 ? "+" : "";
-    pnlEl.textContent = `PnL: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
-    nwApplySignStyling(pnl > 0 ? "up" : (pnl < 0 ? "down" : "flat"));
-  } else if (pnlEl && nwTf !== "live") {
-    pnlEl.classList.remove("good","bad");
-    pnlEl.classList.add("flat");
-    pnlEl.textContent = "PnL: —";
-    nwApplySignStyling("flat");
+    if (pnlEl){
+      pnlEl.classList.remove("good","bad","flat");
+      const cls = pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat");
+      pnlEl.classList.add(cls);
+      const sign = pnl > 0 ? "+" : "";
+      pnlEl.textContent = `PnL: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
+      nwApplySignStyling(pnl > 0 ? "up" : (pnl < 0 ? "down" : "flat"));
+    }
+  } else {
+    if (pnlEl){
+      pnlEl.classList.remove("good","bad");
+      pnlEl.classList.add("flat");
+      pnlEl.textContent = "PnL: —";
+      nwApplySignStyling("flat");
+    }
   }
+
+  updateNWTFButtons();
 }
 
+function updateNWTFButtons(){
+  const wrap = $("nwTfSwitch");
+  if (!wrap) return;
+  const btns = wrap.querySelectorAll(".tf-btn");
+  btns.forEach(b => {
+    const tf = b.dataset.tf || "";
+    // live always available
+    const enabled = (tf === "live") ? true
+      : (tf === "1d") ? true
+      : (tf === "1w") ? nwHasSpan("1w")
+      : (tf === "1m") ? nwHasSpan("1m")
+      : (tf === "1y") ? nwHasSpan("1y")
+      : (tf === "all") ? (nwTAll.length > 20)
+      : true;
+
+    b.disabled = !enabled;
+    b.style.opacity = enabled ? "1" : "0.42";
+    b.style.pointerEvents = enabled ? "auto" : "none";
+    b.classList.toggle("active", (b.dataset.tf === nwTf));
+  });
+}
+
+/* hover interactions */
 function nwGetIndexFromEvent(evt){
   if (!netWorthChart) return null;
   const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
@@ -2466,23 +2326,19 @@ function nwShowHoverValue(idx){
   const labels = netWorthChart.data.labels || [];
   idx = clamp(idx, 0, data.length - 1);
   const v = safe(data[idx]);
-  const lab = labels[idx] || "";
+  const ts = labelToTs(labels[idx]);
   if (!v) return;
 
   const el = $("netWorthUsd");
-  if (el) el.textContent = `$${v.toFixed(2)}`;
-
+  if (el){
+    el.textContent = `$${v.toFixed(2)}`;
+  }
   const pnlEl = $("netWorthPnl");
   if (pnlEl){
     pnlEl.classList.remove("good","bad","flat");
     pnlEl.classList.add("flat");
-    pnlEl.textContent = `Point: ${lab} • $${v.toFixed(2)}`;
+    pnlEl.textContent = `Point: ${ts ? fmtHHMMSS(ts) : ""} • $${v.toFixed(2)}`;
   }
-}
-
-function nwRestoreRealtimeValue(){
-  nwHoverActive = false;
-  nwHoverIndex = null;
 }
 
 function attachNWInteractions(){
@@ -2499,7 +2355,8 @@ function attachNWInteractions(){
   };
 
   const onLeave = () => {
-    nwRestoreRealtimeValue();
+    nwHoverActive = false;
+    nwHoverIndex = null;
     netWorthChart.update("none");
   };
 
@@ -2512,50 +2369,45 @@ function attachNWInteractions(){
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
 
-/* ✅ FIX: no double listener on timeframe */
 function attachNWTFHandlers(){
   const wrap = $("nwTfSwitch");
   if (!wrap) return;
-
-  const existing = Array.from(wrap.querySelectorAll(".tf-btn")).map(b => b.dataset.tf);
-  if (!existing.includes("live")) {
-    const liveBtn = document.createElement("button");
-    liveBtn.className = "tf-btn";
-    liveBtn.type = "button";
-    liveBtn.dataset.tf = "live";
-    liveBtn.textContent = "LIVE";
-    wrap.insertAdjacentElement("afterbegin", liveBtn);
-  }
-
-  const btns = wrap.querySelectorAll(".tf-btn");
-  btns.forEach(b => b.classList.toggle("active", b.dataset.tf === nwTf));
-
-  if (wrap.dataset.bound === "1") return;
-  wrap.dataset.bound = "1";
 
   wrap.addEventListener("click", (e) => {
     const btn = e.target?.closest(".tf-btn");
     if (!btn) return;
     const tf = btn.dataset.tf || "1d";
     if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
-
-    if (tf !== "live" && tf !== "1d") {
-      const oldest = nwTAll.length ? safe(nwTAll[0]) : 0;
-      const span = Date.now() - oldest;
-      const need = nwWindowMs(tf);
-      if (span < need * 0.25) {
-        pushEvent({ type:"ui", title:"Timeframe locked", value:`Not enough data for ${tf.toUpperCase()}`, status:"pending" });
-        return;
-      }
-    }
+    if (btn.disabled) return;
 
     nwTf = tf;
-    btns.forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
-    saveNW();
+    saveNWLocal();
     drawNW();
   }, { passive:true });
+
+  // scale toggle
+  $("nwScaleBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    nwScale = (nwScale === "log") ? "linear" : "log";
+    const b = $("nwScaleBtn");
+    if (b) b.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    saveNWLocal();
+    drawNW();
+  }, { passive:false });
+
+  // live toggle button
+  $("nwLiveBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    const b = $("nwLiveBtn");
+    const on = (nwTf === "live") ? false : true;
+    nwTf = on ? "live" : "1d";
+    if (b) b.classList.toggle("active", on);
+    saveNWLocal();
+    drawNW();
+  }, { passive:false });
 }
 
+/* record points */
 function recordNetWorthPoint(){
   if (!address) return;
   const px = safe(targetPrice);
@@ -2563,25 +2415,306 @@ function recordNetWorthPoint(){
 
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * px;
-
   if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
 
   const now = Date.now();
-
   const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
   const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwUsdAll.length - 1]) : 0;
 
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
 
+  // density control
   if (lastT && dt < 5_000 && dUsd < 0.25) return;
 
   nwTAll.push(now);
   nwUsdAll.push(totalUsd);
   nwInjAll.push(totalInj);
   clampNWArrays();
-  saveNW();
+  saveNWLocal();
   drawNW();
+}
+
+/* ================= CLOUD SYNC (REAL) ================= */
+const CLOUD_VER = 2;
+const CLOUD_KEY = `inj_cloudmeta_v${CLOUD_VER}`;
+let cloudPts = 0;
+let cloudLastSync = 0;
+let cloudDirty = false;
+let cloudPushTimer = null;
+
+function cloudLoadMeta(){
+  try{
+    const raw = localStorage.getItem(CLOUD_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    cloudPts = safe(obj?.pts);
+    cloudLastSync = safe(obj?.lastSync);
+  } catch {}
+}
+function cloudSaveMeta(){
+  try{
+    localStorage.setItem(CLOUD_KEY, JSON.stringify({ v:CLOUD_VER, pts: cloudPts, lastSync: cloudLastSync }));
+  } catch {}
+}
+
+function cloudSetState(state){
+  const root = $("appRoot");
+  const st = $("cloudStatus");
+  if (!root || !st) return;
+
+  root.classList.remove("cloud-synced","cloud-saving","cloud-error");
+
+  // footer text
+  if (state === "saving"){
+    root.classList.add("cloud-saving");
+    st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
+  } else if (state === "error"){
+    root.classList.add("cloud-error");
+    st.textContent = "Cloud: Error";
+  } else {
+    root.classList.add("cloud-synced");
+    st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
+  }
+
+  // menu text + dot
+  if (cloudDotMenu) {
+    cloudDotMenu.classList.remove("ok","saving","err");
+    if (state === "saving") cloudDotMenu.classList.add("saving");
+    else if (state === "error") cloudDotMenu.classList.add("err");
+    else cloudDotMenu.classList.add("ok");
+  }
+  if (cloudTextMenu) {
+    cloudTextMenu.textContent = (state === "saving") ? "Saving"
+      : (state === "error") ? "Error"
+      : hasInternet() ? "Synced" : "Offline cache";
+  }
+}
+
+function cloudRenderMeta(){
+  const hist = $("cloudHistory");
+  if (hist) hist.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
+  if (cloudPtsMenu) cloudPtsMenu.textContent = `${Math.max(0, Math.floor(cloudPts))} pts`;
+}
+
+function cloudBumpLocal(points = 1){
+  cloudPts = safe(cloudPts) + safe(points);
+  cloudLastSync = Date.now();
+  cloudSaveMeta();
+  cloudRenderMeta();
+}
+
+function cloudMarkDirty(){
+  if (!address) return;
+  cloudDirty = true;
+  if (!hasInternet()) return;
+  scheduleCloudPush();
+}
+
+function scheduleCloudPush(){
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => cloudPush(), CLOUD_PUSH_DEBOUNCE_MS);
+}
+
+function buildCloudPayload(){
+  return {
+    v: 2,
+    t: Date.now(),
+    stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
+    wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll },
+    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll }
+  };
+}
+
+function mergeUniqueByTs(baseTimes, baseVals, addTimes, addVals){
+  // assumes times arrays contain ms timestamps
+  const map = new Map();
+  for (let i=0;i<baseTimes.length;i++){
+    const t = safe(baseTimes[i]);
+    if (!t) continue;
+    map.set(t, safe(baseVals[i]));
+  }
+  for (let i=0;i<addTimes.length;i++){
+    const t = safe(addTimes[i]);
+    if (!t) continue;
+    if (!map.has(t)) map.set(t, safe(addVals[i]));
+  }
+  const times = [...map.keys()].sort((a,b)=>a-b);
+  const vals = times.map(t => map.get(t));
+  return { times, vals };
+}
+
+function mergeStakeByLabel(payloadStake){
+  if (!payloadStake) return;
+  const pl = Array.isArray(payloadStake.labels) ? payloadStake.labels : [];
+  const pd = Array.isArray(payloadStake.data) ? payloadStake.data : [];
+  const pm = Array.isArray(payloadStake.moves) ? payloadStake.moves : [];
+  const pt = Array.isArray(payloadStake.types) ? payloadStake.types : [];
+
+  // merge by timestamp label (we store numeric-label)
+  const map = new Map();
+  for (let i=0;i<stakeLabels.length;i++){
+    const k = String(stakeLabels[i]);
+    map.set(k, { d: safe(stakeData[i]), m: safe(stakeMoves[i]), t: String(stakeTypes[i] || "Stake update") });
+  }
+  for (let i=0;i<pl.length;i++){
+    const k = String(pl[i]);
+    if (!map.has(k)) {
+      map.set(k, { d: safe(pd[i]), m: safe(pm[i]), t: String(pt[i] || "Stake update") });
+    }
+  }
+
+  const keys = [...map.keys()].sort((a,b)=>labelToTs(a)-labelToTs(b));
+  stakeLabels = keys;
+  stakeData = keys.map(k => map.get(k).d);
+  stakeMoves = keys.map(k => map.get(k).m);
+  stakeTypes = keys.map(k => map.get(k).t);
+
+  // clamp
+  stakeLabels = clampArray(stakeLabels, 2400);
+  stakeData   = clampArray(stakeData,   2400);
+  stakeMoves  = clampArray(stakeMoves,  2400);
+  stakeTypes  = clampArray(stakeTypes,  2400);
+
+  stakeBaselineCaptured = stakeData.length > 0;
+  lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
+}
+
+function mergeWd(payloadWd){
+  if (!payloadWd) return;
+  const pl = Array.isArray(payloadWd.labels) ? payloadWd.labels : [];
+  const pv = Array.isArray(payloadWd.values) ? payloadWd.values : [];
+  const pt = Array.isArray(payloadWd.times) ? payloadWd.times : [];
+
+  // merge by times (preferred)
+  const map = new Map();
+  for (let i=0;i<wdTimesAll.length;i++){
+    const t = safe(wdTimesAll[i]) || labelToTs(wdLabelsAll[i]);
+    if (!t) continue;
+    map.set(t, { v: safe(wdValuesAll[i]), l: String(wdLabelsAll[i] || tsLabel(t)) });
+  }
+  for (let i=0;i<pt.length;i++){
+    const t = safe(pt[i]) || labelToTs(pl[i]);
+    if (!t) continue;
+    if (!map.has(t)) map.set(t, { v: safe(pv[i]), l: String(pl[i] || tsLabel(t)) });
+  }
+
+  const times = [...map.keys()].sort((a,b)=>a-b);
+  wdTimesAll  = times;
+  wdValuesAll = times.map(t => map.get(t).v);
+  wdLabelsAll = times.map(t => map.get(t).l);
+
+  // clamp
+  wdTimesAll  = clampArray(wdTimesAll, 2400);
+  wdValuesAll = clampArray(wdValuesAll, 2400);
+  wdLabelsAll = clampArray(wdLabelsAll, 2400);
+}
+
+function mergeNW(payloadNw){
+  if (!payloadNw) return;
+  const t = Array.isArray(payloadNw.times) ? payloadNw.times : [];
+  const u = Array.isArray(payloadNw.usd) ? payloadNw.usd : [];
+  const j = Array.isArray(payloadNw.inj) ? payloadNw.inj : [];
+
+  const m1 = mergeUniqueByTs(nwTAll, nwUsdAll, t, u);
+  const m2 = mergeUniqueByTs(nwTAll, nwInjAll, t, j);
+
+  nwTAll = m1.times;
+  nwUsdAll = m1.vals;
+  nwInjAll = m2.vals;
+
+  clampNWArrays();
+}
+
+async function cloudPull(){
+  if (!address) return;
+  if (!hasInternet()) { cloudSetState("synced"); return; }
+
+  const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
+  const res = await fetchJSON(url);
+  if (!res?.ok) { cloudSetState("error"); return; }
+  if (!res.data) { cloudSetState("synced"); return; }
+
+  try{
+    const data = res.data;
+    mergeStakeByLabel(data.stake);
+    mergeWd(data.wd);
+    mergeNW(data.nw);
+
+    // rebuild chart views
+    saveStakeSeriesLocal();
+    saveWdAllLocal();
+    rebuildWdView();
+    goRewardLive();
+    saveNWLocal();
+    drawNW();
+    drawStakeChart();
+    drawRewardWdChart();
+
+    cloudLastSync = Date.now();
+    cloudSaveMeta();
+    cloudSetState("synced");
+  } catch {
+    cloudSetState("error");
+  }
+}
+
+async function cloudPush(){
+  if (!address) return;
+  if (!hasInternet()) return;
+  if (!cloudDirty) return;
+
+  cloudSetState("saving");
+
+  const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
+  const payload = buildCloudPayload();
+
+  const res = await fetchJSON(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res?.ok) {
+    cloudSetState("error");
+    return;
+  }
+
+  cloudDirty = false;
+  cloudLastSync = Date.now();
+  cloudSaveMeta();
+  cloudSetState("synced");
+}
+
+/* ================= NET WORTH UI rows ================= */
+function updateNetWorthMiniRows(){
+  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
+  const px = safe(displayed.price);
+
+  setText("nwInjQty", totalInj.toFixed(4));
+  setText("nwInjPx", `$${px.toFixed(2)}`);
+
+  // also big total INJ label if present
+  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+}
+
+/* ================= IMPORTANT PRICE EVENTS (24h thresholds) ================= */
+let lastPriceStepUp = 0;
+let lastPriceStepDown = 0;
+function maybePriceEvent(pct24h){
+  // fire at each 5% step
+  const step = 5;
+  const upSteps = Math.floor(Math.max(0, pct24h) / step);
+  const dnSteps = Math.floor(Math.max(0, -pct24h) / step);
+
+  if (upSteps > lastPriceStepUp) {
+    lastPriceStepUp = upSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ +${(upSteps*step).toFixed(0)}% (24h)`, dir:"up", status:"ok" });
+  }
+  if (dnSteps > lastPriceStepDown) {
+    lastPriceStepDown = dnSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ -${(dnSteps*step).toFixed(0)}% (24h)`, dir:"down", status:"ok" });
+  }
 }
 
 /* ================= CHART THEME REFRESH ================= */
@@ -2590,6 +2723,8 @@ function refreshChartsTheme(){
     if (stakeChart) {
       stakeChart.options.scales.y.grid.color = axisGridColor();
       stakeChart.options.scales.y.ticks.color = axisTickColor();
+      stakeChart.options.scales.x.grid.color = axisGridColor();
+      stakeChart.options.scales.x.ticks.color = axisTickColor();
       stakeChart.update("none");
     }
     if (rewardChart) {
@@ -2610,12 +2745,6 @@ function refreshChartsTheme(){
       netWorthChart.options.scales.x.ticks.color = axisTickColor();
       netWorthChart.update("none");
     }
-
-    if (eventPage) {
-      eventPage.style.background = (document.body.dataset.theme === "light")
-        ? "rgba(231,234,240,0.96)"
-        : "rgba(0,0,0,0.82)";
-    }
   } catch {}
 }
 
@@ -2630,37 +2759,35 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
+  // reset runtime
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
-  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0;
+  displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0; displayed.apr = 0;
 
-  if (RESET_STAKE_FROM_NOW_ON_BOOT) {
-    clearStakeSeriesStorage();
-    resetStakeSeriesFromNow();
-  } else {
-    loadStakeSeries();
-    drawStakeChart();
-  }
+  // load local series
+  loadStakeSeriesLocal();
+  drawStakeChart();
 
   wdLastRewardsSeen = null;
   wdMinFilter = safe($("rewardFilter")?.value || 0);
-  loadWdAll();
+  loadWdAllLocal();
   rebuildWdView();
   goRewardLive();
 
-  loadNW();
+  loadNWLocal();
+  const scaleBtn = $("nwScaleBtn");
+  if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
+  const liveBtn = $("nwLiveBtn");
+  if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
   attachNWTFHandlers();
   drawNW();
 
+  // events
   loadEvents();
-  renderEventRows();
+  renderEvents();
 
-  ensureValidatorCard();
-  setValidatorDot(hasInternet() ? "loading" : "fail");
-  setValidatorLine("Loading…");
-
-  swapInjectiveLogos();
-
-  await cloudHydrateAndMerge();
+  // cloud pull
+  cloudSetState("saving");
+  await cloudPull();
 
   modeLoading = true;
   refreshConnUI();
@@ -2676,8 +2803,9 @@ async function commitAddress(newAddr) {
 /* ================= ONLINE / OFFLINE listeners ================= */
 window.addEventListener("online", () => {
   refreshConnUI();
+  setValidatorUI("ready");
   cloudSetState("synced");
-  setValidatorDot("loading");
+  if (address) cloudPull();
   if (liveMode) {
     startTradeWS();
     startKlineWS();
@@ -2695,184 +2823,63 @@ window.addEventListener("offline", () => {
   refreshLoading = false;
   modeLoading = false;
   refreshConnUI();
-  cloudSetState("offline");
-  setValidatorDot("fail");
+  setValidatorUI("ready");
+  cloudSetState("synced");
 }, { passive: true });
-
-/* ================= PULL TO REFRESH (ONLY REFRESH MODE) ================= */
-let pullWrap = null;
-let pullStartY = 0;
-let pulling = false;
-let pullDist = 0;
-
-function ensurePullUI(){
-  if (pullWrap) return pullWrap;
-  pullWrap = document.getElementById("pullRefresh");
-  if (pullWrap) return pullWrap;
-
-  pullWrap = document.createElement("div");
-  pullWrap.id = "pullRefresh";
-  pullWrap.style.position = "fixed";
-  pullWrap.style.left = "0";
-  pullWrap.style.right = "0";
-  pullWrap.style.top = "-64px";
-  pullWrap.style.height = "64px";
-  pullWrap.style.display = "grid";
-  pullWrap.style.placeItems = "center";
-  pullWrap.style.zIndex = "140";
-  pullWrap.style.pointerEvents = "none";
-  pullWrap.innerHTML = `
-    <div id="pullSpinner" style="width:22px;height:22px;border-radius:50%;
-      border:3px solid rgba(250,204,21,.28);border-top-color: rgba(250,204,21,.95);
-      transform: rotate(0deg);"></div>
-  `;
-  document.body.appendChild(pullWrap);
-
-  const st = document.createElement("style");
-  st.textContent = `@keyframes spin { to { transform: rotate(360deg); } }`;
-  document.head.appendChild(st);
-
-  return pullWrap;
-}
-
-function pullSet(y){
-  ensurePullUI();
-  const t = clamp(y, -64, 0);
-  pullWrap.style.top = `${t}px`;
-}
-
-function pullSpin(on){
-  const sp = document.getElementById("pullSpinner");
-  if (!sp) return;
-  sp.style.animation = on ? "spin 700ms linear infinite" : "none";
-}
-
-function attachPullToRefresh(){
-  window.addEventListener("touchstart", (e) => {
-    if (liveMode) return;
-    if (isDrawerOpen || isEventPageOpen()) return;
-    if (window.scrollY > 0) return;
-
-    pulling = true;
-    pullStartY = e.touches?.[0]?.clientY || 0;
-    pullDist = 0;
-    pullSpin(false);
-  }, { passive: true });
-
-  window.addEventListener("touchmove", (e) => {
-    if (!pulling) return;
-    if (liveMode) return;
-    if (window.scrollY > 0) return;
-
-    const y = e.touches?.[0]?.clientY || 0;
-    pullDist = Math.max(0, y - pullStartY);
-    const eased = Math.min(64, pullDist * 0.55);
-    pullSet(-64 + eased);
-  }, { passive: true });
-
-  window.addEventListener("touchend", async () => {
-    if (!pulling) return;
-    pulling = false;
-
-    if (liveMode) { pullSet(-64); return; }
-
-    if (pullDist > 90) {
-      pullSet(0);
-      pullSpin(true);
-      pushEvent({ type:"ui", title:"Manual refresh", value:"Refresh triggered", status:"pending" });
-
-      await refreshLoadAllOnce();
-
-      pullSpin(false);
-      setTimeout(() => pullSet(-64), 220);
-      return;
-    }
-    pullSet(-64);
-  }, { passive: true });
-}
-
-/* ================= FULLSCREEN EXPAND (optional) ================= */
-function attachExpandHandlers(){
-  document.addEventListener("click", (e) => {
-    const btn = e.target?.closest(".card-expand");
-    if (!btn) return;
-
-    const id = btn.dataset.expand;
-    const card = id ? document.getElementById(id) : btn.closest(".card");
-    if (!card) return;
-
-    const isFull = card.classList.contains("fullscreen");
-    document.querySelectorAll(".card.fullscreen").forEach(c => c.classList.remove("fullscreen"));
-    document.body.classList.remove("card-expanded");
-
-    if (!isFull) {
-      card.classList.add("fullscreen");
-      document.body.classList.add("card-expanded");
-    }
-  }, { passive:true });
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    document.querySelectorAll(".card.fullscreen").forEach(c => c.classList.remove("fullscreen"));
-    document.body.classList.remove("card-expanded");
-  });
-}
 
 /* ================= BOOT ================= */
 (async function boot() {
-  cloudSetState(hasInternet() ? "synced" : "offline");
-  cloudRenderCounts();
+  // theme + zoom
+  applyTheme(theme);
+  ZOOM_OK = tryRegisterZoom();
 
+  // ui
+  cloudLoadMeta();
+  cloudRenderMeta();
+  cloudSetState("synced");
   refreshConnUI();
-  setTimeout(() => setUIReady(true), 2800);
+  setTimeout(() => setUIReady(true), 2600);
 
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
   attachRewardFilterHandler();
-  attachPullToRefresh();
-  attachExpandHandlers();
-
-  ensureEventPage();
-  hideEventPage();
-
-  setAddressDisplay(address);
-  wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  if (address && RESET_STAKE_FROM_NOW_ON_BOOT) {
-    clearStakeSeriesStorage();
-    resetStakeSeriesFromNow();
-  } else {
-    loadStakeSeries();
-    drawStakeChart();
-  }
+  // bind expand
+  bindExpandButtons();
+
+  // pull-to-refresh
+  initPullToRefresh();
+
+  // address display
+  setAddressDisplay(address);
+
+  // initial data for last saved address
+  wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (address) {
-    loadWdAll();
-    rebuildWdView();
-    goRewardLive();
-
-    loadNW();
+    // local loads first
+    loadStakeSeriesLocal(); drawStakeChart();
+    loadWdAllLocal(); rebuildWdView(); goRewardLive();
+    loadNWLocal();
+    const scaleBtn = $("nwScaleBtn");
+    if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    const liveBtn = $("nwLiveBtn");
+    if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
     attachNWTFHandlers();
     drawNW();
 
     loadEvents();
-    renderEventRows();
-  } else {
-    attachNWTFHandlers();
-    drawNW();
-  }
+    renderEvents();
 
-  ensureValidatorCard();
-  swapInjectiveLogos();
-  if (address) setValidatorDot(hasInternet() ? "loading" : "fail");
+    // cloud merge
+    await cloudPull();
+  }
 
   modeLoading = true;
   refreshConnUI();
-
-  if (address) await cloudHydrateAndMerge();
 
   await loadCandleSnapshot(liveMode ? false : true);
   await loadChartToday(liveMode ? false : true);
@@ -2890,17 +2897,16 @@ function attachExpandHandlers(){
     refreshConnUI();
     await refreshLoadAllOnce();
   }
-
-  cloudSetState(hasInternet() ? "synced" : "offline");
-  cloudRenderCounts();
 })();
 
 /* ================= LOOP ================= */
 function animate() {
+  // PRICE
   const op = displayed.price;
   displayed.price = tick(displayed.price, targetPrice);
   colorNumber($("price"), displayed.price, op, 4);
 
+  // PERF
   const pD = tfReady.d ? pctChange(targetPrice, candle.d.open) : 0;
   const pW = tfReady.w ? pctChange(targetPrice, candle.w.open) : 0;
   const pM = tfReady.m ? pctChange(targetPrice, candle.m.open) : 0;
@@ -2909,6 +2915,10 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
+  // price event thresholds (24h)
+  if (tfReady.d) maybePriceEvent(pD);
+
+  // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
@@ -2925,6 +2935,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
+  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -2965,11 +2976,13 @@ function animate() {
     setText("monthMin", "--"); setText("monthOpen", "--"); setText("monthMax", "--");
   }
 
+  // AVAILABLE
   const oa = displayed.available;
   displayed.available = tick(displayed.available, availableInj);
   colorNumber($("available"), displayed.available, oa, 6);
   setText("availableUsd", `≈ $${(displayed.available * displayed.price).toFixed(2)}`);
 
+  // STAKE
   const os = displayed.stake;
   displayed.stake = tick(displayed.stake, stakeInj);
   colorNumber($("stake"), displayed.stake, os, 4);
@@ -2987,6 +3000,7 @@ function animate() {
   setText("stakeMin", "0");
   setText("stakeMax", String(STAKE_TARGET_MAX));
 
+  // REWARDS
   const or = displayed.rewards;
   displayed.rewards = tick(displayed.rewards, rewardsInj);
   colorNumber($("rewards"), displayed.rewards, or, 7);
@@ -3006,9 +3020,15 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  setText("apr", safe(apr).toFixed(2) + "%");
+  // APR (animated like price)
+  const oapr = displayed.apr;
+  displayed.apr = tick(displayed.apr, apr);
+  colorNumber($("apr"), displayed.apr, oapr, 2);
+
+  // Last update at bottom
   setText("updated", "Last update: " + nowLabel());
 
+  /* ================= NET WORTH UI ================= */
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
@@ -3017,22 +3037,34 @@ function animate() {
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
 
-    if (nwTf !== "live") drawNW();
+    // keep pnl & chart updated (live view filters window)
+    drawNW();
   }
 
-  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
-  setText("nwAssetQty", totalInj.toFixed(4));
-  setText("nwAssetPrice", `$${safe(displayed.price).toFixed(2)}`);
-  setText("nwAssetUsd", `$${totalUsd.toFixed(2)}`);
+  updateNetWorthMiniRows();
 
+  // densità: registra spesso (solo live + address)
   if (address && liveMode) recordNetWorthPoint();
 
+  // cloud push if dirty (debounced)
+  if (cloudDirty && hasInternet()) scheduleCloudPush();
+
   refreshConnUI();
+  setValidatorUI("ready");
 
-  if (netWorthChart && typeof netWorthChart.draw === "function") netWorthChart.draw();
-
-  if (isEventPageOpen()) renderEventRows();
+  // keep dot fluid
+  if (netWorthChart) netWorthChart.draw();
 
   requestAnimationFrame(animate);
 }
 animate();
+
+/* ================= WHAT WAS ADDED (this file) =================
+✅ FIX: Coming soon close works always (button + background + ESC)
+✅ Menu: Event opens dedicated Events page; other items open coming soon overlay
+✅ Validator card: single card, Injective validator fetched (if delegations exist), status dot yellow/green/red
+✅ Cloud Sync: real GET/POST to /api/point with Saving/Synced/Error reflected in menu + footer
+✅ Address search: wallet stays displayed, input clears after commit
+✅ Events: toast slide-down + persistence + events table rendering; stake/reward/price events added
+✅ Pull-to-refresh: enabled only in REFRESH mode (mobile), shows spinner and refreshes data
+=============================================================== */
