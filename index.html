@@ -22,13 +22,19 @@
       <div class="drawer-title">Menu</div>
 
       <div class="drawer-toggles">
-        <button class="toggle-btn" id="themeToggle" aria-label="Tema">
-          <span id="themeIcon">🌙</span>
-        </button>
+        <div class="toggle-wrap">
+          <button class="toggle-btn" id="themeToggle" aria-label="Tema">
+            <span id="themeIcon">🌙</span>
+          </button>
+          <span class="toggle-label">Tema</span>
+        </div>
 
-        <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
-          <span id="liveIcon">📡</span>
-        </button>
+        <div class="toggle-wrap">
+          <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
+            <span id="liveIcon">📡</span>
+          </button>
+          <span class="toggle-label">Live/Refresh</span>
+        </div>
       </div>
     </div>
 
@@ -36,7 +42,15 @@
       <button class="nav-item" data-page="home">HOME</button>
       <button class="nav-item" data-page="market">MARKET</button>
       <button class="nav-item active" data-page="dashboard">MY DASHBOARD</button>
-      <button class="nav-item" data-page="event">EVENT</button>
+
+      <!-- EVENT + badge count -->
+      <button class="nav-item" data-page="event" id="navEventBtn">
+        EVENT
+        <span class="nav-badge" id="eventBadge" aria-label="Nuovi eventi" hidden>0</span>
+      </button>
+
+      <!-- NEW: TOOLS -->
+      <button class="nav-item" data-page="tools">TOOL’S</button>
 
       <div class="nav-spacer"></div>
 
@@ -72,7 +86,7 @@
     </div>
   </aside>
 
-  <!-- COMING SOON OVERLAY (per Home/Market/Settings) -->
+  <!-- COMING SOON OVERLAY (per Home/Market se vuoi tenerli placeholder) -->
   <div class="coming-soon" id="comingSoon" aria-hidden="true">
     <div class="coming-card">
       <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
@@ -81,7 +95,7 @@
     </div>
   </div>
 
-  <!-- EVENT TOAST (compare dall’alto, dura ~2s) -->
+  <!-- EVENT TOAST -->
   <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
 
   <!-- APP ROOT -->
@@ -94,7 +108,6 @@
           <button class="menu-btn" id="menuBtn" aria-label="Menu">≡</button>
         </div>
 
-        <!-- TITOLO centrato -->
         <div class="header-center">
           <h1 class="brand-title">
             <span class="title-full">Injective <span class="dot">•</span> Portfolio</span>
@@ -112,8 +125,13 @@
       </div>
 
       <div class="header-meta-right">
-        <!-- Wallet “in evidenza” a sinistra di status -->
-        <div id="addressDisplay" class="address-display"></div>
+        <!-- Wallet “in evidenza” + copy -->
+        <div class="address-chip">
+          <div id="addressDisplay" class="address-display"></div>
+          <button class="icon-btn copy-btn" id="copyAddressBtn" type="button" aria-label="Copia indirizzo" title="Copia indirizzo">
+            ⧉
+          </button>
+        </div>
 
         <div class="connection-status" id="connectionStatus">
           <span class="status-dot" id="statusDot"></span>
@@ -127,7 +145,6 @@
 
       <!-- ========== DASHBOARD PAGE ========== -->
       <section class="page page-dashboard active" id="pageDashboard" data-page="dashboard" aria-hidden="false">
-
         <div class="cards-wrapper">
 
           <!-- 1) NET WORTH -->
@@ -135,24 +152,19 @@
 
             <div class="networth-top">
               <div class="label networth-title">Net Worth</div>
-
-              <!-- expand icon (piccola, non invade) -->
               <button class="card-expand" id="nwExpand" type="button" aria-label="Expand Net Worth">⤢</button>
             </div>
 
-            <!-- scale toggle sotto (separato dall’expand) -->
-            <div class="networth-top2">
-              <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
-
-              <!-- LIVE toggle dedicato al net worth -->
-              <button class="nw-live-btn" id="nwLiveToggle" type="button" aria-label="Net worth live toggle">
-                LIVE
-              </button>
-            </div>
-
+            <!-- METRICS: prezzo + solo LIN/LOG vicino -->
             <div class="networth-metrics">
-              <div class="networth-usd" id="netWorthUsd">$0.00</div>
-              <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
+              <div class="networth-metrics-left">
+                <div class="networth-usd" id="netWorthUsd">$0.00</div>
+                <div class="networth-pnl flat" id="netWorthPnl">PnL: —</div>
+              </div>
+
+              <div class="networth-metrics-right">
+                <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
+              </div>
             </div>
 
             <div class="networth-chart">
@@ -167,24 +179,6 @@
                 <button class="tf-btn" data-tf="1m" type="button">1M</button>
                 <button class="tf-btn" data-tf="1y" type="button">1Y</button>
                 <button class="tf-btn" data-tf="all" type="button">ALL</button>
-              </div>
-
-              <!-- mini asset row: logo Injective + qty/price/usd -->
-              <div class="networth-asset">
-                <img
-                  class="inj-logo"
-                  src="https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png"
-                  alt="Injective"
-                  loading="lazy"
-                />
-                <span class="nw-asset-name">Injective</span>
-
-                <span class="nw-asset-qty" id="nwAssetQty">0.0000</span>
-                <span class="nw-asset-mid">INJ</span>
-                <span class="nw-asset-sep">·</span>
-                <span class="nw-asset-price" id="nwAssetPrice">$0.00</span>
-                <span class="nw-asset-sep">→</span>
-                <span class="nw-asset-usd" id="nwAssetUsd">$0.00</span>
               </div>
             </div>
 
@@ -209,7 +203,7 @@
                 </div>
               </div>
 
-              <!-- box 2: Validator (solo UI, i dati arrivano dal JS) -->
+              <!-- Validator dentro Net Worth (come richiesto) -->
               <div class="nw-mini nw-mini-validator" id="validatorCard">
                 <div class="nw-mini-left">
                   <img
@@ -242,6 +236,18 @@
           <!-- 3) STAKED -->
           <div class="card stake-card">
             <div class="label">Staked</div>
+
+            <div class="card-tools">
+              <button class="card-expand" id="stakeExpand" type="button" aria-label="Expand Staked">⤢</button>
+              <!-- NEW: scale toggle al posto del live -->
+              <button class="mini-btn" id="stakeScaleToggle" type="button" aria-label="Scala Staked">LIN</button>
+
+              <!-- NEW: settings range (gear) -->
+              <button class="icon-btn gear-btn" id="stakeRangeBtn" type="button" aria-label="Imposta range Staked" title="Imposta range">
+                ⚙︎
+              </button>
+            </div>
+
             <div class="value-row"><span id="stake">0.0000</span></div>
             <div class="sub-row" id="stakeUsd">≈ $0.00</div>
 
@@ -256,18 +262,50 @@
               <span id="stakeMax" class="right">1000</span>
             </div>
 
-            <div class="card-tools">
-              <button class="card-expand" id="stakeExpand" type="button" aria-label="Expand Staked">⤢</button>
+            <!-- NEW: TF per staked -->
+            <div class="tf-switch tf-switch-compact" id="stakeTfSwitch">
+              <button class="tf-btn active" data-tf="all" type="button">ALL</button>
+              <button class="tf-btn" data-tf="1d" type="button">1D</button>
+              <button class="tf-btn" data-tf="1w" type="button">1W</button>
+              <button class="tf-btn" data-tf="1m" type="button">1M</button>
             </div>
 
             <div class="stake-chart-wrap">
               <canvas id="stakeChart"></canvas>
+            </div>
+
+            <!-- MODAL range (hook) -->
+            <div class="range-modal" id="stakeRangeModal" aria-hidden="true">
+              <div class="range-modal-card">
+                <div class="range-modal-title">Staked Range</div>
+                <div class="range-modal-row">
+                  <label for="stakeRangeValue">Max</label>
+                  <input id="stakeRangeValue" type="number" inputmode="decimal" placeholder="es. 1000" />
+                </div>
+                <div class="range-modal-actions">
+                  <button class="mini-btn" id="stakeRangeCancel" type="button">Annulla</button>
+                  <button class="mini-btn primary" id="stakeRangeApply" type="button">Applica</button>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- 4) REWARDS -->
           <div class="card reward-card">
             <div class="label">Rewards</div>
+
+            <div class="card-tools">
+              <button class="card-expand" id="rewardExpand" type="button" aria-label="Expand Rewards">⤢</button>
+
+              <!-- NEW: scale toggle al posto del live -->
+              <button id="rewardScaleToggle" class="mini-btn" type="button" aria-label="Scala Rewards">LIN</button>
+
+              <!-- NEW: settings range (gear) -->
+              <button class="icon-btn gear-btn" id="rewardRangeBtn" type="button" aria-label="Imposta range Rewards" title="Imposta range">
+                ⚙︎
+              </button>
+            </div>
+
             <div class="value-row"><span id="rewards">0.0000000</span></div>
             <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
 
@@ -282,8 +320,19 @@
               <span id="rewardMax" class="right">0.1</span>
             </div>
 
-            <div class="card-tools">
-              <button class="card-expand" id="rewardExpand" type="button" aria-label="Expand Rewards">⤢</button>
+            <!-- NEW: stime reward -->
+            <div class="reward-estimates" id="rewardEstimates">
+              <div class="est" id="rewardEstDay">Day: —</div>
+              <div class="est" id="rewardEstWeek">Week: —</div>
+              <div class="est" id="rewardEstMonth">Month: —</div>
+            </div>
+
+            <!-- NEW: TF per rewards -->
+            <div class="tf-switch tf-switch-compact" id="rewardTfSwitch">
+              <button class="tf-btn active" data-tf="all" type="button">ALL</button>
+              <button class="tf-btn" data-tf="1d" type="button">1D</button>
+              <button class="tf-btn" data-tf="1w" type="button">1W</button>
+              <button class="tf-btn" data-tf="1m" type="button">1M</button>
             </div>
 
             <div class="reward-chart-wrap">
@@ -291,8 +340,6 @@
             </div>
 
             <div class="reward-tools">
-              <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
-
               <div class="mini-select-wrap">
                 <span class="mini-select-label">Filtro</span>
                 <select id="rewardFilter" class="mini-select">
@@ -309,24 +356,43 @@
               <input id="rewardTimeline" type="range" min="0" max="0" value="0" />
               <div class="reward-timeline-meta" id="rewardTimelineMeta">—</div>
             </div>
+
+            <!-- MODAL range (hook) -->
+            <div class="range-modal" id="rewardRangeModal" aria-hidden="true">
+              <div class="range-modal-card">
+                <div class="range-modal-title">Rewards Range</div>
+                <div class="range-modal-row">
+                  <label for="rewardRangeValue">Max</label>
+                  <input id="rewardRangeValue" type="number" inputmode="decimal" placeholder="es. 0.10" />
+                </div>
+                <div class="range-modal-actions">
+                  <button class="mini-btn" id="rewardRangeCancel" type="button">Annulla</button>
+                  <button class="mini-btn primary" id="rewardRangeApply" type="button">Applica</button>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <!-- 5) APR (card separata) -->
-          <div class="card">
-            <div class="label">APR</div>
-            <div class="value-row"><span id="apr">0%</span></div>
-          </div>
-
-          <!-- 6) 1D PRICE CHART -->
+          <!-- 6) 1D PRICE CHART (con TF + 5m + LIN/LOG) -->
           <div class="card chart-card">
-            <div class="label">1D Price Chart</div>
+            <div class="label">Price Chart</div>
 
             <div class="card-tools">
-              <button class="card-expand" id="priceChartExpand" type="button" aria-label="Expand 1D Price Chart">⤢</button>
+              <button class="card-expand" id="priceChartExpand" type="button" aria-label="Expand Price Chart">⤢</button>
+              <button class="mini-btn" id="priceScaleToggle" type="button" aria-label="Scala Price Chart">LIN</button>
+              <button class="mini-btn" id="price5mBtn" type="button" aria-label="5m live">5m</button>
             </div>
 
             <div class="chart-overlay" id="chartOverlay">
               <span id="chartPrice">--</span>
+            </div>
+
+            <div class="tf-switch tf-switch-compact" id="priceTfSwitch">
+              <button class="tf-btn active" data-tf="1d" type="button">1D</button>
+              <button class="tf-btn" data-tf="1w" type="button">1W</button>
+              <button class="tf-btn" data-tf="1m" type="button">1M</button>
+              <button class="tf-btn" data-tf="1y" type="button">1Y</button>
+              <button class="tf-btn" data-tf="all" type="button">ALL</button>
             </div>
 
             <canvas id="priceChart"></canvas>
@@ -386,18 +452,51 @@
             </div>
           </div>
 
+          <!-- 8) APR (spostata in fondo + grafico) -->
+          <div class="card apr-card">
+            <div class="label">APR</div>
+
+            <div class="card-tools">
+              <button class="card-expand" id="aprExpand" type="button" aria-label="Expand APR">⤢</button>
+              <button class="mini-btn" id="aprScaleToggle" type="button" aria-label="Scala APR">LIN</button>
+            </div>
+
+            <div class="value-row"><span id="apr">0%</span></div>
+
+            <div class="apr-chart-wrap">
+              <canvas id="aprChart"></canvas>
+            </div>
+          </div>
+
         </div>
       </section>
 
-      <!-- ========== EVENTS PAGE (dedicata) ========== -->
+      <!-- ========== EVENTS PAGE (filtri + pagination) ========== -->
       <section class="page page-events" id="pageEvents" data-page="event" aria-hidden="true">
         <div class="events-head">
           <div class="events-title">
             <h2>Event</h2>
-            <div class="events-sub">On-chain actions + key price moves (24h)</div>
+            <div class="events-sub">On-chain actions + key moves (solo address cercato)</div>
           </div>
 
-          <button class="events-clear" id="eventsClearBtn" type="button">Clear</button>
+          <div class="events-actions">
+            <button class="icon-btn" id="eventsFilterBtn" type="button" aria-label="Filtri eventi" title="Filtri">⎇</button>
+            <button class="events-clear" id="eventsClearBtn" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="events-filters" id="eventsFilters" aria-hidden="true">
+          <div class="filter-row">
+            <label for="eventsCategory">Categoria</label>
+            <select id="eventsCategory">
+              <option value="all">Tutte</option>
+              <option value="rewards">Rewards</option>
+              <option value="apr">APR</option>
+              <option value="price">Price Moves</option>
+              <option value="exchange">Exchange Flow</option>
+              <option value="system">System</option>
+            </select>
+          </div>
         </div>
 
         <div class="events-card">
@@ -411,21 +510,162 @@
                   <th>Status</th>
                 </tr>
               </thead>
-              <tbody id="eventsTbody">
-                <!-- rows injected by JS -->
-              </tbody>
+              <tbody id="eventsTbody"></tbody>
             </table>
           </div>
 
           <div class="events-empty" id="eventsEmpty">
             No events yet. They will appear here automatically.
           </div>
+
+          <div class="events-pager" id="eventsPager" aria-label="Paginazione eventi">
+            <button class="mini-btn" id="eventsPrev" type="button">‹</button>
+            <div class="events-pages" id="eventsPages"></div>
+            <button class="mini-btn" id="eventsNext" type="button">›</button>
+          </div>
         </div>
       </section>
 
+      <!-- ========== TOOLS PAGE ========== -->
+      <section class="page page-tools" id="pageTools" data-page="tools" aria-hidden="true">
+        <div class="tools-head">
+          <h2>Tool’s</h2>
+          <div class="tools-sub">Utility realtime basate su prezzo INJ e FX</div>
+        </div>
+
+        <div class="cards-wrapper">
+
+          <!-- Injective Converter -->
+          <div class="card tools-card" id="injConverterCard">
+            <div class="label">Injective Converter</div>
+
+            <div class="tool-row">
+              <label for="convEur">EUR</label>
+              <input id="convEur" type="number" inputmode="decimal" placeholder="es. 100" />
+            </div>
+
+            <div class="tool-out">
+              <div class="tool-line">USD: <span id="convUsd">—</span></div>
+              <div class="tool-line">INJ: <span id="convInj">—</span></div>
+              <div class="tool-line small">INJ Price: <span id="convInjPrice">—</span></div>
+              <div class="tool-line small">FX EUR/USD: <span id="convFx">—</span></div>
+            </div>
+          </div>
+
+          <!-- Market Cap Of -->
+          <div class="card tools-card" id="marketCapCard">
+            <div class="label">Market Cap Of</div>
+
+            <div class="tool-row">
+              <label for="mcValue">Cap</label>
+              <input id="mcValue" type="number" inputmode="decimal" placeholder="es. 10" />
+              <select id="mcUnit">
+                <option value="k">Migliaia</option>
+                <option value="m">Milioni</option>
+                <option value="b" selected>Billion</option>
+                <option value="t">Trillion</option>
+              </select>
+            </div>
+
+            <div class="tool-out">
+              <div class="tool-line">INJ @ cap scelta: <span id="mcInjPrice">—</span></div>
+              <div class="tool-line small">Supply (stima/fornita dal JS): <span id="mcSupply">—</span></div>
+              <div class="tool-line small">Last INJ Price: <span id="mcLastPrice">—</span></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ========== SETTINGS PAGE (vera) ========== -->
+      <section class="page page-settings" id="pageSettings" data-page="settings" aria-hidden="true">
+        <div class="settings-head">
+          <h2>Settings</h2>
+          <div class="settings-sub">Configura opzioni e reset selettivi</div>
+        </div>
+
+        <div class="settings-tabs" id="settingsTabs">
+          <button class="tf-btn active" data-tab="general" type="button">Generali</button>
+          <button class="tf-btn" data-tab="view" type="button">Vedi Opzioni</button>
+          <button class="tf-btn" data-tab="advance" type="button">Advance</button>
+        </div>
+
+        <div class="settings-body">
+
+          <div class="settings-panel active" id="settingsGeneral" data-tab="general">
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-label">Modalità</div>
+                <div class="settings-value" id="settingsModeNow">—</div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-label">Cloud Sync</div>
+                <div class="settings-value" id="settingsCloudNow">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-panel" id="settingsView" data-tab="view">
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-label">Autoscaling grafici</div>
+                <div class="settings-value">Attivo (gestito dal JS)</div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-label">Badge Event</div>
+                <div class="settings-value">Attivo</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-panel" id="settingsAdvance" data-tab="advance">
+            <div class="settings-card">
+              <div class="settings-warn">
+                Attenzione: il reset è irreversibile.
+              </div>
+
+              <div class="settings-row">
+                <label class="check">
+                  <input type="checkbox" id="resetStakeChk" />
+                  <span>Reset Staked (punti/storico)</span>
+                </label>
+              </div>
+
+              <div class="settings-row">
+                <label class="check">
+                  <input type="checkbox" id="resetRewardChk" />
+                  <span>Reset Rewards (punti/storico)</span>
+                </label>
+              </div>
+
+              <div class="settings-row">
+                <label class="check">
+                  <input type="checkbox" id="resetAprChk" />
+                  <span>Reset APR (punti/storico)</span>
+                </label>
+              </div>
+
+              <div class="settings-actions">
+                <button class="mini-btn" id="resetCancelBtn" type="button">Annulla</button>
+                <button class="mini-btn danger" id="resetApplyBtn" type="button">Applica Reset</button>
+              </div>
+
+              <div class="settings-note" id="resetNote">
+                Seleziona cosa vuoi resettare e premi “Applica Reset”.
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ========== HOME/MARKET (se li vuoi placeholder) ========== -->
+      <section class="page" id="pageHome" data-page="home" aria-hidden="true"></section>
+      <section class="page" id="pageMarket" data-page="market" aria-hidden="true"></section>
+
     </main>
 
-    <!-- LAST UPDATE in fondo pagina -->
+    <!-- LAST UPDATE -->
     <div id="updated" class="last-update">Last update: --:--</div>
 
     <!-- Footer pro -->
@@ -440,16 +680,5 @@
 
   </div>
 
-  <!--
-    ✅ HTML changes (v2.0.2):
-    - Added dedicated Events page (pageEvents + events table + clear button)
-    - Added toastHost for “event arrived” slide-down notifications
-    - Added Cloud Sync status area inside drawer menu (cloudMenuDot/cloudMenuStatus/cloudMenuLast)
-    - Fixed Coming Soon overlay structure (comingClose always present)
-    - Restored centered title layout
-    - Replaced purple dot with Injective high-res logo (Wikimedia PNG)
-    - Prepared expand buttons inside cards (⤢) without overlapping metrics
-    - Last update moved to bottom of the app
-  -->
 </body>
 </html>
