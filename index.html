@@ -2,60 +2,61 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#000000" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark light" />
   <title>Injective • Portfolio</title>
 
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Chart.js + Zoom plugin -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+  <!-- Zoom plugin (optional; JS handles missing plugin safely) -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
 
-  <!-- App -->
   <script src="app.js" defer></script>
 </head>
 
 <body data-theme="dark">
-  <!-- Backdrop for drawer -->
+  <!-- Backdrop + Drawer -->
   <div class="backdrop" id="backdrop" aria-hidden="true"></div>
 
-  <!-- Drawer -->
   <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-top">
       <div class="drawer-title">Menu</div>
 
       <div class="drawer-toggles">
-        <button class="toggle-btn" id="themeToggle" type="button" aria-label="Theme">
+        <button class="toggle-btn" id="themeToggle" type="button" aria-label="Theme toggle">
           <span class="toggle-ico" id="themeIcon">🌙</span>
+          <span class="toggle-label">Theme</span>
         </button>
 
-        <button class="toggle-btn" id="liveToggle" type="button" aria-label="Mode">
+        <button class="toggle-btn" id="liveToggle" type="button" aria-label="Mode toggle">
           <span class="toggle-ico" id="liveIcon">📡</span>
+          <span class="toggle-label">Mode</span>
         </button>
-      </div>
 
-      <div class="drawer-hint" id="modeHint">Mode: LIVE</div>
+        <div class="toggle-hint" id="modeHint">Mode: LIVE</div>
+      </div>
     </div>
 
     <nav class="drawer-nav" id="drawerNav" aria-label="Navigation">
+      <button class="nav-item" type="button" data-page="dashboard">
+        <span class="nav-ico">📊</span>
+        <span class="nav-txt">My Dashboard</span>
+      </button>
+
       <button class="nav-item" type="button" data-page="home">
         <span class="nav-ico">🏠</span>
         <span class="nav-txt">Home</span>
       </button>
 
       <button class="nav-item" type="button" data-page="market">
-        <span class="nav-ico">📈</span>
+        <span class="nav-ico">💹</span>
         <span class="nav-txt">Market</span>
       </button>
 
-      <button class="nav-item active" type="button" data-page="dashboard">
-        <span class="nav-ico">🧩</span>
-        <span class="nav-txt">My Dashboard</span>
-      </button>
-
       <button class="nav-item" type="button" data-page="event">
-        <span class="nav-ico">🗂️</span>
+        <span class="nav-ico">🧾</span>
         <span class="nav-txt">Event</span>
       </button>
 
@@ -66,365 +67,373 @@
     </nav>
 
     <div class="drawer-foot">
-      <!-- JS injects: App v2.0.2 + Cloud status -->
+      <div class="drawer-foot-row">
+        <div class="drawer-foot-left">
+          <div class="foot-strong">Injective Portfolio</div>
+          <div class="foot-muted">Dashboard</div>
+        </div>
+
+        <div class="drawer-foot-right">
+          <div class="chip">
+            <span class="chip-dot"></span>
+            <span class="chip-label" id="drawerCloudStatus">—</span>
+          </div>
+        </div>
+      </div>
     </div>
   </aside>
 
-  <!-- Coming soon overlay -->
-  <div class="coming-soon" id="comingSoon" aria-hidden="true">
-    <div class="coming-card" role="dialog" aria-modal="true" aria-label="Coming soon">
-      <div class="coming-emoji">🚀</div>
-      <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
-      <div class="coming-sub" id="comingSub">This page is coming soon.</div>
-      <button class="coming-close" id="comingClose" type="button">Close</button>
-    </div>
-  </div>
-
-  <!-- App Root -->
+  <!-- App -->
   <div class="container loading" id="appRoot">
     <!-- Header -->
     <header class="header">
       <div class="header-grid">
-        <!-- LEFT: Menu -->
+        <!-- LEFT -->
         <div class="header-left">
-          <button class="menu-btn" id="menuBtn" type="button" aria-label="Menu">
-            <span class="menu-ico">☰</span>
+          <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Menu">
+            <span class="burger">
+              <span></span><span></span><span></span>
+            </span>
           </button>
+
+          <div class="brand">
+            <div class="brand-title">Injective</div>
+            <div class="brand-sub">Portfolio</div>
+          </div>
         </div>
 
-        <!-- CENTER: Search -->
+        <!-- CENTER -->
         <div class="header-center">
-          <div class="search-wrap" id="searchWrap">
-            <button class="search-btn" id="searchBtn" type="button" aria-label="Search wallet">
-              <span class="search-ico">🔍</span>
-            </button>
+          <div class="status">
+            <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+            <span class="status-txt" id="statusText">Loading...</span>
+            <span class="status-sep">·</span>
+            <span class="status-cloud" id="cloudStatus">Cloud: —</span>
+            <span class="status-cloud" id="cloudHistory">· 0 pts</span>
+          </div>
+        </div>
 
+        <!-- RIGHT -->
+        <div class="header-right">
+          <button class="icon-btn search-btn" id="searchBtn" type="button" aria-label="Search wallet">
+            <span class="search-ico">🔎</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Search wrap (expands) -->
+      <div class="search-wrap" id="searchWrap">
+        <div class="search-inner">
+          <div class="search-pill">
+            <span class="search-pill-ico">🔎</span>
             <input
-              class="search-input"
               id="addressInput"
+              class="search-input"
               type="text"
               inputmode="text"
               autocomplete="off"
+              autocapitalize="off"
               spellcheck="false"
               placeholder="Enter Injective address (inj...)"
-              aria-label="Wallet address"
+              aria-label="Injective address"
             />
           </div>
-
           <div class="address-display" id="addressDisplay"></div>
-        </div>
-
-        <!-- RIGHT: Status -->
-        <div class="header-right">
-          <div class="status">
-            <span class="dot" id="statusDot" aria-hidden="true"></span>
-            <span class="status-text" id="statusText">Loading…</span>
-          </div>
         </div>
       </div>
     </header>
 
-    <!-- Main -->
+    <!-- Content -->
     <main class="main">
       <div class="cards-wrapper">
-        <!-- PRICE CARD -->
-        <section class="card" id="priceCard">
+        <!-- NET WORTH -->
+        <section class="card card-nw" id="netWorthCard">
           <div class="card-top">
-            <div class="card-title">
-              <div class="card-title-row">
-                <div class="card-name">INJ Price</div>
-                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
-              </div>
-
-              <div class="price-line">
-                <div class="price-value" id="price">--</div>
-                <div class="price-perf">
-                  <div class="perf">
-                    <span class="arrow" id="arrow24h">►</span>
-                    <span class="pct" id="pct24h">0.00%</span>
-                    <span class="perf-label">24H</span>
-                  </div>
-                  <div class="perf">
-                    <span class="arrow" id="arrowWeek">►</span>
-                    <span class="pct" id="pctWeek">0.00%</span>
-                    <span class="perf-label">1W</span>
-                  </div>
-                  <div class="perf">
-                    <span class="arrow" id="arrowMonth">►</span>
-                    <span class="pct" id="pctMonth">0.00%</span>
-                    <span class="perf-label">1M</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Bars -->
-          <div class="bars">
-            <div class="bar-block">
-              <div class="bar-head">
-                <span class="bar-label">24H</span>
-                <span class="bar-minmax">
-                  <span class="mm"><span class="mm-l">L</span> <span id="priceMin">--</span></span>
-                  <span class="mm"><span class="mm-l">O</span> <span id="priceOpen">--</span></span>
-                  <span class="mm"><span class="mm-l">H</span> <span id="priceMax">--</span></span>
-                </span>
-              </div>
-              <div class="bar-container">
-                <div class="bar-fill" id="priceBar"></div>
-                <div class="bar-line" id="priceLine"></div>
-              </div>
-            </div>
-
-            <div class="bar-block">
-              <div class="bar-head">
-                <span class="bar-label">1W</span>
-                <span class="bar-minmax">
-                  <span class="mm"><span class="mm-l">L</span> <span id="weekMin">--</span></span>
-                  <span class="mm"><span class="mm-l">O</span> <span id="weekOpen">--</span></span>
-                  <span class="mm"><span class="mm-l">H</span> <span id="weekMax">--</span></span>
-                </span>
-              </div>
-              <div class="bar-container">
-                <div class="bar-fill" id="weekBar"></div>
-                <div class="bar-line" id="weekLine"></div>
-              </div>
-            </div>
-
-            <div class="bar-block">
-              <div class="bar-head">
-                <span class="bar-label">1M</span>
-                <span class="bar-minmax">
-                  <span class="mm"><span class="mm-l">L</span> <span id="monthMin">--</span></span>
-                  <span class="mm"><span class="mm-l">O</span> <span id="monthOpen">--</span></span>
-                  <span class="mm"><span class="mm-l">H</span> <span id="monthMax">--</span></span>
-                </span>
-              </div>
-              <div class="bar-container">
-                <div class="bar-fill" id="monthBar"></div>
-                <div class="bar-line" id="monthLine"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 1D Chart -->
-          <div class="chart-wrap">
-            <div class="chart-overlay" id="chartOverlay" aria-hidden="true">
-              <div class="chart-overlay-text" id="chartPrice">--</div>
-            </div>
-            <canvas id="priceChart"></canvas>
-          </div>
-        </section>
-
-        <!-- NET WORTH CARD -->
-        <section class="card" id="netWorthCard">
-          <div class="card-top">
-            <div class="card-title">
-              <div class="card-title-row">
-                <div class="card-name">Net Worth</div>
-                <div class="card-actions">
-                  <!-- Only scale button next to the value (JS wires it) -->
-                  <button class="nw-scale-btn" type="button" aria-label="Scale">LIN</button>
-                  <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
-                </div>
-              </div>
-
-              <div class="nw-head">
-                <div class="nw-usd" id="netWorthUsd">$0.00</div>
-                <div class="nw-pnl" id="netWorthPnl">PnL: —</div>
-              </div>
-
-              <!-- Timeframes -->
-              <div class="tf-switch" id="nwTfSwitch" aria-label="Net worth timeframes">
+            <div class="card-title-wrap">
+              <div class="card-title">Net Worth</div>
+              <div class="tf-switch" id="nwTfSwitch" aria-label="Timeframe switch">
                 <button class="tf-btn active" type="button" data-tf="1d">1D</button>
                 <button class="tf-btn" type="button" data-tf="1w">1W</button>
                 <button class="tf-btn" type="button" data-tf="1m">1M</button>
                 <button class="tf-btn" type="button" data-tf="1y">1Y</button>
                 <button class="tf-btn" type="button" data-tf="all">ALL</button>
-                <!-- JS injects LIVE if missing -->
               </div>
+            </div>
+
+            <div class="nw-metrics">
+              <div class="nw-usd" id="netWorthUsd">$0.00</div>
+              <div class="nw-pnl flat" id="netWorthPnl">PnL: —</div>
             </div>
           </div>
 
-          <div class="chart-wrap networth-chart">
+          <div class="chart-wrap chart-nw">
             <canvas id="netWorthChart"></canvas>
           </div>
 
-          <!-- Mini cards (keep structure, JS updates IDs) -->
-          <div class="nw-mini-grid">
+          <div class="nw-bottom">
             <div class="nw-mini">
-              <div class="nw-mini-label">INJ Total Owned</div>
+              <div class="nw-mini-label">INJ Total owned</div>
               <div class="nw-mini-val" id="netWorthInj">0.0000 INJ</div>
-              <div class="nw-mini-sub">
-                <span class="nw-coin-logo" aria-hidden="true"></span>
-                <span class="nw-mini-muted">Available + Staked + Rewards</span>
-              </div>
             </div>
 
-            <!-- Second mini card kept for compatibility; can be hidden via CSS later -->
-            <div class="nw-mini is-empty">
-              <div class="nw-mini-label">—</div>
-              <div class="nw-mini-val">—</div>
-              <div class="nw-mini-sub">—</div>
-            </div>
-          </div>
-
-          <!-- Legacy asset row (kept for compatibility; you can hide via CSS) -->
-          <div class="networth-asset">
-            <div class="networth-asset-row">
-              <div class="networth-asset-left">
+            <div class="nw-asset">
+              <div class="nw-asset-left">
                 <span class="nw-asset-icon" aria-hidden="true"></span>
-                <div class="networth-asset-meta">
-                  <div class="networth-asset-name">Injective</div>
-                  <div class="networth-asset-sub">Total crypto</div>
+                <div class="nw-asset-name">
+                  <div class="nw-asset-sym">INJ</div>
+                  <div class="nw-asset-sub">Injective</div>
                 </div>
               </div>
-              <div class="networth-asset-right">
-                <div class="networth-asset-line">
-                  <span class="muted">Qty</span> <span id="nwAssetQty">0.0000</span>
+              <div class="nw-asset-right">
+                <div class="nw-asset-row">
+                  <span class="nw-asset-k">Qty</span>
+                  <span class="nw-asset-v" id="nwAssetQty">0.0000</span>
                 </div>
-                <div class="networth-asset-line">
-                  <span class="muted">Price</span> <span id="nwAssetPrice">$0.00</span>
+                <div class="nw-asset-row">
+                  <span class="nw-asset-k">Price</span>
+                  <span class="nw-asset-v" id="nwAssetPrice">$0.00</span>
                 </div>
-                <div class="networth-asset-line">
-                  <span class="muted">Value</span> <span id="nwAssetUsd">$0.00</span>
+                <div class="nw-asset-row">
+                  <span class="nw-asset-k">Value</span>
+                  <span class="nw-asset-v" id="nwAssetUsd">$0.00</span>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        <!-- STAKED CARD -->
-        <section class="card" id="stakeCard">
+        <!-- VALIDATOR (placeholder; JS will also create if missing) -->
+        <section class="card validator-card">
           <div class="card-top">
-            <div class="card-title">
-              <div class="card-title-row">
-                <div class="card-name">Staked</div>
-                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
-              </div>
-
-              <div class="metric-row">
-                <div class="metric-main">
-                  <div class="metric-val" id="stake">0.0000</div>
-                  <div class="metric-sub" id="stakeUsd">≈ $0.00</div>
-                </div>
-                <div class="metric-side">
-                  <div class="metric-chip">
-                    <span class="chip-label">Progress</span>
-                    <span class="chip-val" id="stakePercent">0.0%</span>
-                  </div>
-                </div>
+            <div class="card-title-wrap">
+              <div class="card-title">Validator</div>
+              <div class="chip">
+                <span class="chip-dot" id="validatorDot"></span>
+                <span class="chip-label">Status</span>
               </div>
             </div>
           </div>
 
-          <div class="bar-block">
-            <div class="bar-head">
-              <span class="bar-label">Target</span>
-              <span class="bar-minmax">
-                <span class="mm"><span class="mm-l">Min</span> <span id="stakeMin">0</span></span>
-                <span class="mm"><span class="mm-l">Max</span> <span id="stakeMax">1000</span></span>
-              </span>
-            </div>
-            <div class="bar-container">
-              <div class="bar-fill" id="stakeBar"></div>
-              <div class="bar-line" id="stakeLine"></div>
-              <!-- Gear injected by JS if missing -->
+          <div class="validator-body">
+            <div class="validator-line" id="validatorLine">—</div>
+            <div class="validator-hint">Detected from your first delegation (if any).</div>
+          </div>
+        </section>
+
+        <!-- STAKED -->
+        <section class="card card-stake">
+          <div class="card-top">
+            <div class="card-title-wrap">
+              <div class="card-title">Staked</div>
+              <div class="card-sub">History saved per wallet</div>
             </div>
           </div>
 
-          <div class="chart-wrap stake-chart-wrap">
+          <div class="chart-wrap chart-stake">
             <canvas id="stakeChart"></canvas>
           </div>
-        </section>
-
-        <!-- REWARDS CARD -->
-        <section class="card" id="rewardCard">
-          <div class="card-top">
-            <div class="card-title">
-              <div class="card-title-row">
-                <div class="card-name">Rewards</div>
-                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
-              </div>
-
-              <div class="metric-row">
-                <div class="metric-main">
-                  <div class="metric-val" id="rewards">0.0000000</div>
-                  <div class="metric-sub" id="rewardsUsd">≈ $0.00</div>
-                </div>
-
-                <div class="metric-side">
-                  <!-- This button exists for JS (will be repurposed to LIN/LOG toggle) -->
-                  <button class="mini-btn" id="rewardLiveBtn" type="button">LIN</button>
-
-                  <select class="mini-select" id="rewardFilter" aria-label="Reward filter">
-                    <option value="all">All</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
 
           <div class="bar-block">
             <div class="bar-head">
-              <span class="bar-label">Range</span>
-              <span class="bar-minmax">
-                <span class="mm"><span class="mm-l">Min</span> <span id="rewardMin">0</span></span>
-                <span class="mm"><span class="mm-l">Max</span> <span id="rewardMax">0.1</span></span>
-              </span>
+              <div class="bar-pct" id="stakePercent">0.0%</div>
+              <div class="bar-range">
+                <span id="stakeMin">0</span>
+                <span class="bar-sep">→</span>
+                <span id="stakeMax">1000</span>
+              </div>
             </div>
-            <div class="bar-container">
-              <div class="bar-fill" id="rewardBar"></div>
-              <div class="bar-line" id="rewardLine"></div>
-              <!-- Gear injected by JS if missing -->
+
+            <div class="bar">
+              <div class="bar-fill" id="stakeBar"></div>
+              <div class="bar-line" id="stakeLine"></div>
             </div>
           </div>
 
-          <div class="reward-meta-row">
-            <input
-              class="timeline"
-              id="rewardTimeline"
-              type="range"
-              min="0"
-              max="0"
-              value="0"
-              step="1"
-              aria-label="Reward timeline"
-            />
+          <div class="kv-grid">
+            <div class="kv">
+              <div class="kv-k">Staked</div>
+              <div class="kv-v"><span id="stake">0.0000</span> <span class="muted">INJ</span></div>
+            </div>
+            <div class="kv">
+              <div class="kv-k">USD</div>
+              <div class="kv-v" id="stakeUsd">≈ $0.00</div>
+            </div>
+            <div class="kv">
+              <div class="kv-k">Available</div>
+              <div class="kv-v"><span id="available">0.000000</span> <span class="muted">INJ</span></div>
+            </div>
+            <div class="kv">
+              <div class="kv-k">Available USD</div>
+              <div class="kv-v" id="availableUsd">≈ $0.00</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- REWARDS -->
+        <section class="card card-reward">
+          <div class="card-top">
+            <div class="card-title-wrap">
+              <div class="card-title">Rewards</div>
+
+              <div class="reward-controls">
+                <select id="rewardFilter" class="select" aria-label="Reward filter">
+                  <option value="0">All</option>
+                  <option value="0.05">&lt; 0.05</option>
+                  <option value="0.1">≥ 0.10</option>
+                </select>
+
+                <button class="btn btn-ghost" id="rewardLiveBtn" type="button">
+                  Live
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart-wrap chart-reward">
+            <canvas id="rewardChart"></canvas>
+          </div>
+
+          <div class="timeline">
+            <input id="rewardTimeline" class="range" type="range" min="0" max="0" value="0" />
             <div class="timeline-meta" id="rewardTimelineMeta">—</div>
           </div>
 
-          <div class="chart-wrap reward-chart-wrap">
-            <canvas id="rewardChart"></canvas>
+          <div class="bar-block">
+            <div class="bar-head">
+              <div class="bar-pct" id="rewardPercent">0.0%</div>
+              <div class="bar-range">
+                <span id="rewardMin">0</span>
+                <span class="bar-sep">→</span>
+                <span id="rewardMax">0.1</span>
+              </div>
+            </div>
+
+            <div class="bar">
+              <div class="bar-fill" id="rewardBar"></div>
+              <div class="bar-line" id="rewardLine"></div>
+            </div>
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv">
+              <div class="kv-k">Rewards</div>
+              <div class="kv-v"><span id="rewards">0.0000000</span> <span class="muted">INJ</span></div>
+            </div>
+            <div class="kv">
+              <div class="kv-k">USD</div>
+              <div class="kv-v" id="rewardsUsd">≈ $0.00</div>
+            </div>
+            <div class="kv">
+              <div class="kv-k">Updated</div>
+              <div class="kv-v" id="updated">Last update: —</div>
+            </div>
+            <div class="kv">
+              <div class="kv-k">Mode</div>
+              <div class="kv-v"><span class="pill" id="modePill">Auto</span></div>
+            </div>
           </div>
         </section>
 
-        <!-- APR CARD (moved to bottom) -->
-        <section class="card" id="aprCard">
+        <!-- INJ PRICE + 1D CHART -->
+        <section class="card card-price">
           <div class="card-top">
-            <div class="card-title">
-              <div class="card-title-row">
-                <div class="card-name">APR</div>
-                <button class="card-expand" type="button" aria-label="Expand card">⤢</button>
-              </div>
+            <div class="card-title-wrap">
+              <div class="card-title">INJ Price</div>
+              <div class="price-live">
+                <div class="price-big"><span id="price">0.0000</span> <span class="muted">USDT</span></div>
 
-              <div class="metric-row">
-                <div class="metric-main">
-                  <div class="metric-val" id="apr">0.00%</div>
-                  <div class="metric-sub" id="updated">Last update: --</div>
-                </div>
-
-                <div class="metric-side">
-                  <div class="metric-chip">
-                    <span class="chip-label">Cloud</span>
-                    <span class="chip-val" id="cloudStatus">Cloud: —</span>
+                <div class="perf">
+                  <div class="perf-item">
+                    <span class="arrow flat" id="arrow24h">►</span>
+                    <span class="pct flat" id="pct24h">0.00%</span>
+                    <span class="perf-k">24H</span>
+                  </div>
+                  <div class="perf-item">
+                    <span class="arrow flat" id="arrowWeek">►</span>
+                    <span class="pct flat" id="pctWeek">0.00%</span>
+                    <span class="perf-k">1W</span>
+                  </div>
+                  <div class="perf-item">
+                    <span class="arrow flat" id="arrowMonth">►</span>
+                    <span class="pct flat" id="pctMonth">0.00%</span>
+                    <span class="perf-k">1M</span>
                   </div>
                 </div>
               </div>
-
-              <!-- (Optional future) APR chart can be added here later with a canvas -->
-              <!-- <div class="chart-wrap apr-chart-wrap"><canvas id="aprChart"></canvas></div> -->
             </div>
+
+            <!-- Bars: 1D / 1W / 1M -->
+            <div class="triple-bars">
+              <div class="bar-row">
+                <div class="bar-row-head">
+                  <span class="bar-row-k">1D</span>
+                  <span class="bar-row-v">
+                    <span class="muted">min</span> <span id="priceMin">--</span>
+                    <span class="muted">open</span> <span id="priceOpen">--</span>
+                    <span class="muted">max</span> <span id="priceMax">--</span>
+                  </span>
+                </div>
+                <div class="bar">
+                  <div class="bar-fill" id="priceBar"></div>
+                  <div class="bar-line" id="priceLine"></div>
+                </div>
+              </div>
+
+              <div class="bar-row">
+                <div class="bar-row-head">
+                  <span class="bar-row-k">1W</span>
+                  <span class="bar-row-v">
+                    <span class="muted">min</span> <span id="weekMin">--</span>
+                    <span class="muted">open</span> <span id="weekOpen">--</span>
+                    <span class="muted">max</span> <span id="weekMax">--</span>
+                  </span>
+                </div>
+                <div class="bar">
+                  <div class="bar-fill" id="weekBar"></div>
+                  <div class="bar-line" id="weekLine"></div>
+                </div>
+              </div>
+
+              <div class="bar-row">
+                <div class="bar-row-head">
+                  <span class="bar-row-k">1M</span>
+                  <span class="bar-row-v">
+                    <span class="muted">min</span> <span id="monthMin">--</span>
+                    <span class="muted">open</span> <span id="monthOpen">--</span>
+                    <span class="muted">max</span> <span id="monthMax">--</span>
+                  </span>
+                </div>
+                <div class="bar">
+                  <div class="bar-fill" id="monthBar"></div>
+                  <div class="bar-line" id="monthLine"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart-wrap chart-price">
+            <div class="chart-overlay" id="chartOverlay" aria-hidden="true">
+              <span id="chartPrice">--</span>
+            </div>
+            <canvas id="priceChart"></canvas>
+          </div>
+        </section>
+
+        <!-- APR -->
+        <section class="card card-apr">
+          <div class="card-top">
+            <div class="card-title-wrap">
+              <div class="card-title">APR</div>
+              <div class="card-sub">Current inflation estimate</div>
+            </div>
+          </div>
+
+          <div class="apr-big">
+            <span id="apr">0.00%</span>
+          </div>
+
+          <div class="apr-hint">
+            (Graph upgrade ready in next step)
           </div>
         </section>
       </div>
@@ -432,27 +441,46 @@
 
     <!-- Footer -->
     <footer class="footer">
-      <div class="footer-grid">
+      <div class="footer-row">
         <div class="footer-left">
           <span class="foot-strong">v2.0.2</span>
-          <span class="foot-muted">·</span>
-          <span class="foot-muted" id="footerSync">Last sync</span>
+          <span class="foot-sep">·</span>
+          <span class="foot-muted" id="footerSync">Last sync —</span>
         </div>
 
         <div class="footer-center">
           <span class="foot-muted">Data verified</span>
-          <span class="foot-muted">·</span>
+          <span class="foot-sep">·</span>
           <span class="foot-strong">Injective</span>
         </div>
 
         <div class="footer-right">
           <span class="foot-muted">API</span>
-          <span class="foot-strong">Online</span>
-          <span class="foot-muted">·</span>
+          <span class="foot-strong" id="footerApi">—</span>
+          <span class="foot-sep">·</span>
+          <span class="foot-muted">WS</span>
+          <span class="foot-strong" id="footerWs">—</span>
+          <span class="foot-sep">·</span>
           <span class="foot-muted">UTC+1</span>
         </div>
       </div>
     </footer>
   </div>
+
+  <!-- Coming Soon modal -->
+  <div class="coming-soon" id="comingSoon" aria-hidden="true">
+    <div class="coming-card" role="dialog" aria-modal="true" aria-label="Coming soon">
+      <div class="coming-top">
+        <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
+        <button class="icon-btn" id="comingClose" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="coming-sub" id="comingSub">This page is coming soon.</div>
+      <div class="coming-hint">
+        Your dashboard remains available in <strong>My Dashboard</strong>.
+      </div>
+    </div>
+  </div>
+
+  <!-- Pull-to-refresh (created also by JS if missing; we keep it optional) -->
 </body>
 </html>
