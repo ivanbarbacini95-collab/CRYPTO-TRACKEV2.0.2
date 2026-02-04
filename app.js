@@ -3089,3 +3089,1613 @@ function animate() {
   requestAnimationFrame(animate);
 }
 animate();
+
+/* =======================================================================
+   INJ PORTFOLIO PATCH v2.1.0
+   Incolla in fondo a app.js (dopo animate();)
+   ======================================================================= */
+(() => {
+  "use strict";
+
+  const PATCH_FLAG = "__INJ_PATCH_V210__";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  const PATCH_VER = "2.1.0";
+  const $id = (id) => document.getElementById(id);
+
+  const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
+  const safe = (n) => (Number.isFinite(+n) ? +n : 0);
+
+  const onReady = (fn) => {
+    if (document.readyState !== "loading") fn();
+    else document.addEventListener("DOMContentLoaded", fn, { once: true });
+  };
+
+  function getAddr() {
+    try {
+      const a = (typeof address === "string" ? address : localStorage.getItem("inj_address") || "").trim();
+      return a;
+    } catch {
+      return "";
+    }
+  }
+
+  function keyFor(suffix) {
+    const a = getAddr();
+    return a ? `inj_patch_${suffix}_${a}` : `inj_patch_${suffix}`;
+  }
+
+  function loadJSON(k, fallback) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function saveJSON(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
+  }
+
+  function fmtCompactUsd(v) {
+    v = safe(v);
+    const av = Math.abs(v);
+    if (av >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+    if (av >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+    if (av >= 1e3) return `$${(v / 1e3).toFixed(2)}k`;
+    return `$${v.toFixed(2)}`;
+  }
+
+  function fmtSmart(v) {
+    v = safe(v);
+    const av = Math.abs(v);
+    if (av >= 1000) return v.toFixed(0);
+    if (av >= 100) return v.toFixed(1);
+    if (av >= 10) return v.toFixed(2);
+    if (av >= 1) return v.toFixed(3);
+    if (av >= 0.1) return v.toFixed(4);
+    return v.toFixed(6);
+  }
+
+  function themeIsLight() {
+    return document.body?.dataset?.theme === "light";
+  }
+
+  function makeMiniBtn(text, title) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = text;
+    b.title = title || "";
+    b.className = "patch-mini-btn";
+    b.style.cssText = `
+      height:30px; padding:0 10px; border-radius:12px;
+      border:1px solid ${themeIsLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.14)"};
+      background:${themeIsLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
+      color:${themeIsLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)"};
+      font-weight:900; letter-spacing:.02em; cursor:pointer;
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      user-select:none;
+    `;
+    return b;
+  }
+
+  function makeIconBtn(icon, title) {
+    const b = makeMiniBtn(icon, title);
+    b.style.width = "34px";
+    b.style.padding = "0";
+    b.style.display = "grid";
+    b.style.placeItems = "center";
+    return b;
+  }
+
+  function ensureCardRelative(card) {
+    if (!card) return;
+    const cs = getComputedStyle(card);
+    if (cs.position === "static") card.style.position = "relative";
+  }
+
+  function findCardByChildId(childId) {
+    const el = $id(childId);
+    if (!el) return null;
+    return el.closest(".card") || el.closest("[data-card]") || el.parentElement;
+  }
+
+  /* ===================== SCALE: linear/log ===================== */
+  function computePositiveMin(data) {
+    let m = Infinity;
+    for (const x of data || []) {
+      const v = safe(x);
+      if (v > 0 && v < m) m = v;
+    }
+    return Number.isFinite(m) ? m : 1;
+  }
+
+  function applyTightRightAxis(chart, axisKey, kind) {
+    try {
+      if (!chart?.options?.scales?.[axisKey]) return;
+      const ax = chart.options.scales[axisKey];
+
+      ax.position = "right";
+      ax.ticks = ax.ticks || {};
+      ax.grid = ax.grid || {};
+
+      ax.ticks.mirror = true;
+      ax.ticks.padding = 4;
+      ax.ticks.maxTicksLimit = 4;
+      ax.ticks.color = (typeof axisTickColor === "function") ? axisTickColor() : (themeIsLight() ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)");
+      ax.grid.color = (typeof axisGridColor === "function") ? axisGridColor() : (themeIsLight() ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)");
+      ax.border = ax.border || {};
+      ax.border.display = false;
+
+      // shorten labels
+      if (kind === "usd") ax.ticks.callback = (v) => fmtCompactUsd(v);
+      else ax.ticks.callback = (v) => fmtSmart(v);
+
+      chart.options.layout = chart.options.layout || {};
+      chart.options.layout.padding = chart.options.layout.padding || {};
+      chart.options.layout.padding.right = Math.min(18, safe(chart.options.layout.padding.right || 18));
+
+      chart.update("none");
+    } catch {}
+  }
+
+  function setYAxisScale(chart, axisKey, type /* linear|logarithmic */) {
+    try {
+      if (!chart?.options?.scales?.[axisKey]) return;
+      const ax = chart.options.scales[axisKey];
+      ax.type = type;
+
+      // for log axis, force positive suggestedMin
+      if (type === "logarithmic") {
+        const ds = chart.data?.datasets?.[0]?.data || [];
+        const minPos = computePositiveMin(ds);
+        ax.suggestedMin = Math.max(minPos * 0.95, minPos / 1.8, 1e-8);
+      } else {
+        ax.suggestedMin = undefined;
+      }
+      chart.update("none");
+    } catch {}
+  }
+
+  function getScaleState(name) {
+    const st = loadJSON(keyFor(`scale_${name}`), { y: "linear" });
+    const y = (st?.y === "logarithmic") ? "logarithmic" : "linear";
+    return { y };
+  }
+
+  function setScaleState(name, yType) {
+    saveJSON(keyFor(`scale_${name}`), { y: yType });
+  }
+
+  function ensureScaleToggleOnCard(card, name, getChart, axisKey = "y") {
+    if (!card) return;
+
+    ensureCardRelative(card);
+    if (card.querySelector(`.patch-scale-toggle[data-name="${name}"]`)) return;
+
+    const btn = makeMiniBtn("LIN", "Switch Y scale: Linear / Log");
+    btn.classList.add("patch-scale-toggle");
+    btn.dataset.name = name;
+
+    // place top-right with small offset (avoid collisions)
+    btn.style.position = "absolute";
+    btn.style.top = "12px";
+    btn.style.right = "12px";
+    btn.style.zIndex = "5";
+
+    function syncLabel() {
+      const st = getScaleState(name);
+      btn.textContent = (st.y === "logarithmic") ? "LOG" : "LIN";
+    }
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ch = getChart();
+      if (!ch) return;
+
+      const cur = getScaleState(name).y;
+      const next = (cur === "linear") ? "logarithmic" : "linear";
+      setScaleState(name, next);
+
+      // apply
+      applyTightRightAxis(ch, axisKey, name.includes("nw") || name.includes("price") || name.includes("apr") ? "usd" : "num");
+      setYAxisScale(ch, axisKey, next);
+
+      // also force autoscale once
+      autoscaleYToVisible(ch, axisKey);
+      syncLabel();
+    });
+
+    card.appendChild(btn);
+    syncLabel();
+  }
+
+  /* ===================== AUTOSCALE Y to visible slice ===================== */
+  function autoscaleYToVisible(chart, axisKey = "y") {
+    try {
+      if (!chart?.data?.datasets?.[0]) return;
+
+      const data = chart.data.datasets[0].data || [];
+      if (!data.length) return;
+
+      // Determine visible indices on category scale (same logic as reward timeline usage)
+      let minIdx = 0;
+      let maxIdx = data.length - 1;
+
+      // prefer options range if present (category scale min/max are indices)
+      const xOpt = chart.options?.scales?.x;
+      if (xOpt && Number.isFinite(+xOpt.min)) minIdx = clamp(Math.floor(+xOpt.min), 0, data.length - 1);
+      if (xOpt && Number.isFinite(+xOpt.max)) maxIdx = clamp(Math.ceil(+xOpt.max), 0, data.length - 1);
+
+      if (maxIdx < minIdx) [minIdx, maxIdx] = [maxIdx, minIdx];
+
+      const slice = data.slice(minIdx, maxIdx + 1).map(safe).filter((v) => Number.isFinite(v));
+      if (!slice.length) return;
+
+      let mn = Math.min(...slice);
+      let mx = Math.max(...slice);
+
+      // padding
+      const span = Math.max(1e-12, mx - mn);
+      mn = mn - span * 0.08;
+      mx = mx + span * 0.12;
+
+      const ax = chart.options?.scales?.[axisKey];
+      if (!ax) return;
+
+      if (ax.type === "logarithmic") {
+        // keep >0
+        const minPos = computePositiveMin(slice);
+        ax.suggestedMin = Math.max(minPos * 0.92, minPos / 2, 1e-8);
+        ax.suggestedMax = Math.max(mx, minPos * 3);
+      } else {
+        ax.suggestedMin = mn;
+        ax.suggestedMax = mx;
+      }
+
+      chart.update("none");
+    } catch {}
+  }
+
+  /* ===================== COPY ADDRESS (📋) ===================== */
+  function ensureCopyAddressBtn() {
+    const host = $id("addressDisplay");
+    if (!host) return;
+    if (host.querySelector(".patch-copy-addr")) return;
+
+    const btn = makeIconBtn("📋", "Copy full address");
+    btn.classList.add("patch-copy-addr");
+    btn.style.marginLeft = "10px";
+    btn.style.height = "28px";
+    btn.style.width = "34px";
+    btn.style.borderRadius = "12px";
+
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const a = getAddr();
+      if (!a) return;
+
+      try {
+        await navigator.clipboard.writeText(a);
+        if (typeof showToastEvent === "function") {
+          showToastEvent({ title: "Copied", t: Date.now(), value: a, status: "ok" });
+        }
+      } catch {
+        // fallback
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = a;
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+          if (typeof showToastEvent === "function") {
+            showToastEvent({ title: "Copied", t: Date.now(), value: a, status: "ok" });
+          }
+        } catch {}
+      }
+    });
+
+    // try place next to tag, otherwise append
+    const tag = host.querySelector(".tag") || host.firstElementChild;
+    if (tag && tag.parentElement) {
+      tag.insertAdjacentElement("afterend", btn);
+    } else {
+      host.appendChild(btn);
+    }
+  }
+
+  /* ===================== MENU labels near icons ===================== */
+  function ensureMenuLabels() {
+    const themeBtn = $id("themeToggle");
+    if (themeBtn && !themeBtn.querySelector(".patch-label")) {
+      const s = document.createElement("span");
+      s.className = "patch-label";
+      s.textContent = "Theme";
+      s.style.cssText = "margin-left:10px;font-weight:900;opacity:.82;font-size:.82rem;";
+      themeBtn.appendChild(s);
+    }
+
+    const modeBtn = $id("liveToggle");
+    if (modeBtn && !modeBtn.querySelector(".patch-label")) {
+      const s = document.createElement("span");
+      s.className = "patch-label";
+      s.textContent = "Mode";
+      s.style.cssText = "margin-left:10px;font-weight:900;opacity:.82;font-size:.82rem;";
+      modeBtn.appendChild(s);
+    }
+  }
+
+  /* ===================== TARGET gear (Stake/Reward) ===================== */
+  function ensureModalCSS() {
+    if (document.getElementById("patchModalCSS")) return;
+    const st = document.createElement("style");
+    st.id = "patchModalCSS";
+    st.textContent = `
+      .patch-modal-backdrop{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+      .patch-modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1000;width:min(520px,92vw);
+        border-radius:18px;border:1px solid rgba(255,255,255,.14);background:rgba(11,18,32,.92);color:rgba(249,250,251,.92);
+        box-shadow:0 30px 110px rgba(0,0,0,.55);padding:14px;}
+      body[data-theme="light"] .patch-modal{background:rgba(240,242,246,.96);color:rgba(15,23,42,.92);border-color:rgba(15,23,42,.14);}
+      .patch-modal h3{margin:0 0 6px 0;font-size:1.02rem;letter-spacing:.02em;}
+      .patch-modal p{margin:0 0 12px 0;opacity:.75;font-weight:800;font-size:.86rem;}
+      .patch-modal .row{display:flex;gap:10px;align-items:center;}
+      .patch-modal input{flex:1;height:40px;border-radius:14px;padding:0 12px;font-weight:900;outline:none;
+        border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;}
+      body[data-theme="light"] .patch-modal input{border-color:rgba(15,23,42,.14);background:rgba(15,23,42,.06);}
+    `;
+    document.head.appendChild(st);
+  }
+
+  function openTargetModal(kind /* stake|reward */) {
+    ensureModalCSS();
+
+    const a = getAddr();
+    if (!a) return;
+
+    const key = keyFor(kind === "stake" ? "stake_target" : "reward_target");
+    const cur = safe(loadJSON(key, null));
+
+    const back = document.createElement("div");
+    back.className = "patch-modal-backdrop";
+
+    const box = document.createElement("div");
+    box.className = "patch-modal";
+    box.innerHTML = `
+      <h3>${kind === "stake" ? "Stake target" : "Reward range"}</h3>
+      <p>Imposta un valore massimo (da 0 a MAX). Viene salvato per questo wallet e non si resetta.</p>
+      <div class="row">
+        <input id="patchTargetInput" inputmode="decimal" placeholder="Es: 1200" value="${cur ? String(cur) : ""}"/>
+        <button id="patchApplyBtn" type="button" style="height:40px;border-radius:14px;padding:0 14px;font-weight:950;cursor:pointer;
+          border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;">Apply</button>
+        <button id="patchCancelBtn" type="button" style="height:40px;border-radius:14px;padding:0 14px;font-weight:950;cursor:pointer;
+          border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;">Cancel</button>
+      </div>
+      <div style="margin-top:10px;display:flex;justify-content:space-between;gap:10px;opacity:.8;font-weight:850;font-size:.82rem;">
+        <span>Tip: lascia vuoto per tornare su Auto</span>
+        <button id="patchClearBtn" type="button" style="height:32px;border-radius:12px;padding:0 12px;font-weight:950;cursor:pointer;
+          border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;">Clear</button>
+      </div>
+    `;
+
+    function close() { try { back.remove(); box.remove(); } catch {} }
+
+    back.addEventListener("click", close, { passive: true });
+    box.querySelector("#patchCancelBtn")?.addEventListener("click", close, { passive: true });
+
+    box.querySelector("#patchClearBtn")?.addEventListener("click", () => {
+      try { localStorage.removeItem(key); } catch {}
+      if (typeof showToastEvent === "function") showToastEvent({ title: "Saved", t: Date.now(), value: "Auto mode", status: "ok" });
+      close();
+    }, { passive: true });
+
+    box.querySelector("#patchApplyBtn")?.addEventListener("click", () => {
+      const v = box.querySelector("#patchTargetInput")?.value;
+      const num = safe(v);
+      if (!v || !Number.isFinite(num) || num <= 0) {
+        try { localStorage.removeItem(key); } catch {}
+        if (typeof showToastEvent === "function") showToastEvent({ title: "Saved", t: Date.now(), value: "Auto mode", status: "ok" });
+        close();
+        return;
+      }
+      saveJSON(key, num);
+      if (typeof showToastEvent === "function") showToastEvent({ title: "Saved", t: Date.now(), value: `Max = ${num}`, status: "ok" });
+      close();
+    }, { passive: true });
+
+    document.body.appendChild(back);
+    document.body.appendChild(box);
+
+    setTimeout(() => box.querySelector("#patchTargetInput")?.focus(), 30);
+  }
+
+  function ensureGearNearBar(barId, kind) {
+    const bar = $id(barId);
+    if (!bar) return;
+    const host = bar.parentElement;
+    if (!host) return;
+    if (host.querySelector(`.patch-gear[data-kind="${kind}"]`)) return;
+
+    const gear = makeIconBtn("⚙️", kind === "stake" ? "Set stake target" : "Set reward range");
+    gear.classList.add("patch-gear");
+    gear.dataset.kind = kind;
+    gear.style.position = "absolute";
+    gear.style.right = "8px";
+    gear.style.top = "50%";
+    gear.style.transform = "translateY(-50%)";
+    gear.style.zIndex = "3";
+
+    const hs = getComputedStyle(host);
+    if (hs.position === "static") host.style.position = "relative";
+    host.appendChild(gear);
+
+    gear.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openTargetModal(kind);
+    }, { passive: false });
+  }
+
+  /* ===================== Reward estimates row ===================== */
+  function ensureRewardEstimateRow() {
+    const card = findCardByChildId("rewardBar") || findCardByChildId("rewards");
+    if (!card) return;
+    if (card.querySelector("#patchRewardEstRow")) return;
+
+    const row = document.createElement("div");
+    row.id = "patchRewardEstRow";
+    row.style.cssText = `
+      margin-top:10px; display:flex; flex-wrap:wrap; gap:10px;
+      font-weight:900; opacity:.86; font-size:.86rem;
+    `;
+    row.innerHTML = `
+      <span id="patchEstDay">Day: —</span>
+      <span id="patchEstWeek">Week: —</span>
+      <span id="patchEstMonth">Month: —</span>
+    `;
+
+    // insert under reward bar if possible
+    const rb = $id("rewardBar");
+    const anchor = rb?.closest(".bar-wrap") || rb?.parentElement || card;
+    anchor.insertAdjacentElement("afterend", row);
+  }
+
+  function updateRewardEstimates() {
+    const a = getAddr();
+    if (!a) return;
+
+    const estDay = $id("patchEstDay");
+    const estWeek = $id("patchEstWeek");
+    const estMonth = $id("patchEstMonth");
+    if (!estDay || !estWeek || !estMonth) return;
+
+    // Use staked * APR (simple estimate)
+    const st = safe(typeof stakeInj !== "undefined" ? stakeInj : 0);
+    const A = safe(typeof apr !== "undefined" ? apr : 0) / 100;
+    const day = st * A / 365;
+    const week = day * 7;
+    const month = day * 30;
+
+    estDay.textContent = `Day: ${day.toFixed(4)} INJ`;
+    estWeek.textContent = `Week: ${week.toFixed(4)} INJ`;
+    estMonth.textContent = `Month: ${month.toFixed(4)} INJ`;
+  }
+
+  /* ===================== Override bars to use user targets ===================== */
+  function getUserTarget(kind) {
+    const key = keyFor(kind === "stake" ? "stake_target" : "reward_target");
+    const v = loadJSON(key, null);
+    const n = safe(v);
+    return (Number.isFinite(n) && n > 0) ? n : null;
+  }
+
+  function patchBarsLoop() {
+    try {
+      const a = getAddr();
+      if (a) {
+        // Stake override
+        const stakeTarget = getUserTarget("stake");
+        if (stakeTarget) {
+          const st = safe(typeof displayed !== "undefined" ? displayed.stake : (typeof stakeInj !== "undefined" ? stakeInj : 0));
+          const pct = clamp((st / stakeTarget) * 100, 0, 100);
+
+          const stakeBar = $id("stakeBar");
+          const stakeLine = $id("stakeLine");
+          if (stakeBar) stakeBar.style.width = pct + "%";
+          if (stakeLine) stakeLine.style.left = pct + "%";
+
+          const sp = $id("stakePercent");
+          const smx = $id("stakeMax");
+          if (sp) sp.textContent = pct.toFixed(1) + "%";
+          if (smx) smx.textContent = String(stakeTarget);
+        }
+
+        // Reward override
+        const rewardTarget = getUserTarget("reward");
+        if (rewardTarget) {
+          const rw = safe(typeof displayed !== "undefined" ? displayed.rewards : (typeof rewardsInj !== "undefined" ? rewardsInj : 0));
+          const pct = clamp((rw / rewardTarget) * 100, 0, 100);
+
+          const rewardBar = $id("rewardBar");
+          const rewardLine = $id("rewardLine");
+          if (rewardBar) rewardBar.style.width = pct + "%";
+          if (rewardLine) rewardLine.style.left = pct + "%";
+
+          const rp = $id("rewardPercent");
+          const rmx = $id("rewardMax");
+          if (rp) rp.textContent = pct.toFixed(1) + "%";
+          if (rmx) rmx.textContent = rewardTarget.toFixed(4).replace(/0+$/,"").replace(/\.$/,"");
+        }
+
+        updateRewardEstimates();
+      }
+    } catch {}
+    requestAnimationFrame(patchBarsLoop);
+  }
+
+  /* ===================== Reward filter options (All / <0.05 / >=0.05 / >=0.1) ===================== */
+  function ensureRewardFilterOptions() {
+    const sel = $id("rewardFilter");
+    if (!sel) return;
+
+    const hasPatch = Array.from(sel.options || []).some(o => o.value === "lt005");
+    if (hasPatch) return;
+
+    // Replace options safely (keep existing as fallback)
+    sel.innerHTML = "";
+    const opts = [
+      ["all", "All"],
+      ["lt005", "< 0.05"],
+      ["ge005", "≥ 0.05"],
+      ["ge01",  "≥ 0.1"]
+    ];
+    for (const [v, t] of opts) {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = t;
+      sel.appendChild(o);
+    }
+
+    // restore previous selection if possible
+    const prev = loadJSON(keyFor("reward_filter"), "all");
+    sel.value = prev && opts.some(x => x[0] === prev) ? prev : "all";
+  }
+
+  function getRewardFilterMode() {
+    const sel = $id("rewardFilter");
+    const v = (sel?.value || "all").trim();
+    if (["all","lt005","ge005","ge01"].includes(v)) return v;
+    return "all";
+  }
+
+  /* ===================== Patch rebuildWdView + syncRewardTimelineUI (autoscale Y visible) ===================== */
+  function patchRewardFunctions() {
+    try {
+      if (typeof rebuildWdView === "function" && !rebuildWdView.__patched) {
+        const orig = rebuildWdView;
+        const patched = function() {
+          // rebuild using current filter mode on wdValuesAll for this address
+          try {
+            const mode = getRewardFilterMode();
+
+            // keep global arrays used by the app
+            wdLabels = [];
+            wdValues = [];
+            wdTimes = [];
+
+            for (let i = 0; i < (wdValuesAll?.length || 0); i++) {
+              const v = safe(wdValuesAll[i]);
+              const ok =
+                mode === "all" ? true :
+                mode === "lt005" ? (v > 0 && v < 0.05) :
+                mode === "ge005" ? (v >= 0.05) :
+                mode === "ge01" ? (v >= 0.1) :
+                true;
+
+              if (ok) {
+                wdLabels.push(wdLabelsAll?.[i] || "");
+                wdValues.push(v);
+                wdTimes.push(wdTimesAll?.[i] || 0);
+              }
+            }
+
+            if (typeof drawRewardWdChart === "function") drawRewardWdChart();
+            if (typeof syncRewardTimelineUI === "function") syncRewardTimelineUI(true);
+          } catch {
+            // fallback to original if anything strange happens
+            orig();
+          }
+        };
+        patched.__patched = true;
+        rebuildWdView = patched;
+      }
+
+      if (typeof syncRewardTimelineUI === "function" && !syncRewardTimelineUI.__patched) {
+        const orig = syncRewardTimelineUI;
+        const patched = function(forceToEnd = false) {
+          orig(forceToEnd);
+          // autoscale Y to visible window
+          if (typeof rewardChart !== "undefined" && rewardChart) {
+            applyTightRightAxis(rewardChart, "y", "num");
+            autoscaleYToVisible(rewardChart, "y");
+          }
+        };
+        patched.__patched = true;
+        syncRewardTimelineUI = patched;
+      }
+    } catch {}
+  }
+
+  /* ===================== Patch Reward tooltip to show date/time ===================== */
+  function patchRewardTooltip() {
+    try {
+      if (!rewardChart?.options?.plugins?.tooltip) return;
+
+      rewardChart.options.plugins.tooltip.callbacks = rewardChart.options.plugins.tooltip.callbacks || {};
+      rewardChart.options.plugins.tooltip.callbacks.title = (items) => {
+        const i = items?.[0]?.dataIndex ?? 0;
+        const t = safe(wdTimes?.[i] || 0);
+        return t ? new Date(t).toLocaleString() : (wdLabels?.[i] || "");
+      };
+      rewardChart.options.plugins.tooltip.callbacks.label = (item) => {
+        const i = item?.dataIndex ?? 0;
+        const v = safe(item?.raw);
+        return `Withdrawn • +${v.toFixed(6)} INJ`;
+      };
+
+      // click a point -> toast
+      rewardChart.options.onClick = (evt) => {
+        try {
+          const pts = rewardChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
+          if (!pts?.length) return;
+          const i = pts[0].index;
+          const t = safe(wdTimes?.[i] || 0);
+          const v = safe(wdValues?.[i] || 0);
+          if (typeof showToastEvent === "function") {
+            showToastEvent({
+              title: "Reward withdrawal",
+              t: t || Date.now(),
+              value: `+${v.toFixed(6)} INJ`,
+              status: "ok"
+            });
+          }
+        } catch {}
+      };
+
+      rewardChart.update("none");
+    } catch {}
+  }
+
+  /* ===================== Stake axis to the right + scale toggle ===================== */
+  function patchStakeChartAxis() {
+    try {
+      if (!stakeChart) return;
+      stakeChart.options.scales = stakeChart.options.scales || {};
+      stakeChart.options.scales.y = stakeChart.options.scales.y || {};
+      applyTightRightAxis(stakeChart, "y", "num");
+
+      // improve readability
+      stakeChart.options.scales.x = stakeChart.options.scales.x || {};
+      stakeChart.options.scales.x.display = false;
+
+      stakeChart.update("none");
+    } catch {}
+  }
+
+  /* ===================== Net Worth live sampling (1 point/min, update last point inside minute) ===================== */
+  function patchNetWorthSampling() {
+    try {
+      if (typeof recordNetWorthPoint !== "function") return;
+      if (recordNetWorthPoint.__patched) return;
+
+      const orig = recordNetWorthPoint;
+
+      const patched = function() {
+        try {
+          const a = getAddr();
+          if (!a) return;
+
+          const px = safe(typeof targetPrice !== "undefined" ? targetPrice : 0);
+          if (!px || px <= 0) return;
+
+          const totalInj = safe(typeof availableInj !== "undefined" ? availableInj : 0)
+            + safe(typeof stakeInj !== "undefined" ? stakeInj : 0)
+            + safe(typeof rewardsInj !== "undefined" ? rewardsInj : 0);
+
+          const totalUsd = totalInj * px;
+          if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
+
+          const now = Date.now();
+          const lastT = nwTAll?.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
+
+          // within 60s -> update last point (no spam, no cloud push)
+          if (lastT && (now - lastT) < 60_000 && nwUsdAll?.length && nwInjAll?.length) {
+            nwTAll[nwTAll.length - 1] = now;
+            nwUsdAll[nwUsdAll.length - 1] = totalUsd;
+            nwInjAll[nwInjAll.length - 1] = totalInj;
+
+            if (typeof clampNWArrays === "function") clampNWArrays();
+            if (typeof saveNWLocalOnly === "function") saveNWLocalOnly();
+            if (typeof drawNW === "function") drawNW();
+            return;
+          }
+
+          // otherwise original logic (adds a point + cloud schedule)
+          orig();
+        } catch {
+          try { orig(); } catch {}
+        }
+      };
+
+      patched.__patched = true;
+      recordNetWorthPoint = patched;
+    } catch {}
+  }
+
+  /* ===================== Patch drawNW autoscale + tight axis + apply saved scale ===================== */
+  function patchDrawNW() {
+    try {
+      if (typeof drawNW !== "function") return;
+      if (drawNW.__patched) return;
+
+      const orig = drawNW;
+      const patched = function() {
+        orig();
+        try {
+          if (!netWorthChart) return;
+
+          applyTightRightAxis(netWorthChart, "y", "usd");
+
+          // apply stored scale
+          const st = getScaleState("nw").y;
+          setYAxisScale(netWorthChart, "y", st);
+
+          // autoscale visible
+          autoscaleYToVisible(netWorthChart, "y");
+        } catch {}
+      };
+      patched.__patched = true;
+      drawNW = patched;
+    } catch {}
+  }
+
+  /* ===================== Hide non-essential Net Worth sub-card (best-effort) ===================== */
+  function hideNetWorthExtraCardBestEffort() {
+    try {
+      const nwCard = $id("netWorthCard") || findCardByChildId("netWorthChart");
+      if (!nwCard) return;
+
+      const keepEl = $id("netWorthInj");
+      const keepBox = keepEl ? (keepEl.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card") || keepEl.parentElement) : null;
+
+      const qty = $id("nwAssetQty");
+      const price = $id("nwAssetPrice");
+      const usd = $id("nwAssetUsd");
+
+      const cand = qty?.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card") ||
+                   price?.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card") ||
+                   usd?.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card");
+
+      if (cand && cand !== keepBox) {
+        cand.style.display = "none";
+      }
+    } catch {}
+  }
+
+  /* ===================== Fullscreen per card (charts) ===================== */
+  function ensureFullscreenButtons() {
+    try {
+      const canvases = Array.from(document.querySelectorAll("canvas"));
+      for (const c of canvases) {
+        const card = c.closest(".card") || c.parentElement;
+        if (!card) continue;
+        if (card.querySelector(".patch-fs-btn")) continue;
+
+        ensureCardRelative(card);
+
+        const btn = makeIconBtn("⛶", "Fullscreen");
+        btn.classList.add("patch-fs-btn");
+        btn.style.position = "absolute";
+        btn.style.left = "12px";
+        btn.style.top = "12px";
+        btn.style.zIndex = "6";
+
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const isOn = card.dataset.patchFullscreen === "1";
+          if (isOn) {
+            card.dataset.patchFullscreen = "0";
+            card.style.position = "";
+            card.style.left = "";
+            card.style.top = "";
+            card.style.right = "";
+            card.style.bottom = "";
+            card.style.width = "";
+            card.style.height = "";
+            card.style.zIndex = "";
+            card.style.borderRadius = "";
+            card.style.margin = "";
+            card.style.overflow = "";
+            document.body.classList.remove("patch-fs-open");
+            document.querySelector(".patch-fs-backdrop")?.remove();
+            try {
+              if (typeof netWorthChart !== "undefined" && netWorthChart) netWorthChart.resize();
+              if (typeof stakeChart !== "undefined" && stakeChart) stakeChart.resize();
+              if (typeof rewardChart !== "undefined" && rewardChart) rewardChart.resize();
+              if (typeof chart !== "undefined" && chart) chart.resize();
+              if (typeof aprChart !== "undefined" && aprChart) aprChart.resize();
+            } catch {}
+            return;
+          }
+
+          card.dataset.patchFullscreen = "1";
+
+          // backdrop
+          let back = document.querySelector(".patch-fs-backdrop");
+          if (!back) {
+            back = document.createElement("div");
+            back.className = "patch-fs-backdrop";
+            back.style.cssText = "position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);";
+            back.addEventListener("click", () => btn.click(), { passive: true });
+            document.body.appendChild(back);
+          }
+
+          card.style.position = "fixed";
+          card.style.left = "10px";
+          card.style.right = "10px";
+          card.style.top = "10px";
+          card.style.bottom = "10px";
+          card.style.width = "auto";
+          card.style.height = "auto";
+          card.style.zIndex = "901";
+          card.style.borderRadius = "18px";
+          card.style.margin = "0";
+          card.style.overflow = "hidden";
+          document.body.classList.add("patch-fs-open");
+
+          setTimeout(() => {
+            try {
+              if (typeof netWorthChart !== "undefined" && netWorthChart) netWorthChart.resize();
+              if (typeof stakeChart !== "undefined" && stakeChart) stakeChart.resize();
+              if (typeof rewardChart !== "undefined" && rewardChart) rewardChart.resize();
+              if (typeof chart !== "undefined" && chart) chart.resize();
+              if (typeof aprChart !== "undefined" && aprChart) aprChart.resize();
+            } catch {}
+          }, 60);
+        }, { passive: false });
+
+        card.appendChild(btn);
+      }
+    } catch {}
+  }
+
+  /* ===================== APR mini chart + events ===================== */
+  let aprChart = null;
+  let aprT = [];
+  let aprV = [];
+  let lastAprSeen = null;
+
+  function aprStoreKey() { return keyFor("apr_series"); }
+
+  function loadAprSeries() {
+    const obj = loadJSON(aprStoreKey(), null);
+    if (!obj?.t || !obj?.v) return;
+    aprT = Array.isArray(obj.t) ? obj.t.map(Number) : [];
+    aprV = Array.isArray(obj.v) ? obj.v.map(Number) : [];
+    // clamp
+    const n = Math.min(aprT.length, aprV.length);
+    aprT = aprT.slice(-n).slice(-1200);
+    aprV = aprV.slice(-n).slice(-1200);
+  }
+
+  function saveAprSeries() {
+    saveJSON(aprStoreKey(), { t: aprT, v: aprV });
+  }
+
+  function ensureAprChart() {
+    const aprEl = $id("apr");
+    if (!aprEl) return;
+    const card = aprEl.closest(".card") || aprEl.parentElement;
+    if (!card) return;
+
+    // inject canvas
+    if (!card.querySelector("#patchAprCanvas")) {
+      const wrap = document.createElement("div");
+      wrap.style.cssText = "height:140px;margin-top:10px;";
+      wrap.innerHTML = `<canvas id="patchAprCanvas"></canvas>`;
+      card.appendChild(wrap);
+    }
+
+    const canvas = card.querySelector("#patchAprCanvas");
+    if (!canvas || !window.Chart) return;
+
+    if (!aprChart) {
+      aprChart = new Chart(canvas, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [{
+            data: [],
+            borderColor: "#3b82f6",
+            backgroundColor: "rgba(59,130,246,.12)",
+            fill: true,
+            tension: 0.3,
+            pointRadius: 3,
+            pointHoverRadius: 6,
+            spanGaps: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { display: false }, tooltip: { enabled: true, displayColors: false } },
+          scales: {
+            x: { display: true, ticks: { color: (typeof axisTickColor === "function") ? axisTickColor() : undefined, maxTicksLimit: 6 }, grid: { display: false }, border: { display: false } },
+            y: { display: true, position: "right", ticks: { color: (typeof axisTickColor === "function") ? axisTickColor() : undefined, mirror: true, padding: 4, callback: (v)=>`${safe(v).toFixed(2)}%` },
+                 grid: { color: (typeof axisGridColor === "function") ? axisGridColor() : undefined }, border: { display: false } }
+          }
+        }
+      });
+    }
+
+    // toggle scale on apr card
+    ensureScaleToggleOnCard(card, "apr", () => aprChart, "y");
+    applyTightRightAxis(aprChart, "y", "num");
+    setYAxisScale(aprChart, "y", getScaleState("apr").y);
+  }
+
+  function updateAprChart() {
+    if (!aprChart) return;
+    const labels = aprT.map(t => {
+      const d = new Date(safe(t));
+      return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    });
+    aprChart.data.labels = labels;
+    aprChart.data.datasets[0].data = aprV;
+
+    applyTightRightAxis(aprChart, "y", "num");
+    setYAxisScale(aprChart, "y", getScaleState("apr").y);
+    autoscaleYToVisible(aprChart, "y");
+
+    aprChart.update("none");
+  }
+
+  function maybeRecordAprPoint() {
+    const a = getAddr();
+    if (!a) return;
+
+    const cur = safe(typeof apr !== "undefined" ? apr : 0);
+    if (!Number.isFinite(cur) || cur <= 0) return;
+
+    if (lastAprSeen == null) {
+      lastAprSeen = cur;
+      return;
+    }
+
+    // record only meaningful changes
+    if (Math.abs(cur - lastAprSeen) >= 0.02) {
+      const t = Date.now();
+      aprT.push(t);
+      aprV.push(cur);
+      if (aprT.length > 1200) { aprT = aprT.slice(-1200); aprV = aprV.slice(-1200); }
+      saveAprSeries();
+      updateAprChart();
+
+      // event
+      if (typeof pushEvent === "function") {
+        pushEvent({
+          type: "apr",
+          title: "APR changed",
+          value: `${lastAprSeen.toFixed(2)}% → ${cur.toFixed(2)}%`,
+          status: (navigator.onLine ? "ok" : "pending")
+        });
+      }
+
+      lastAprSeen = cur;
+    }
+  }
+
+  /* ===================== Market move events thresholds ===================== */
+  function marketStoreKeyForDay() {
+    const d = new Date();
+    const tag = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    return keyFor(`market_bucket_${tag}`);
+  }
+
+  function maybeMarketMoveEvent() {
+    const a = getAddr();
+    if (!a) return;
+
+    const open = safe(candle?.d?.open);
+    const px = safe(typeof targetPrice !== "undefined" ? targetPrice : 0);
+    if (!open || !px) return;
+
+    const pct = ((px - open) / open) * 100;
+    const ap = Math.abs(pct);
+
+    const buckets = [5,10,15,20,25,30,40,50];
+    let b = 0;
+    for (const x of buckets) if (ap >= x) b = x;
+
+    const prev = safe(loadJSON(marketStoreKeyForDay(), 0));
+    if (b > prev) {
+      saveJSON(marketStoreKeyForDay(), b);
+      if (typeof pushEvent === "function") {
+        pushEvent({
+          type: "market",
+          title: `Market move ${pct > 0 ? "up" : "down"}`,
+          value: `${pct > 0 ? "+" : ""}${pct.toFixed(2)}% (≥ ${b}%)`,
+          status: (navigator.onLine ? "ok" : "pending")
+        });
+      }
+    }
+  }
+
+  /* ===================== Event Page: filters + reset + pagination ===================== */
+  const EV_PAGE_SIZE = 25;
+  const evState = { page: 1, filter: "all" };
+
+  function ensureEventControls() {
+    try {
+      if (!window.eventPage || !eventPage) return;
+      if (eventPage.querySelector("#patchEvControls")) return;
+
+      // Insert controls in header near close
+      const closeBtn = eventPage.querySelector("#eventCloseBtn");
+      if (!closeBtn) return;
+
+      const ctr = document.createElement("div");
+      ctr.id = "patchEvControls";
+      ctr.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;";
+
+      const filter = document.createElement("select");
+      filter.id = "patchEvFilter";
+      filter.style.cssText = `
+        height:40px;border-radius:14px;padding:0 10px;font-weight:900;cursor:pointer;
+        border:1px solid ${themeIsLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.14)"};
+        background:${themeIsLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
+        color:${themeIsLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)"};
+      `;
+      const types = [
+        ["all","All"],
+        ["reward","Reward"],
+        ["stake","Stake"],
+        ["apr","APR"],
+        ["market","Market"],
+        ["ui","UI"]
+      ];
+      for (const [v,t] of types) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = t;
+        filter.appendChild(o);
+      }
+
+      const reset = makeMiniBtn("Reset", "Clear events for this wallet");
+      const pager = document.createElement("div");
+      pager.id = "patchEvPager";
+      pager.style.cssText = "width:100%;margin-top:10px;display:flex;gap:8px;align-items:center;justify-content:space-between;opacity:.9;font-weight:900;";
+
+      ctr.appendChild(filter);
+      ctr.appendChild(reset);
+
+      closeBtn.insertAdjacentElement("beforebegin", ctr);
+      closeBtn.closest("div")?.insertAdjacentElement("afterend", pager);
+
+      filter.addEventListener("change", () => {
+        evState.filter = filter.value || "all";
+        evState.page = 1;
+        if (typeof renderEventRows === "function") renderEventRows();
+      }, { passive: true });
+
+      reset.addEventListener("click", () => {
+        try {
+          if (Array.isArray(eventsAll)) eventsAll = [];
+          if (typeof saveEventsLocalOnly === "function") saveEventsLocalOnly();
+          if (typeof cloudSchedulePush === "function") cloudSchedulePush();
+          if (typeof renderEventRows === "function") renderEventRows();
+          if (typeof showToastEvent === "function") showToastEvent({ title: "Events reset", t: Date.now(), value: "Cleared", status: "ok" });
+        } catch {}
+      }, { passive: true });
+    } catch {}
+  }
+
+  function patchRenderEventRows() {
+    try {
+      if (typeof renderEventRows !== "function") return;
+      if (renderEventRows.__patched) return;
+
+      const orig = renderEventRows;
+
+      const patched = function() {
+        try {
+          if (!eventPage) return orig();
+
+          ensureEventControls();
+
+          const rows = eventPage.querySelector("#eventRows");
+          if (!rows) return;
+
+          const pager = eventPage.querySelector("#patchEvPager");
+
+          let items = Array.isArray(eventsAll) ? eventsAll.slice() : [];
+          // newest first display (keep original behavior)
+          items = items.slice().reverse();
+
+          // filter
+          const fSel = eventPage.querySelector("#patchEvFilter");
+          const f = (fSel?.value || evState.filter || "all");
+          if (f && f !== "all") {
+            items = items.filter(ev => String(ev?.type || "") === f);
+          }
+
+          const total = items.length;
+          const pages = Math.max(1, Math.ceil(total / EV_PAGE_SIZE));
+          evState.page = clamp(evState.page || 1, 1, pages);
+
+          const start = (evState.page - 1) * EV_PAGE_SIZE;
+          const pageItems = items.slice(start, start + EV_PAGE_SIZE);
+
+          // reuse original renderer styles if possible
+          const fg = themeIsLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)";
+          const muted = themeIsLight() ? "rgba(15,23,42,.62)" : "rgba(249,250,251,.62)";
+          const border = themeIsLight() ? "rgba(15,23,42,.10)" : "rgba(255,255,255,.10)";
+          const bgRow = themeIsLight() ? "rgba(15,23,42,.03)" : "rgba(255,255,255,.03)";
+
+          if (!pageItems.length) {
+            rows.innerHTML = `<div style="padding:14px;opacity:.75;font-weight:850;">No events.</div>`;
+          } else {
+            rows.innerHTML = pageItems.map((ev, idx) => {
+              const dt = new Date(safe(ev?.t) || Date.now());
+              const dtStr = dt.toLocaleDateString() + " " + dt.toLocaleTimeString();
+              const v = String(ev?.value || "—");
+              const title = String(ev?.title || "Event");
+              const badge = (typeof statusBadgeHTML === "function") ? statusBadgeHTML(ev?.status) : "";
+              return `
+                <div style="display:grid;grid-template-columns: 1.2fr .9fr .9fr .55fr;gap:10px;
+                  padding:12px 14px;border-top:1px solid ${border};background:${idx%2?bgRow:"transparent"};color:${fg};">
+                  <div style="font-weight:950;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+                  <div style="color:${muted};font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${dtStr}</div>
+                  <div style="font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${v}</div>
+                  <div style="text-align:right;">${badge}</div>
+                </div>
+              `;
+            }).join("");
+          }
+
+          if (pager) {
+            pager.innerHTML = "";
+
+            const left = document.createElement("div");
+            left.style.display = "flex";
+            left.style.alignItems = "center";
+            left.style.gap = "8px";
+
+            const prev = makeMiniBtn("‹", "Prev");
+            const next = makeMiniBtn("›", "Next");
+            prev.style.width = next.style.width = "42px";
+
+            const info = document.createElement("div");
+            info.textContent = `Page ${evState.page}/${pages} · ${total} events`;
+            info.style.opacity = ".85";
+
+            prev.disabled = evState.page <= 1;
+            next.disabled = evState.page >= pages;
+            prev.style.opacity = prev.disabled ? ".4" : "1";
+            next.style.opacity = next.disabled ? ".4" : "1";
+
+            prev.addEventListener("click", () => { if (evState.page > 1) { evState.page--; patched(); } }, { passive: true });
+            next.addEventListener("click", () => { if (evState.page < pages) { evState.page++; patched(); } }, { passive: true });
+
+            left.appendChild(prev);
+            left.appendChild(next);
+            left.appendChild(info);
+
+            pager.appendChild(left);
+
+            const right = document.createElement("div");
+            right.style.opacity = ".8";
+            right.textContent = `Filter: ${f.toUpperCase()}`;
+            pager.appendChild(right);
+          }
+        } catch {
+          orig();
+        }
+      };
+
+      patched.__patched = true;
+      renderEventRows = patched;
+    } catch {}
+  }
+
+  /* ===================== PRICE TF (5m/1d/1w/1m/1y/all) + scale ===================== */
+  const priceState = {
+    tf: loadJSON("inj_patch_price_tf_global", "1d"), // global, not per address (market data)
+  };
+
+  async function fetchBinanceKlines(interval, startTimeMs, limit = 1000) {
+    try {
+      const st = Number.isFinite(+startTimeMs) ? `&startTime=${Math.floor(startTimeMs)}` : "";
+      const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${limit}${st}`;
+      const d = (typeof fetchJSON === "function") ? await fetchJSON(url) : null;
+      return Array.isArray(d) ? d : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function priceTfToRequest(tf) {
+    const now = Date.now();
+    if (tf === "1w") return { interval: "15m", start: now - 7*24*60*60*1000, limit: 1000 };
+    if (tf === "1m") return { interval: "1h",  start: now - 30*24*60*60*1000, limit: 1000 };
+    if (tf === "1y") return { interval: "1d",  start: now - 365*24*60*60*1000, limit: 500 };
+    if (tf === "all") return { interval: "1w", start: now - 3650*24*60*60*1000, limit: 1000 };
+    return null;
+  }
+
+  function ensurePriceControls() {
+    const cv = $id("priceChart");
+    if (!cv) return;
+    const card = cv.closest(".card") || cv.parentElement;
+    if (!card) return;
+
+    ensureCardRelative(card);
+
+    if (!card.querySelector("#patchPriceControls")) {
+      const wrap = document.createElement("div");
+      wrap.id = "patchPriceControls";
+      wrap.style.cssText = "position:absolute;right:12px;top:12px;display:flex;gap:8px;flex-wrap:wrap;z-index:7;";
+      card.appendChild(wrap);
+
+      const buttons = [
+        ["5m", "5m"],
+        ["1d", "1D"],
+        ["1w", "1W"],
+        ["1m", "1M"],
+        ["1y", "1Y"],
+        ["all","ALL"],
+      ];
+
+      for (const [tf, label] of buttons) {
+        const b = makeMiniBtn(label, `Price timeframe ${label}`);
+        b.dataset.tf = tf;
+        if (tf === priceState.tf) b.style.outline = "2px solid rgba(250,204,21,.55)";
+        b.addEventListener("click", async () => {
+          priceState.tf = tf;
+          saveJSON("inj_patch_price_tf_global", tf);
+          // update UI selection
+          wrap.querySelectorAll("button[data-tf]").forEach(x => x.style.outline = "");
+          b.style.outline = "2px solid rgba(250,204,21,.55)";
+          await applyPriceTimeframe(tf);
+        }, { passive: true });
+        wrap.appendChild(b);
+      }
+
+      // scale toggle (Y)
+      const sc = makeMiniBtn("LIN", "Switch Y scale: Linear / Log");
+      sc.dataset.scale = "1";
+      sc.addEventListener("click", () => {
+        const cur = getScaleState("price").y;
+        const next = (cur === "linear") ? "logarithmic" : "linear";
+        setScaleState("price", next);
+        sc.textContent = (next === "logarithmic") ? "LOG" : "LIN";
+        if (typeof chart !== "undefined" && chart) {
+          applyTightRightAxis(chart, "y", "usd");
+          setYAxisScale(chart, "y", next);
+          autoscaleYToVisible(chart, "y");
+        }
+      }, { passive: true });
+      wrap.appendChild(sc);
+
+      // initial label
+      sc.textContent = (getScaleState("price").y === "logarithmic") ? "LOG" : "LIN";
+    }
+  }
+
+  async function applyPriceTimeframe(tf) {
+    try {
+      if (typeof chart === "undefined" || !chart) return;
+
+      // always apply tight Y + scale
+      applyTightRightAxis(chart, "y", "usd");
+      setYAxisScale(chart, "y", getScaleState("price").y);
+
+      // 5m = keep live 1m stream but show last 5 points
+      if (tf === "5m") {
+        chart.options.scales.x.display = false;
+        const n = chart.data.datasets?.[0]?.data?.length || 0;
+        if (n > 0) {
+          const minIdx = Math.max(0, n - 5);
+          chart.options.scales.x.min = minIdx;
+          chart.options.scales.x.max = n - 1;
+        }
+        autoscaleYToVisible(chart, "y");
+        chart.update("none");
+        return;
+      }
+
+      // 1d: restore core behavior
+      if (tf === "1d") {
+        chart.options.scales.x.display = false;
+        chart.options.scales.x.min = undefined;
+        chart.options.scales.x.max = undefined;
+
+        // allow core refresh to keep running
+        autoscaleYToVisible(chart, "y");
+        chart.update("none");
+        return;
+      }
+
+      // other TF: fetch and freeze live updates
+      const req = priceTfToRequest(tf);
+      if (!req) return;
+
+      const kl = await fetchBinanceKlines(req.interval, req.start, req.limit);
+      if (!kl?.length) return;
+
+      const labels = kl.map(k => {
+        const t = safe(k?.[0]);
+        const d = new Date(t);
+        if (tf === "1y" || tf === "all") return d.toLocaleDateString();
+        return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+      });
+
+      const data = kl.map(k => safe(k?.[4])).filter(v => Number.isFinite(v));
+
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = data;
+
+      // show x in long TF
+      chart.options.scales.x.display = true;
+      chart.options.scales.x.grid = chart.options.scales.x.grid || {};
+      chart.options.scales.x.grid.display = false;
+      chart.options.scales.x.ticks = chart.options.scales.x.ticks || {};
+      chart.options.scales.x.ticks.color = (typeof axisTickColor === "function") ? axisTickColor() : undefined;
+      chart.options.scales.x.ticks.maxTicksLimit = 6;
+      chart.options.scales.x.min = undefined;
+      chart.options.scales.x.max = undefined;
+
+      autoscaleYToVisible(chart, "y");
+      chart.update("none");
+    } catch {}
+  }
+
+  function patchPriceUpdatersToRespectTF() {
+    try {
+      // block core loadChartToday when TF != 1d/5m
+      if (typeof loadChartToday === "function" && !loadChartToday.__patched) {
+        const orig = loadChartToday;
+        const patched = async function(isRefresh = false) {
+          const tf = loadJSON("inj_patch_price_tf_global", "1d");
+          if (tf !== "1d" && tf !== "5m") return;
+          return orig(isRefresh);
+        };
+        patched.__patched = true;
+        loadChartToday = patched;
+      }
+
+      if (typeof ensureChartBootstrapped === "function" && !ensureChartBootstrapped.__patched) {
+        const orig = ensureChartBootstrapped;
+        const patched = async function() {
+          const tf = loadJSON("inj_patch_price_tf_global", "1d");
+          if (tf !== "1d" && tf !== "5m") return;
+          return orig();
+        };
+        patched.__patched = true;
+        ensureChartBootstrapped = patched;
+      }
+
+      if (typeof updateChartFrom1mKline === "function" && !updateChartFrom1mKline.__patched) {
+        const orig = updateChartFrom1mKline;
+        const patched = function(k) {
+          const tf = loadJSON("inj_patch_price_tf_global", "1d");
+          if (tf !== "1d" && tf !== "5m") return;
+          orig(k);
+          // keep 5m window moving
+          if (tf === "5m" && typeof chart !== "undefined" && chart) {
+            const n = chart.data.datasets?.[0]?.data?.length || 0;
+            if (n > 0) {
+              chart.options.scales.x.min = Math.max(0, n - 5);
+              chart.options.scales.x.max = n - 1;
+              autoscaleYToVisible(chart, "y");
+              chart.update("none");
+            }
+          }
+        };
+        patched.__patched = true;
+        updateChartFrom1mKline = patched;
+      }
+    } catch {}
+  }
+
+  /* ===================== Attach scale toggles to cards ===================== */
+  function attachScaleToggles() {
+    try {
+      // Net Worth card toggle
+      const nwCard = $id("netWorthCard") || findCardByChildId("netWorthChart");
+      if (nwCard) ensureScaleToggleOnCard(nwCard, "nw", () => (typeof netWorthChart !== "undefined" ? netWorthChart : null), "y");
+
+      // Stake card toggle
+      const stCard = findCardByChildId("stakeChart") || findCardByChildId("stake");
+      if (stCard) ensureScaleToggleOnCard(stCard, "stake", () => (typeof stakeChart !== "undefined" ? stakeChart : null), "y");
+
+      // Reward card toggle
+      const rwCard = findCardByChildId("rewardChart") || findCardByChildId("rewards");
+      if (rwCard) ensureScaleToggleOnCard(rwCard, "reward", () => (typeof rewardChart !== "undefined" ? rewardChart : null), "y");
+
+      // Price controls includes scale already
+      ensurePriceControls();
+    } catch {}
+  }
+
+  /* ===================== Apply saved scales when charts exist ===================== */
+  function applyScalesOnceChartsReady() {
+    try {
+      // Net worth
+      if (typeof netWorthChart !== "undefined" && netWorthChart) {
+        applyTightRightAxis(netWorthChart, "y", "usd");
+        setYAxisScale(netWorthChart, "y", getScaleState("nw").y);
+        autoscaleYToVisible(netWorthChart, "y");
+      }
+
+      // Stake
+      if (typeof stakeChart !== "undefined" && stakeChart) {
+        patchStakeChartAxis();
+        setYAxisScale(stakeChart, "y", getScaleState("stake").y);
+        autoscaleYToVisible(stakeChart, "y");
+      }
+
+      // Reward
+      if (typeof rewardChart !== "undefined" && rewardChart) {
+        applyTightRightAxis(rewardChart, "y", "num");
+        setYAxisScale(rewardChart, "y", getScaleState("reward").y);
+        autoscaleYToVisible(rewardChart, "y");
+        patchRewardTooltip();
+      }
+
+      // Price
+      if (typeof chart !== "undefined" && chart) {
+        applyTightRightAxis(chart, "y", "usd");
+        setYAxisScale(chart, "y", getScaleState("price").y);
+        autoscaleYToVisible(chart, "y");
+      }
+
+      // APR
+      if (aprChart) {
+        applyTightRightAxis(aprChart, "y", "num");
+        setYAxisScale(aprChart, "y", getScaleState("apr").y);
+        autoscaleYToVisible(aprChart, "y");
+      }
+    } catch {}
+  }
+
+  /* ===================== Hook setAddressDisplay to re-add copy button ===================== */
+  function patchSetAddressDisplay() {
+    try {
+      if (typeof setAddressDisplay !== "function") return;
+      if (setAddressDisplay.__patched) return;
+
+      const orig = setAddressDisplay;
+      const patched = function(addr) {
+        orig(addr);
+        ensureCopyAddressBtn();
+      };
+      patched.__patched = true;
+      setAddressDisplay = patched;
+    } catch {}
+  }
+
+  /* ===================== Boot patch ===================== */
+  onReady(() => {
+    try {
+      // keep idempotent controls
+      ensureCopyAddressBtn();
+      ensureMenuLabels();
+
+      // reward filter options + functions
+      ensureRewardFilterOptions();
+      patchRewardFunctions();
+
+      // events page renderer
+      patchRenderEventRows();
+
+      // networth sampling + draw enhancements
+      patchNetWorthSampling();
+      patchDrawNW();
+
+      // price TF safety wrappers
+      patchPriceUpdatersToRespectTF();
+
+      // gear buttons
+      ensureGearNearBar("stakeBar", "stake");
+      ensureGearNearBar("rewardBar", "reward");
+
+      // reward estimates
+      ensureRewardEstimateRow();
+
+      // setAddressDisplay hook
+      patchSetAddressDisplay();
+
+      // hide net worth extra card if found
+      hideNetWorthExtraCardBestEffort();
+
+      // fullscreen buttons
+      ensureFullscreenButtons();
+
+      // APR chart
+      loadAprSeries();
+      ensureAprChart();
+      updateAprChart();
+
+      // Attach scale toggles on cards
+      attachScaleToggles();
+
+      // apply initial price TF (if chart exists)
+      setTimeout(async () => {
+        ensurePriceControls();
+        await applyPriceTimeframe(loadJSON("inj_patch_price_tf_global", "1d"));
+      }, 500);
+
+      // periodic “late init” (charts might appear after)
+      let tries = 0;
+      const t = setInterval(() => {
+        tries++;
+        ensureCopyAddressBtn();
+        ensureMenuLabels();
+        ensureRewardFilterOptions();
+        ensureGearNearBar("stakeBar", "stake");
+        ensureGearNearBar("rewardBar", "reward");
+        ensureRewardEstimateRow();
+        ensurePriceControls();
+        attachScaleToggles();
+        applyScalesOnceChartsReady();
+        patchRewardTooltip();
+        patchStakeChartAxis();
+        hideNetWorthExtraCardBestEffort();
+        ensureFullscreenButtons();
+        ensureAprChart();
+        updateAprChart();
+
+        if (tries > 30) clearInterval(t);
+      }, 650);
+
+      // start bars loop override
+      requestAnimationFrame(patchBarsLoop);
+
+      // background “events detectors”
+      setInterval(() => {
+        try {
+          maybeRecordAprPoint();
+          maybeMarketMoveEvent();
+        } catch {}
+      }, 1200);
+
+      // if price TF is 5m keep autoscale fresh
+      setInterval(() => {
+        try {
+          const tf = loadJSON("inj_patch_price_tf_global", "1d");
+          if (tf === "5m" && typeof chart !== "undefined" && chart) {
+            autoscaleYToVisible(chart, "y");
+          }
+        } catch {}
+      }, 1200);
+
+      // log patch version in console
+      console.log(`[INJ PATCH] v${PATCH_VER} loaded`);
+    } catch (e) {
+      console.warn("[INJ PATCH] failed to init:", e);
+    }
+  });
+
+})();
+
