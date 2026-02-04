@@ -3502,4 +3502,392 @@ animate();
   }
 })();
 
+/* =========================================================
+   PATCH v2.0.2 — Bind pulsanti + TF + LIN/LOG + Expand responsive
+   Incolla in fondo a app.js
+   ========================================================= */
+(function patchBindingsV202(){
+  /* ---------- small helpers ---------- */
+  const $$ = (id) => document.getElementById(id);
+  const clamp = (n,a,b)=>Math.min(Math.max(n,a),b);
+  const safe = (n)=> (Number.isFinite(+n) ? +n : 0);
+
+  function fmtMMDD(ms){
+    const d = new Date(ms);
+    return `${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+  }
+
+  function setBtnText(id, txt){
+    const b = $$(id);
+    if (b) b.textContent = txt;
+  }
+
+  /* =========================================================
+     1) Cloud Sync menu: HTML IDs diversi -> patcha cloudSetState + meta
+     ========================================================= */
+  const _cloudSetState = (typeof cloudSetState === "function") ? cloudSetState : null;
+  cloudSetState = function(state){
+    // chiama logica esistente (footer + classi)
+    try{ _cloudSetState && _cloudSetState(state); }catch{}
+
+    // aggiorna anche i tuoi ID menu
+    const dot = $$("cloudMenuDot");
+    const txt = $$("cloudMenuStatus");
+    const last = $$("cloudMenuLast");
+
+    if (dot){
+      dot.classList.remove("ok","saving","err");
+      if (state === "saving") dot.classList.add("saving");
+      else if (state === "error") dot.classList.add("err");
+      else dot.classList.add("ok");
+    }
+
+    if (txt){
+      txt.textContent =
+        (state === "saving") ? "Saving"
+        : (state === "error") ? "Error"
+        : (navigator.onLine ? "Synced" : "Offline cache");
+    }
+
+    if (last){
+      // mostra un orario semplice quando aggiorniamo pts/lastSync
+      try{
+        const t = (typeof cloudLastSync !== "undefined") ? safe(cloudLastSync) : 0;
+        last.textContent = t ? new Date(t).toLocaleString() : "—";
+      }catch{ last.textContent = "—"; }
+    }
+  };
+
+  const _cloudRenderMeta = (typeof cloudRenderMeta === "function") ? cloudRenderMeta : null;
+  cloudRenderMeta = function(){
+    try{ _cloudRenderMeta && _cloudRenderMeta(); }catch{}
+    const last = $$("cloudMenuLast");
+    if (last){
+      try{
+        const t = (typeof cloudLastSync !== "undefined") ? safe(cloudLastSync) : 0;
+        last.textContent = t ? new Date(t).toLocaleString() : "—";
+      }catch{ last.textContent = "—"; }
+    }
+  };
+
+  /* =========================================================
+     2) Events page: tbody ID e colonne diverse
+     ========================================================= */
+  renderEvents = function(){
+    const body = $$("eventsTbody");  // ✅ HTML
+    const empty = $$("eventsEmpty");
+    if (!body) return;
+
+    body.innerHTML = "";
+    const list = (Array.isArray(eventsAll) ? eventsAll : []);
+
+    if (empty) empty.style.display = list.length ? "none" : "block";
+    if (!list.length) return;
+
+    for (const ev of list){
+      const tr = document.createElement("tr");
+      const ts = safe(ev.ts || Date.now());
+      const dt = new Date(ts);
+      const when = `${dt.toLocaleDateString()} ${dt.toLocaleTimeString()}`;
+
+      const status = (ev.status === "ok") ? "OK" : (ev.status === "err") ? "ERR" : "…";
+      const kind = String(ev.kind || "info").toUpperCase();
+      const title = ev.title || "Event";
+      const detail = ev.detail || "";
+
+      tr.innerHTML = `
+        <td><span class="ev-pill"><span class="ev-dot ${ev.status==="ok"?"ok":ev.status==="err"?"err":""}"></span>${kind}</span> ${title}</td>
+        <td style="white-space:nowrap">${when}</td>
+        <td>${detail}</td>
+        <td style="white-space:nowrap;font-weight:900">${status}</td>
+      `;
+      body.appendChild(tr);
+    }
+  };
+
+  /* =========================================================
+     3) Net Worth LIN/LOG: HTML usa nwScaleToggle
+     ========================================================= */
+  const nwScaleToggle = $$("nwScaleToggle");
+  if (nwScaleToggle){
+    nwScaleToggle.addEventListener("click", (e)=>{
+      e.preventDefault();
+      // nwScale esiste già nel tuo file (let)
+      try{
+        nwScale = (nwScale === "log") ? "linear" : "log";
+        nwScaleToggle.textContent = (nwScale === "log") ? "LOG" : "LIN";
+        try{ saveNWLocal && saveNWLocal(); }catch{}
+        try{ drawNW && drawNW(); }catch{}
+      }catch{}
+    }, { passive:false });
+  }
+
+  /* =========================================================
+     4) STAKE: TF + LIN/LOG sul chart (stakeScaleToggle + stakeTfSwitch)
+     ========================================================= */
+  let stakeScale = "linear";
+  function stakeApplyScale(){
+    if (!stakeChart) return;
+    stakeChart.options.scales.y.type = (stakeScale === "log") ? "logarithmic" : "linear";
+    // log scale richiede valori > 0
+    if (stakeScale === "log"){
+      stakeChart.options.scales.y.min = 0.000001;
+    } else {
+      stakeChart.options.scales.y.min = undefined;
+    }
+    stakeChart.update("none");
+  }
+
+  function stakeApplyTF(tf){
+    if (!stakeChart) return;
+    const now = Date.now();
+    const w =
+      (tf === "1d") ? 24*60*60*1000 :
+      (tf === "1w") ? 7*24*60*60*1000 :
+      (tf === "1m") ? 30*24*60*60*1000 :
+      0;
+
+    if (!w || !Array.isArray(stakeLabels) || stakeLabels.length < 2){
+      stakeChart.options.scales.x.min = undefined;
+      stakeChart.options.scales.x.max = undefined;
+      stakeChart.update("none");
+      return;
+    }
+
+    // labels sono tsLabel -> timestamp
+    const minT = now - w;
+    let startIdx = 0;
+    for (let i=0;i<stakeLabels.length;i++){
+      const t = safe(labelToTs(stakeLabels[i]));
+      if (t && t >= minT) { startIdx = i; break; }
+    }
+    stakeChart.options.scales.x.min = startIdx;
+    stakeChart.options.scales.x.max = stakeLabels.length - 1;
+    stakeChart.update("none");
+  }
+
+  const stakeScaleBtn = $$("stakeScaleToggle");
+  if (stakeScaleBtn){
+    stakeScaleBtn.addEventListener("click",(e)=>{
+      e.preventDefault();
+      stakeScale = (stakeScale === "log") ? "linear" : "log";
+      stakeScaleBtn.textContent = (stakeScale === "log") ? "LOG" : "LIN";
+      stakeApplyScale();
+    }, { passive:false });
+  }
+
+  const stakeTfSwitch = $$("stakeTfSwitch");
+  if (stakeTfSwitch){
+    stakeTfSwitch.addEventListener("click",(e)=>{
+      const btn = e.target.closest(".tf-btn");
+      if (!btn) return;
+      const tf = btn.dataset.tf || "all";
+      stakeTfSwitch.querySelectorAll(".tf-btn").forEach(b=>b.classList.toggle("active", b===btn));
+      stakeApplyTF(tf);
+    }, { passive:true });
+  }
+
+  /* =========================================================
+     5) REWARDS: TF + LIN/LOG sul chart (rewardScaleToggle + rewardTfSwitch)
+     ========================================================= */
+  let rewardScale = "linear";
+
+  function rewardApplyScale(){
+    if (!rewardChart) return;
+    rewardChart.options.scales.y.type = (rewardScale === "log") ? "logarithmic" : "linear";
+    if (rewardScale === "log"){
+      rewardChart.options.scales.y.min = 0.0000001;
+    } else {
+      rewardChart.options.scales.y.min = undefined;
+    }
+    rewardChart.update("none");
+  }
+
+  function rewardApplyTF(tf){
+    if (!rewardChart) return;
+    const now = Date.now();
+    const w =
+      (tf === "1d") ? 24*60*60*1000 :
+      (tf === "1w") ? 7*24*60*60*1000 :
+      (tf === "1m") ? 30*24*60*60*1000 :
+      0;
+
+    if (!w || !Array.isArray(wdTimes) || wdTimes.length < 2){
+      rewardChart.options.scales.x.min = undefined;
+      rewardChart.options.scales.x.max = undefined;
+      rewardChart.update("none");
+      return;
+    }
+
+    const minT = now - w;
+    let startIdx = 0;
+    for (let i=0;i<wdTimes.length;i++){
+      const t = safe(wdTimes[i] || labelToTs(wdLabels?.[i]));
+      if (t && t >= minT) { startIdx = i; break; }
+    }
+    rewardChart.options.scales.x.min = startIdx;
+    rewardChart.options.scales.x.max = wdTimes.length - 1;
+    rewardChart.update("none");
+  }
+
+  const rewardScaleBtn = $$("rewardScaleToggle");
+  if (rewardScaleBtn){
+    rewardScaleBtn.addEventListener("click",(e)=>{
+      e.preventDefault();
+      rewardScale = (rewardScale === "log") ? "linear" : "log";
+      rewardScaleBtn.textContent = (rewardScale === "log") ? "LOG" : "LIN";
+      rewardApplyScale();
+    }, { passive:false });
+  }
+
+  const rewardTfSwitch = $$("rewardTfSwitch");
+  if (rewardTfSwitch){
+    rewardTfSwitch.addEventListener("click",(e)=>{
+      const btn = e.target.closest(".tf-btn");
+      if (!btn) return;
+      const tf = btn.dataset.tf || "all";
+      rewardTfSwitch.querySelectorAll(".tf-btn").forEach(b=>b.classList.toggle("active", b===btn));
+      rewardApplyTF(tf);
+    }, { passive:true });
+  }
+
+  /* =========================================================
+     6) PRICE CHART: TF + LIN/LOG + 5m
+     - usa Binance REST per timeframes (leggero e affidabile)
+     ========================================================= */
+  let priceTf = "1d";
+  let priceScale = "linear";
+
+  async function fetchPriceTf(tf){
+    if (!navigator.onLine) return null;
+
+    // mapping: più timeframe = meno granularità (miglior performance)
+    let interval = "1m";
+    let limit = 720; // default
+
+    if (tf === "5m"){ interval = "1m"; limit = 10; }          // ultimi 10 minuti per respirare
+    else if (tf === "1d"){ interval = "1m"; limit = 1440; }    // 1 day
+    else if (tf === "1w"){ interval = "15m"; limit = 7*24*4; } // 672
+    else if (tf === "1m"){ interval = "1h"; limit = 24*30; }   // 720
+    else if (tf === "1y"){ interval = "1d"; limit = 365; }
+    else if (tf === "all"){ interval = "1w"; limit = 260; }    // ~5 anni (260 settimane)
+
+    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${limit}`;
+    const d = await fetchJSON(url);
+    if (!Array.isArray(d) || !d.length) return null;
+
+    const labels = d.map(k=>{
+      const t = safe(k[0]);
+      if (interval === "1m" || interval === "15m") return fmtHHMM(t);
+      if (interval === "1h") return fmtMMDD(t);
+      return fmtMMDD(t); // 1d/1w
+    });
+    const data = d.map(k=>safe(k[4]));
+    return { labels, data };
+  }
+
+  function priceApplyScale(){
+    if (!chart) return;
+    chart.options.scales.y.type = (priceScale === "log") ? "logarithmic" : "linear";
+    if (priceScale === "log"){
+      chart.options.scales.y.min = 0.000001;
+    } else {
+      chart.options.scales.y.min = undefined;
+    }
+    chart.update("none");
+  }
+
+  async function priceLoadTf(tf){
+    if (!chart) return;
+    const got = await fetchPriceTf(tf);
+    if (!got) return;
+
+    // aggiorna dati chart
+    chart.data.labels = got.labels;
+    chart.data.datasets[0].data = got.data;
+
+    // per TF diversi da 1d disattiviamo “bootstrap today” perché serie differente
+    chartBootstrappedToday = (tf === "1d");
+    chart.update("none");
+  }
+
+  const priceTfSwitch = $$("priceTfSwitch");
+  if (priceTfSwitch){
+    priceTfSwitch.addEventListener("click", async (e)=>{
+      const btn = e.target.closest(".tf-btn");
+      if (!btn) return;
+      const tf = (btn.dataset.tf || "1d").toLowerCase();
+      priceTfSwitch.querySelectorAll(".tf-btn").forEach(b=>b.classList.toggle("active", b===btn));
+
+      priceTf = tf;
+      await priceLoadTf(tf);
+    }, { passive:true });
+  }
+
+  const priceScaleBtn = $$("priceScaleToggle");
+  if (priceScaleBtn){
+    priceScaleBtn.addEventListener("click",(e)=>{
+      e.preventDefault();
+      priceScale = (priceScale === "log") ? "linear" : "log";
+      priceScaleBtn.textContent = (priceScale === "log") ? "LOG" : "LIN";
+      priceApplyScale();
+    }, { passive:false });
+  }
+
+  const price5mBtn = $$("price5mBtn");
+  if (price5mBtn){
+    price5mBtn.addEventListener("click", async (e)=>{
+      e.preventDefault();
+      // evidenzia “5m” momentaneamente senza introdurre nuovo btn nei TF
+      await priceLoadTf("5m");
+    }, { passive:false });
+  }
+
+  /* =========================================================
+     7) Expand: resize robusto su mobile/desktop (rotate / visualViewport)
+     ========================================================= */
+  function resizeAllCharts(){
+    try{ chart?.resize?.(); }catch{}
+    try{ stakeChart?.resize?.(); }catch{}
+    try{ rewardChart?.resize?.(); }catch{}
+    try{ netWorthChart?.resize?.(); }catch{}
+    try{ aprChart?.resize?.(); }catch{} // se lo aggiungi poi
+  }
+
+  window.addEventListener("resize", ()=>{ resizeAllCharts(); }, { passive:true });
+  window.addEventListener("orientationchange", ()=>{ setTimeout(resizeAllCharts, 250); }, { passive:true });
+  if (window.visualViewport){
+    window.visualViewport.addEventListener("resize", ()=>{ resizeAllCharts(); }, { passive:true });
+  }
+
+  // quando entri/esci fullscreen, Chart.js a volte ha bisogno di un tick extra
+  const _enter = (typeof enterFullscreenCard === "function") ? enterFullscreenCard : null;
+  if (_enter){
+    enterFullscreenCard = function(card){
+      _enter(card);
+      setTimeout(resizeAllCharts, 180);
+      setTimeout(resizeAllCharts, 420);
+    };
+  }
+  const _exit = (typeof exitFullscreenCard === "function") ? exitFullscreenCard : null;
+  if (_exit){
+    exitFullscreenCard = function(){
+      _exit();
+      setTimeout(resizeAllCharts, 180);
+      setTimeout(resizeAllCharts, 420);
+    };
+  }
+
+  /* =========================================================
+     8) Prima applicazione (se i chart sono già creati)
+     ========================================================= */
+  setTimeout(()=>{
+    try{ stakeApplyScale(); }catch{}
+    try{ rewardApplyScale(); }catch{}
+    try{ priceApplyScale(); }catch{}
+    try{ renderEvents && renderEvents(); }catch{}
+    try{ cloudRenderMeta && cloudRenderMeta(); }catch{}
+  }, 900);
+
+})();
 
