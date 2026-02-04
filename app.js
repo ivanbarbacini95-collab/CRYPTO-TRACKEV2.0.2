@@ -1,6 +1,6 @@
 /* =========================================================
    Injective Portfolio • v2.0.2
-   app.js — FULL FILE
+   app.js — FULL FILE (aligned to provided HTML)
    ========================================================= */
 
 /* ================= CONFIG ================= */
@@ -10,11 +10,11 @@ const ACCOUNT_POLL_MS = 2000;
 const REST_SYNC_MS = 60000;
 const CHART_SYNC_MS = 60000;
 
-const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
-const DEFAULT_STAKE_TARGET_MAX = 1000;
-const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
+const STAKE_TARGET_DEFAULT_MAX = 1000;           // default (user can override via range)
+const REWARD_TARGET_DEFAULT_MAX = 0.10;          // default (user can override via range)
+const REWARD_WITHDRAW_THRESHOLD = 0.0002;        // INJ
 
 /* persistence versions */
 const STAKE_LOCAL_VER = 3;
@@ -22,8 +22,12 @@ const REWARD_WD_LOCAL_VER = 2;
 const NW_LOCAL_VER = 2;
 const EV_LOCAL_VER = 1;
 
+/* series limits */
 const NW_MAX_POINTS = 4800;
-const NW_LIVE_WINDOW_MS = 2 * 60 * 1000;
+const SERIES_MAX_POINTS = 2400;
+
+/* Net Worth live window */
+const NW_LIVE_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 
 /* cloud */
 const CLOUD_API = "/api/point";
@@ -37,11 +41,17 @@ const REFRESH_RED_MS = 220;
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
+const nowMs = () => Date.now();
 
 function pad2(n) { return String(n).padStart(2, "0"); }
-function fmtHHMM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
-function fmtHHMMSS(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; }
-
+function fmtHHMM(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function fmtHHMMSS(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
 function tsLabel(ms = Date.now()) { return String(Math.floor(ms)); }
 function labelToTs(lbl) {
   if (lbl == null) return 0;
@@ -50,11 +60,9 @@ function labelToTs(lbl) {
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : 0;
 }
-
-function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
 function setText(id, txt) { const el = $(id); if (el) el.textContent = txt; }
-
+function hasInternet() { return navigator.onLine === true; }
 function fmtSmart(v){
   v = safe(v);
   const av = Math.abs(v);
@@ -66,7 +74,16 @@ function fmtSmart(v){
   return v.toFixed(6);
 }
 
-function hasInternet() { return navigator.onLine === true; }
+/* ================= SAFE FETCH ================= */
+async function fetchJSON(url, opts = {}) {
+  try {
+    const res = await fetch(url, { cache: "no-store", ...opts });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 /* ================= GLOBAL ERROR GUARDS ================= */
 function setStatusError(msg){
@@ -75,19 +92,27 @@ function setStatusError(msg){
   if (statusText) statusText.textContent = msg || "Error";
   if (statusDot) statusDot.style.background = "#ef4444";
 }
-window.addEventListener("error", (e) => { setStatusError("JS Error"); console.error(e?.error || e); });
-window.addEventListener("unhandledrejection", (e) => { setStatusError("Promise Error"); console.error(e?.reason || e); });
+window.addEventListener("error", (e) => {
+  setStatusError("JS Error");
+  console.error("JS Error:", e?.error || e);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  setStatusError("Promise Error");
+  console.error("Promise Error:", e?.reason || e);
+});
 
 /* ================= THEME / MODE ================= */
 const THEME_KEY = "inj_theme";
 const MODE_KEY  = "inj_mode"; // live | refresh
-
 let theme = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
-function axisGridColor() { return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)"; }
-function axisTickColor() { return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)"; }
-
+function axisGridColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
+}
+function axisTickColor() {
+  return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)";
+}
 function applyTheme(t){
   theme = (t === "light") ? "light" : "dark";
   document.body.dataset.theme = theme;
@@ -156,25 +181,13 @@ function refreshConnUI() {
 }
 
 /* ================= UI READY FAILSAFE ================= */
-const tfReady = { d: false, w: false, m: false };
 function setUIReady(force=false){
   const root = $("appRoot");
   if (!root) return;
   if (root.classList.contains("ready")) return;
-  if (!force && !tfReady.d) return;
+  if (!force) { /* keep simple */ }
   root.classList.remove("loading");
   root.classList.add("ready");
-}
-
-/* ================= SAFE FETCH ================= */
-async function fetchJSON(url, opts = {}) {
-  try {
-    const res = await fetch(url, { cache: "no-store", ...opts });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  } catch {
-    return null;
-  }
 }
 
 /* ================= SMOOTH DISPLAY ================= */
@@ -203,7 +216,6 @@ function colorNumber(el, n, o, d) {
     return `<span style="color:${col}">${c}</span>`;
   }).join("");
 }
-
 function colorMoney(el, n, o, decimals = 2){
   if (!el) return;
   n = safe(n); o = safe(o);
@@ -280,18 +292,23 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
 
 /* ================= FLASH EXTREMES ================= */
 const lastExtremes = { d:{low:null,high:null}, w:{low:null,high:null}, m:{low:null,high:null} };
-function flash(el) { if (!el) return; el.classList.remove("flash-yellow"); void el.offsetWidth; el.classList.add("flash-yellow"); }
+function flash(el) {
+  if (!el) return;
+  el.classList.remove("flash-yellow");
+  void el.offsetWidth;
+  el.classList.add("flash-yellow");
+}
 
-/* ================= ADDRESS / SEARCH ================= */
+/* ================= ADDRESS / SEARCH + COPY ================= */
 const searchWrap = $("searchWrap");
 const searchBtn = $("searchBtn");
 const addressInput = $("addressInput");
 const addressDisplay = $("addressDisplay");
-const menuBtn = $("menuBtn");
 const copyAddressBtn = $("copyAddressBtn");
+const menuBtn = $("menuBtn");
 
 let address = localStorage.getItem("inj_address") || "";
-let pendingAddress = address || "";
+let pendingAddress = "";
 
 function setAddressDisplay(addr) {
   if (!addressDisplay) return;
@@ -299,6 +316,20 @@ function setAddressDisplay(addr) {
   addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${shortAddr(addr)}</span>`;
 }
 setAddressDisplay(address);
+
+async function doCopyAddress(){
+  if (!address) return;
+  try{
+    await navigator.clipboard.writeText(address);
+    // mini feedback: swap icon briefly if present
+    if (copyAddressBtn){
+      const prev = copyAddressBtn.textContent;
+      copyAddressBtn.textContent = "✓";
+      setTimeout(()=>{ copyAddressBtn.textContent = prev || "⧉"; }, 900);
+    }
+  } catch {}
+}
+copyAddressBtn?.addEventListener("click", (e)=>{ e.preventDefault(); doCopyAddress(); }, {passive:false});
 
 function openSearch() {
   if (!searchWrap) return;
@@ -315,62 +346,37 @@ function closeSearch() {
 
 if (addressInput) addressInput.value = "";
 
-if (searchBtn) {
-  searchBtn.addEventListener("click", (e) => {
-    e?.preventDefault?.(); e?.stopPropagation?.();
-    if (!searchWrap.classList.contains("open")) openSearch();
-    else addressInput?.focus();
-  }, { passive: false });
-}
+searchBtn?.addEventListener("click", (e) => {
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  if (!searchWrap.classList.contains("open")) openSearch();
+  else addressInput?.focus();
+}, { passive: false });
 
-if (addressInput) {
-  addressInput.addEventListener("focus", () => openSearch(), { passive: true });
-  addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
-  addressInput.addEventListener("keydown", async (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const v = pendingAddress;
-      await commitAddress(v);
-      addressInput.value = "";
-      pendingAddress = "";
-      closeSearch();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      addressInput.value = "";
-      pendingAddress = "";
-      closeSearch();
-    }
-  });
-}
+addressInput?.addEventListener("focus", () => openSearch(), { passive: true });
+addressInput?.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
+
+addressInput?.addEventListener("keydown", async (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const v = pendingAddress;
+    await commitAddress(v);
+    addressInput.value = "";
+    pendingAddress = "";
+    closeSearch();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    addressInput.value = "";
+    pendingAddress = "";
+    closeSearch();
+  }
+});
 
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
   closeSearch();
 }, { passive: true });
-
-/* copy address */
-function showCopyToast(){
-  pushEvent({ kind:"system", title:"Copied", detail:"Wallet address copied.", status:"ok" });
-}
-copyAddressBtn?.addEventListener("click", async (e) => {
-  e.preventDefault();
-  if (!address) return;
-  try{
-    await navigator.clipboard.writeText(address);
-    showCopyToast();
-  } catch {
-    // fallback
-    const ta = document.createElement("textarea");
-    ta.value = address;
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand("copy"); showCopyToast(); } catch {}
-    document.body.removeChild(ta);
-  }
-}, { passive:false });
 
 /* ================= DRAWER MENU ================= */
 const backdrop = $("backdrop");
@@ -382,6 +388,7 @@ const liveIcon = $("liveIcon");
 const modeHint = $("modeHint");
 
 let isDrawerOpen = false;
+
 function openDrawer(){
   isDrawerOpen = true;
   document.body.classList.add("drawer-open");
@@ -396,7 +403,12 @@ function closeDrawer(){
 }
 function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
 
-menuBtn?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleDrawer(); }, { passive:false });
+menuBtn?.addEventListener("click", (e) => {
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  toggleDrawer();
+}, { passive: false });
+
 backdrop?.addEventListener("click", () => closeDrawer(), { passive:true });
 
 document.addEventListener("keydown", (e) => {
@@ -404,17 +416,15 @@ document.addEventListener("keydown", (e) => {
     closeDrawer();
     closeComingSoon();
     exitFullscreenCard();
-    hideRangeModal("stake");
-    hideRangeModal("reward");
   }
 });
 
 themeToggle?.addEventListener("click", (e) => {
-  e.preventDefault();
+  e?.preventDefault?.();
   applyTheme(theme === "dark" ? "light" : "dark");
 }, { passive:false });
 
-/* ================= COMING SOON ================= */
+/* ================= COMING SOON overlay ================= */
 const comingSoon = $("comingSoon");
 const comingTitle = $("comingTitle");
 const comingSub = $("comingSub");
@@ -423,8 +433,8 @@ const comingClose = $("comingClose");
 function pageLabel(key){
   if (key === "home") return "HOME";
   if (key === "market") return "MARKET";
-  if (key === "settings") return "SETTINGS";
   if (key === "tools") return "TOOL’S";
+  if (key === "settings") return "SETTINGS";
   return "PAGE";
 }
 function openComingSoon(pageKey){
@@ -439,18 +449,49 @@ function closeComingSoon(){
   comingSoon.classList.remove("show");
   comingSoon.setAttribute("aria-hidden", "true");
 }
-comingClose?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeComingSoon(); }, { passive:false });
-comingSoon?.addEventListener("click", (e) => { if (e.target === comingSoon) closeComingSoon(); }, { passive:true });
+comingClose?.addEventListener("click", (e) => {
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  closeComingSoon();
+}, { passive:false });
+comingSoon?.addEventListener("click", (e) => {
+  if (e.target === comingSoon) closeComingSoon();
+}, { passive:true });
 
-/* ================= PAGES ================= */
+/* ================= PAGES (Dashboard / Events / Tools / Settings) ================= */
 const pageDashboard = $("pageDashboard");
 const pageEvents = $("pageEvents");
-function showPage(key){
-  pageDashboard?.classList.remove("active");
-  pageEvents?.classList.remove("active");
-  if (key === "events") pageEvents?.classList.add("active");
-  else pageDashboard?.classList.add("active");
+const pageTools = $("pageTools");
+const pageSettings = $("pageSettings");
+const pageHome = $("pageHome");
+const pageMarket = $("pageMarket");
+
+function hideAllPages(){
+  [pageDashboard,pageEvents,pageTools,pageSettings,pageHome,pageMarket].forEach(p => p?.classList.remove("active"));
+  [pageDashboard,pageEvents,pageTools,pageSettings,pageHome,pageMarket].forEach(p => p?.setAttribute("aria-hidden","true"));
 }
+function showPage(key){
+  hideAllPages();
+  closeComingSoon();
+
+  const map = {
+    dashboard: pageDashboard,
+    event: pageEvents,
+    events: pageEvents,
+    tools: pageTools,
+    settings: pageSettings,
+    home: pageHome,
+    market: pageMarket
+  };
+  const p = map[key] || pageDashboard;
+  p?.classList.add("active");
+  p?.setAttribute("aria-hidden","false");
+
+  // page-specific
+  if (p === pageEvents) renderEvents(true);
+  if (p === pageSettings) syncSettingsUI();
+}
+
 function setActivePage(pageKey){
   const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
@@ -463,14 +504,12 @@ drawerNav?.addEventListener("click", (e) => {
   setActivePage(page);
   closeDrawer();
 
-  if (page === "dashboard") {
-    closeComingSoon();
-    showPage("dashboard");
-  } else if (page === "event" || page === "events") {
-    closeComingSoon();
-    showPage("events");
-    renderEvents();
-  } else {
+  if (page === "dashboard") showPage("dashboard");
+  else if (page === "event" || page === "events") showPage("events");
+  else if (page === "tools") showPage("tools");
+  else if (page === "settings") showPage("settings");
+  else {
+    // keep dashboard under overlay
     showPage("dashboard");
     openComingSoon(page);
   }
@@ -497,7 +536,7 @@ function buildExpandedBackdrop(){
 function hideNonChartContent(card){
   const hidden = [];
   const keepSet = new Set();
-  const tools = card.querySelector(".card-tools");
+  const tools = card.querySelector(".card-tools") || card.querySelector(".networth-top");
   if (tools) keepSet.add(tools);
 
   const canvases = card.querySelectorAll("canvas");
@@ -528,6 +567,14 @@ function restoreNonChartContent(card){
   expandedHiddenMap.delete(card);
 }
 
+function resizeAllCharts(){
+  try { priceChart?.resize?.(); } catch {}
+  try { stakeChart?.resize?.(); } catch {}
+  try { rewardChart?.resize?.(); } catch {}
+  try { netWorthChart?.resize?.(); } catch {}
+  try { aprChart?.resize?.(); } catch {}
+}
+
 function enterFullscreenCard(card){
   if (!card) return;
   if (expandedCard) exitFullscreenCard();
@@ -540,15 +587,8 @@ function enterFullscreenCard(card){
   card.classList.add("fullscreen");
   hideNonChartContent(card);
 
-  setTimeout(() => {
-    try { chartPrice?.resize?.(); } catch {}
-    try { stakeChart?.resize?.(); } catch {}
-    try { rewardChart?.resize?.(); } catch {}
-    try { netWorthChart?.resize?.(); } catch {}
-    try { aprChart?.resize?.(); } catch {}
-  }, 120);
+  setTimeout(resizeAllCharts, 180);
 }
-
 function exitFullscreenCard(){
   if (!expandedCard) return;
   restoreNonChartContent(expandedCard);
@@ -556,19 +596,11 @@ function exitFullscreenCard(){
   document.body.classList.remove("card-expanded");
   expandedBackdrop && (expandedBackdrop.style.display = "none");
   expandedCard = null;
-
-  setTimeout(() => {
-    try { chartPrice?.resize?.(); } catch {}
-    try { stakeChart?.resize?.(); } catch {}
-    try { rewardChart?.resize?.(); } catch {}
-    try { netWorthChart?.resize?.(); } catch {}
-    try { aprChart?.resize?.(); } catch {}
-  }, 120);
+  setTimeout(resizeAllCharts, 180);
 }
 
 function bindExpandButtons(){
-  const btns = document.querySelectorAll(".card-expand");
-  btns.forEach(btn => {
+  document.querySelectorAll(".card-expand").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -582,28 +614,42 @@ function bindExpandButtons(){
 
 /* ================= EVENTS SYSTEM ================= */
 let eventsAll = [];
+let eventsUnread = 0;
+
 function evStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_events_v${EV_LOCAL_VER}_${a}` : null;
 }
 function loadEvents(){
   const key = evStoreKey(address);
-  if (!key) { eventsAll = []; return; }
+  if (!key) { eventsAll = []; eventsUnread = 0; renderEventBadge(); return; }
   try{
     const raw = localStorage.getItem(key);
-    if (!raw) { eventsAll = []; return; }
+    if (!raw) { eventsAll = []; eventsUnread = 0; renderEventBadge(); return; }
     const obj = JSON.parse(raw);
-    if (!Array.isArray(obj?.events)) { eventsAll = []; return; }
+    if (!Array.isArray(obj?.events)) { eventsAll = []; eventsUnread = 0; renderEventBadge(); return; }
     eventsAll = obj.events.slice(0, 1200);
-  } catch { eventsAll = []; }
+    eventsUnread = safe(obj?.unread);
+  } catch {
+    eventsAll = [];
+    eventsUnread = 0;
+  }
+  renderEventBadge();
 }
 function saveEvents(){
   const key = evStoreKey(address);
   if (!key) return;
   try{
-    localStorage.setItem(key, JSON.stringify({ v: EV_LOCAL_VER, t: Date.now(), events: eventsAll.slice(0, 1200) }));
+    localStorage.setItem(key, JSON.stringify({
+      v: EV_LOCAL_VER,
+      t: Date.now(),
+      unread: eventsUnread,
+      events: eventsAll.slice(0, 1200)
+    }));
   } catch {}
+  renderEventBadge();
 }
+
 function showToast(ev){
   const host = $("toastHost");
   if (!host) return;
@@ -624,10 +670,15 @@ function showToast(ev){
   `;
 
   host.appendChild(el);
-  setTimeout(() => { try { host.removeChild(el); } catch {} }, 2600);
+
+  setTimeout(() => {
+    try { host.removeChild(el); } catch {}
+  }, 2600);
 }
+
 function pushEvent(ev){
   if (!address) return;
+
   const obj = {
     id: ev.id || (String(Date.now()) + "_" + Math.random().toString(16).slice(2)),
     ts: ev.ts || Date.now(),
@@ -635,62 +686,131 @@ function pushEvent(ev){
     title: ev.title || "Event",
     detail: ev.detail || "",
     dir: ev.dir || null,
-    status: ev.status || "pending"
+    status: ev.status || "ok" // ok|pending|err
   };
+
   eventsAll.unshift(obj);
   eventsAll = eventsAll.slice(0, 1200);
+  eventsUnread += 1;
+
   saveEvents();
-  renderEvents();
+  renderEvents(false);
   showToast(obj);
 
-  if (obj.status === "pending" && obj.kind !== "price") {
+  if (obj.status === "pending") {
     setTimeout(() => {
       const idx = eventsAll.findIndex(x => x.id === obj.id);
       if (idx >= 0) {
         eventsAll[idx].status = hasInternet() ? "ok" : "err";
         saveEvents();
-        renderEvents();
+        renderEvents(false);
       }
     }, 1400);
   }
 }
 
-function renderEvents(){
-  const body = $("eventsTbody");
-  const empty = $("eventsEmpty");
-  if (!body) return;
+function renderEventBadge(){
+  const badge = $("eventBadge");
+  if (!badge) return;
+  const n = Math.max(0, Math.floor(eventsUnread));
+  badge.hidden = n <= 0;
+  badge.textContent = String(n);
+}
 
-  body.innerHTML = "";
-  const list = eventsAll || [];
+let eventsPageIndex = 0;
+const EVENTS_PER_PAGE = 18;
+
+function getFilteredEvents(){
+  const cat = ($("eventsCategory")?.value || "all").toLowerCase();
+  if (cat === "all") return eventsAll;
+
+  // simple mapping
+  return eventsAll.filter(ev => {
+    const k = (ev.kind || "").toLowerCase();
+    if (cat === "rewards") return k.includes("reward") || ev.title.toLowerCase().includes("reward");
+    if (cat === "apr") return k.includes("apr") || ev.title.toLowerCase().includes("apr");
+    if (cat === "price") return k.includes("price") || ev.title.toLowerCase().includes("price");
+    if (cat === "exchange") return k.includes("exchange");
+    if (cat === "system") return k.includes("system") || k.includes("info");
+    return true;
+  });
+}
+
+function renderEvents(markRead){
+  const tbody = $("eventsTbody");
+  const empty = $("eventsEmpty");
+  const pagesEl = $("eventsPages");
+  if (!tbody) return;
+
+  if (markRead) {
+    eventsUnread = 0;
+    saveEvents();
+  }
+
+  const list = getFilteredEvents();
 
   if (empty) empty.style.display = list.length ? "none" : "block";
-  if (!list.length) return;
+  tbody.innerHTML = "";
 
-  for (const ev of list){
+  const totalPages = Math.max(1, Math.ceil(list.length / EVENTS_PER_PAGE));
+  eventsPageIndex = clamp(eventsPageIndex, 0, totalPages - 1);
+
+  const start = eventsPageIndex * EVENTS_PER_PAGE;
+  const slice = list.slice(start, start + EVENTS_PER_PAGE);
+
+  for (const ev of slice){
     const tr = document.createElement("tr");
     const dt = new Date(ev.ts || Date.now());
     const when = `${dt.toLocaleDateString()} ${fmtHHMMSS(ev.ts || Date.now())}`;
-    const kind = String(ev.kind || "info").toUpperCase();
-    const st = ev.status === "ok" ? "OK" : ev.status === "err" ? "ERR" : "…";
+
+    const status = (ev.status || "ok");
+    const statusTxt = status === "ok" ? "OK" : status === "err" ? "ERR" : "PENDING";
+    const kind = (ev.kind || "info").toUpperCase();
 
     tr.innerHTML = `
       <td>${kind}</td>
       <td style="white-space:nowrap">${when}</td>
       <td>${ev.detail || ev.title || ""}</td>
-      <td style="font-weight:900">${st}</td>
+      <td>${statusTxt}</td>
     `;
-    body.appendChild(tr);
+    tbody.appendChild(tr);
   }
+
+  // pager
+  if (pagesEl){
+    pagesEl.textContent = `${eventsPageIndex + 1} / ${totalPages}`;
+  }
+
+  $("eventsPrev")?.toggleAttribute("disabled", eventsPageIndex <= 0);
+  $("eventsNext")?.toggleAttribute("disabled", eventsPageIndex >= totalPages - 1);
 }
 
 $("eventsClearBtn")?.addEventListener("click", (e) => {
   e.preventDefault();
   eventsAll = [];
+  eventsUnread = 0;
+  eventsPageIndex = 0;
   saveEvents();
-  renderEvents();
+  renderEvents(true);
 }, { passive:false });
 
-/* ================= MODE SWITCH ================= */
+$("eventsPrev")?.addEventListener("click", () => { eventsPageIndex--; renderEvents(false); }, { passive:true });
+$("eventsNext")?.addEventListener("click", () => { eventsPageIndex++; renderEvents(false); }, { passive:true });
+
+$("eventsFilterBtn")?.addEventListener("click", () => {
+  const box = $("eventsFilters");
+  if (!box) return;
+  const hidden = box.getAttribute("aria-hidden") === "true";
+  box.setAttribute("aria-hidden", hidden ? "false" : "true");
+  box.style.display = hidden ? "block" : "none";
+}, { passive:true });
+
+$("eventsCategory")?.addEventListener("change", () => {
+  eventsPageIndex = 0;
+  renderEvents(false);
+}, { passive:true });
+
+/* ================= MODE SWITCH + TIMERS ================= */
 let accountPollTimer = null;
 let restSyncTimer = null;
 let chartSyncTimer = null;
@@ -708,8 +828,8 @@ function startAllTimers(){
   stopAllTimers();
   accountPollTimer = setInterval(loadAccount, ACCOUNT_POLL_MS);
   restSyncTimer = setInterval(loadCandleSnapshot, REST_SYNC_MS);
-  chartSyncTimer = setInterval(loadPriceTF, CHART_SYNC_MS);
-  ensureChartTimer = setInterval(ensureChartBootstrapped, 1500);
+  chartSyncTimer = setInterval(loadPriceChartSelected, CHART_SYNC_MS);
+  ensureChartTimer = setInterval(ensurePriceChartBootstrapped, 1500);
   cloudPullTimer = setInterval(() => { if (address) cloudPull(); }, CLOUD_PULL_INTERVAL_MS);
 }
 
@@ -724,7 +844,7 @@ async function refreshLoadAllOnce(){
 
   try{
     await loadCandleSnapshot(true);
-    await loadPriceTF(true);
+    await loadPriceChartSelected(true);
     if (address) await loadAccount(true);
     refreshLoaded = true;
     modeLoading = false;
@@ -769,14 +889,106 @@ function setMode(isLive){
     startTradeWS();
     startKlineWS();
     loadCandleSnapshot();
-    loadPriceTF();
+    loadPriceChartSelected();
     if (address) loadAccount();
     startAllTimers();
     refreshConnUI();
   }
+
+  syncSettingsUI();
 }
 
-liveToggle?.addEventListener("click", (e) => { e.preventDefault(); setMode(!liveMode); }, { passive:false });
+liveToggle?.addEventListener("click", (e) => {
+  e?.preventDefault?.();
+  setMode(!liveMode);
+}, { passive:false });
+
+/* ================= PULL TO REFRESH (REFRESH mode only, mobile) ================= */
+let ptr = { startY: 0, pulling: false, shown: false };
+let ptrEl = null;
+
+function ensurePullSpinner(){
+  if (ptrEl) return ptrEl;
+  const el = document.createElement("div");
+  el.id = "pullSpinner";
+  el.style.position = "fixed";
+  el.style.top = "10px";
+  el.style.left = "50%";
+  el.style.transform = "translateX(-50%)";
+  el.style.zIndex = "160";
+  el.style.width = "38px";
+  el.style.height = "38px";
+  el.style.borderRadius = "999px";
+  el.style.border = "3px solid rgba(250,204,21,.25)";
+  el.style.borderTopColor = "rgba(250,204,21,.95)";
+  el.style.display = "none";
+  el.style.boxShadow = "0 16px 70px rgba(0,0,0,.45)";
+  el.style.background = "rgba(17,28,47,.65)";
+  el.style.backdropFilter = "blur(8px)";
+  el.style.animation = "spin 1s linear infinite";
+  const st = document.createElement("style");
+  st.textContent = `@keyframes spin{to{transform:translateX(-50%) rotate(360deg)}}`;
+  document.head.appendChild(st);
+  document.body.appendChild(el);
+  ptrEl = el;
+  return el;
+}
+function showPullSpinner(on){
+  const el = ensurePullSpinner();
+  el.style.display = on ? "block" : "none";
+}
+function initPullToRefresh(){
+  let touchId = null;
+
+  window.addEventListener("touchstart", (e) => {
+    if (liveMode) return;
+    if (!hasInternet()) return;
+    if (document.body.classList.contains("drawer-open")) return;
+    if (document.body.classList.contains("card-expanded")) return;
+
+    const atTop = (window.scrollY || document.documentElement.scrollTop || 0) <= 2;
+    if (!atTop) return;
+
+    const t = e.touches?.[0];
+    if (!t) return;
+    touchId = t.identifier;
+    ptr.startY = t.clientY;
+    ptr.pulling = true;
+    ptr.shown = false;
+  }, { passive: true });
+
+  window.addEventListener("touchmove", (e) => {
+    if (!ptr.pulling) return;
+    const t = [...(e.touches || [])].find(x => x.identifier === touchId) || e.touches?.[0];
+    if (!t) return;
+    const dy = t.clientY - ptr.startY;
+    if (dy > 85 && !ptr.shown) {
+      ptr.shown = true;
+      showPullSpinner(true);
+    }
+  }, { passive: true });
+
+  window.addEventListener("touchend", async () => {
+    if (!ptr.pulling) return;
+    const doRefresh = ptr.shown;
+    ptr.pulling = false;
+    ptr.shown = false;
+
+    if (!doRefresh) return;
+    showPullSpinner(true);
+    try{
+      await refreshLoadAllOnce();
+      pushEvent({ kind:"system", title:"Refresh", detail:"Data refreshed (REFRESH mode).", status:"ok" });
+    } finally {
+      setTimeout(() => showPullSpinner(false), 550);
+    }
+  }, { passive: true });
+
+  window.addEventListener("touchcancel", () => {
+    ptr.pulling = false; ptr.shown = false;
+    showPullSpinner(false);
+  }, { passive: true });
+}
 
 /* ================= STATE ================= */
 let targetPrice = 0;
@@ -789,6 +1001,7 @@ const candle = {
   w: { t: 0, open: 0, high: 0, low: 0 },
   m: { t: 0, open: 0, high: 0, low: 0 },
 };
+const tfReady = { d: false, w: false, m: false };
 
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
@@ -803,10 +1016,10 @@ function stopAllSockets(){
   if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; }
   if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; }
 }
-
-function clearTradeRetry() { if (tradeRetryTimer) { clearTimeout(tradeRetryTimer); tradeRetryTimer = null; } }
-function scheduleTradeRetry() { clearTradeRetry(); tradeRetryTimer = setTimeout(() => { if (liveMode) startTradeWS(); }, 1200); }
-
+function scheduleTradeRetry() {
+  if (tradeRetryTimer) clearTimeout(tradeRetryTimer);
+  tradeRetryTimer = setTimeout(() => { if (liveMode) startTradeWS(); }, 1200);
+}
 function startTradeWS() {
   if (!liveMode) return;
   try { wsTrade?.close(); } catch {}
@@ -821,7 +1034,6 @@ function startTradeWS() {
     wsTradeOnline = true;
     modeLoading = address ? !accountOnline : false;
     refreshConnUI();
-    clearTradeRetry();
   };
   wsTrade.onclose = () => { wsTradeOnline = false; refreshConnUI(); scheduleTradeRetry(); };
   wsTrade.onerror = () => { wsTradeOnline = false; refreshConnUI(); try { wsTrade.close(); } catch {} scheduleTradeRetry(); };
@@ -837,12 +1049,15 @@ function startTradeWS() {
     if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
     if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
     if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
+
+    // live update for price chart when tf=1d (1m stream)
   };
 }
 
-function clearKlineRetry() { if (klineRetryTimer) { clearTimeout(klineRetryTimer); klineRetryTimer = null; } }
-function scheduleKlineRetry() { clearKlineRetry(); klineRetryTimer = setTimeout(() => { if (liveMode) startKlineWS(); }, 1200); }
-
+function scheduleKlineRetry() {
+  if (klineRetryTimer) clearTimeout(klineRetryTimer);
+  klineRetryTimer = setTimeout(() => { if (liveMode) startKlineWS(); }, 1200);
+}
 function applyKline(intervalKey, k) {
   const t = safe(k.t);
   const o = safe(k.o);
@@ -859,7 +1074,6 @@ function applyKline(intervalKey, k) {
     }
   }
 }
-
 function startKlineWS() {
   if (!liveMode) return;
   try { wsKline?.close(); } catch {}
@@ -881,7 +1095,6 @@ function startKlineWS() {
     wsKlineOnline = true;
     modeLoading = address ? !accountOnline : false;
     refreshConnUI();
-    clearKlineRetry();
   };
   wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
   wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
@@ -895,8 +1108,7 @@ function startKlineWS() {
     if (!k) return;
 
     if (stream.includes("@kline_1m")) {
-      // keep 1D price chart live-updated when TF=1D
-      updatePriceFrom1mKline(k);
+      updatePriceChartFrom1mKline(k);
       return;
     }
 
@@ -908,7 +1120,7 @@ function startKlineWS() {
   };
 }
 
-/* ================= ACCOUNT + VALIDATOR ================= */
+/* ================= ACCOUNT (Injective LCD) + VALIDATOR ================= */
 let validator = { addr: "", moniker: "", status: "unknown" };
 let validatorLoading = false;
 
@@ -916,7 +1128,7 @@ function setValidatorUI(state){
   const nameEl = $("validatorName");
   const dotEl  = $("validatorDot");
 
-  if (nameEl) nameEl.textContent = validator.moniker || "Validator";
+  if (nameEl) nameEl.textContent = validator.moniker || "—";
   if (!dotEl) return;
 
   dotEl.style.background = "#f59e0b";
@@ -929,9 +1141,13 @@ function setValidatorUI(state){
     dotEl.style.background = "#f59e0b";
     return;
   }
-  if (validator.status === "bonded" || validator.status === "active") dotEl.style.background = "#22c55e";
-  else if (validator.status === "unbonded" || validator.status === "jailed") dotEl.style.background = "#ef4444";
-  else dotEl.style.background = "#f59e0b";
+  if (validator.status === "bonded" || validator.status === "active") {
+    dotEl.style.background = "#22c55e";
+  } else if (validator.status === "unbonded" || validator.status === "jailed") {
+    dotEl.style.background = "#ef4444";
+  } else {
+    dotEl.style.background = "#f59e0b";
+  }
 }
 
 async function fetchValidatorInfo(valAddr){
@@ -1006,6 +1222,7 @@ async function loadAccount(isRefresh=false) {
 
   apr = safe(i.inflation) * 100;
 
+  // validator (first delegation)
   const valAddr = del?.[0]?.delegation?.validator_address || "";
   if (valAddr && valAddr !== validator.addr) {
     validator.addr = valAddr;
@@ -1017,14 +1234,23 @@ async function loadAccount(isRefresh=false) {
     setValidatorUI("ready");
   }
 
+  // series updates
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
 
+  // net worth point
   recordNetWorthPoint();
+
+  // APR series
+  recordAprPoint(apr);
+
+  // estimates
+  updateRewardEstimates();
+
   setUIReady(true);
 }
 
-/* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
+/* ================= BINANCE REST: snapshot 1D/1W/1M ================= */
 async function loadCandleSnapshot(isRefresh=false) {
   if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
@@ -1060,22 +1286,19 @@ async function loadCandleSnapshot(isRefresh=false) {
   setUIReady(true);
 }
 
-/* ================= PRICE CHART (TF + LIN/LOG + 5m) ================= */
-let chartPrice = null;
-let priceLabelsAll = [];
-let priceDataAll = [];
-let priceTimesAll = [];
-let priceTF = "1d";          // 1d|1w|1m|1y|all
-let priceScale = "linear";   // linear|log
-let price5mView = false;
-
+/* ================= PRICE CHART (multi TF) ================= */
+let priceChart = null;
+let priceTf = "1d";          // 1d | 1w | 1m | 1y | all
+let priceScale = "linear";   // linear | log
+let priceLastOpenTime = 0;
+let priceChartBoot = false;
 let hoverActive = false;
 let hoverIndex = null;
 let pinnedIndex = null;
 let isPanning = false;
 
-const verticalLinePlugin = {
-  id: "verticalLinePlugin",
+const priceVerticalLinePlugin = {
+  id: "priceVerticalLinePlugin",
   afterDraw(ch) {
     if (!hoverActive || hoverIndex == null) return;
     const meta = ch.getDatasetMeta(0);
@@ -1093,10 +1316,43 @@ const verticalLinePlugin = {
   }
 };
 
+const priceLastDotPlugin = {
+  id: "priceLastDotPlugin",
+  afterDatasetsDraw(ch){
+    const ds = ch.data.datasets?.[0];
+    if (!ds) return;
+    const meta = ch.getDatasetMeta(0);
+    const pts = meta?.data || [];
+    if (!pts.length) return;
+    const el = pts[pts.length - 1];
+    if (!el) return;
+
+    const t = Date.now();
+    const pulse = 0.35 + 0.65 * Math.abs(Math.sin(t / 320));
+    const ctx = ch.ctx;
+    ctx.save();
+    ctx.shadowColor = `rgba(250,204,21,${0.35 * pulse})`;
+    ctx.shadowBlur = 10;
+
+    ctx.beginPath();
+    ctx.arc(el.x, el.y, 6.3, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250,204,21,${0.18 * pulse})`;
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(el.x, el.y, 3.0, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250,204,21,${0.95 * pulse})`;
+    ctx.fill();
+
+    ctx.restore();
+  }
+};
+
 function updatePinnedOverlay() {
   const overlay = $("chartOverlay");
   const chartEl = $("chartPrice");
-  if (!overlay || !chartEl || !chartPrice) return;
+  if (!overlay || !chartEl || !priceChart) return;
 
   if (pinnedIndex == null) {
     overlay.classList.remove("show");
@@ -1104,8 +1360,8 @@ function updatePinnedOverlay() {
     return;
   }
 
-  const ds = chartPrice.data.datasets?.[0]?.data || [];
-  const lbs = chartPrice.data.labels || [];
+  const ds = priceChart.data.datasets?.[0]?.data || [];
+  const lbs = priceChart.data.labels || [];
   if (!ds.length || !lbs.length) {
     overlay.classList.remove("show");
     chartEl.textContent = "--";
@@ -1130,6 +1386,12 @@ function updatePinnedOverlay() {
 
   chartEl.textContent = `${label} • $${price.toFixed(4)}`;
   overlay.classList.add("show");
+}
+
+function applyPriceChartScale(){
+  if (!priceChart) return;
+  priceChart.options.scales.y.type = (priceScale === "log") ? "logarithmic" : "linear";
+  priceChart.update("none");
 }
 
 function initPriceChart() {
@@ -1165,7 +1427,7 @@ function initPriceChart() {
     }
   } : {};
 
-  chartPrice = new Chart(canvas, {
+  priceChart = new Chart(canvas, {
     type: "line",
     data: {
       labels: [],
@@ -1177,7 +1439,9 @@ function initPriceChart() {
         pointRadius: 0,
         tension: 0.3,
         cubicInterpolationMode: "monotone",
-        spanGaps: true
+        spanGaps: true,
+        borderWidth: 2,
+        clip: { left: 0, top: 0, right: 22, bottom: 0 }
       }]
     },
     options: {
@@ -1193,99 +1457,30 @@ function initPriceChart() {
       scales: {
         x: { display: false },
         y: {
-          type: priceScale === "log" ? "logarithmic" : "linear",
+          type: (priceScale === "log") ? "logarithmic" : "linear",
           ticks: { color: axisTickColor() },
           grid: { color: axisGridColor() }
         }
       }
     },
-    plugins: [verticalLinePlugin]
+    plugins: [priceVerticalLinePlugin, priceLastDotPlugin]
   });
 
-  setupPriceInteractions();
+  setupPriceChartInteractions();
 }
 
-function priceTFConfig(tf){
-  // returns { interval, limit }
-  if (tf === "1d") return { interval:"1m", limit: 1440 };
-  if (tf === "1w") return { interval:"15m", limit: 7*24*4 };   // 672
-  if (tf === "1m") return { interval:"1h", limit: 30*24 };     // 720
-  if (tf === "1y") return { interval:"4h", limit: 365*6 };     // 2190 -> binance max 1000 per call, we cap later
-  return { interval:"1d", limit: 1000 }; // all
-}
-
-async function fetchKlines(interval, limit){
-  const cap = Math.min(1000, Math.max(1, Math.floor(limit)));
-  const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${cap}`;
-  const d = await fetchJSON(url);
-  return Array.isArray(d) ? d : [];
-}
-
-function buildPriceSeriesFromKlines(kl){
-  const times = kl.map(x => safe(x[0]));
-  const data = kl.map(x => safe(x[4]));
-  const labels = times.map(t => fmtHHMM(t));
-  return { times, data, labels };
-}
-
-function applyPriceView(){
-  if (!chartPrice) initPriceChart();
-  if (!chartPrice) return;
-
-  // filter 5m view: only when TF=1d and interval is 1m
-  let labels = priceLabelsAll.slice();
-  let data = priceDataAll.slice();
-  let times = priceTimesAll.slice();
-
-  if (price5mView && priceTF === "1d" && data.length > 0){
-    const n = data.length;
-    const from = Math.max(0, n - 5);
-    labels = labels.slice(from);
-    data = data.slice(from);
-    times = times.slice(from);
-  }
-
-  chartPrice.data.labels = labels;
-  chartPrice.data.datasets[0].data = data;
-  chartPrice.options.scales.y.type = (priceScale === "log") ? "logarithmic" : "linear";
-  chartPrice.update("none");
-}
-
-async function loadPriceTF(isRefresh=false){
-  if (!isRefresh && !liveMode) return;
-  if (!hasInternet()) return;
-
-  const cfg = priceTFConfig(priceTF);
-  let kl = await fetchKlines(cfg.interval, cfg.limit);
-
-  // for 1y we may want more than 1000 points: we keep last 1000 (ok for now)
-  if (!kl.length) return;
-
-  const { times, data, labels } = buildPriceSeriesFromKlines(kl);
-  priceTimesAll = times;
-  priceDataAll = data;
-  priceLabelsAll = labels;
-
-  // update targetPrice on first load
-  const last = safe(data[data.length - 1]);
-  if (!targetPrice && last) targetPrice = last;
-
-  applyPriceView();
-  setUIReady(true);
-}
-
-function setupPriceInteractions() {
+function setupPriceChartInteractions() {
   const canvas = $("priceChart");
-  if (!canvas || !chartPrice) return;
+  if (!canvas || !priceChart) return;
 
   const getIndexFromEvent = (evt) => {
-    const points = chartPrice.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
+    const points = priceChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
     if (!points || !points.length) return null;
     return points[0].index;
   };
 
   const handleMove = (evt) => {
-    if (!chartPrice) return;
+    if (!priceChart) return;
     if (isPanning) return;
 
     const idx = getIndexFromEvent(evt);
@@ -1296,7 +1491,7 @@ function setupPriceInteractions() {
     pinnedIndex = idx;
 
     updatePinnedOverlay();
-    chartPrice.update("none");
+    priceChart.update("none");
   };
 
   const handleLeave = () => {
@@ -1304,7 +1499,7 @@ function setupPriceInteractions() {
     hoverIndex = null;
     pinnedIndex = null;
     updatePinnedOverlay();
-    if (chartPrice) chartPrice.update("none");
+    if (priceChart) priceChart.update("none");
   };
 
   canvas.addEventListener("mousemove", handleMove, { passive: true });
@@ -1316,68 +1511,154 @@ function setupPriceInteractions() {
   canvas.addEventListener("touchcancel", handleLeave, { passive: true });
 }
 
-function updatePriceFrom1mKline(k) {
-  // live update only when TF is 1d and not in refresh mode
+function binanceIntervalForTf(tf){
+  if (tf === "1d") return "1m";
+  if (tf === "1w") return "15m";
+  if (tf === "1m") return "1h";
+  if (tf === "1y") return "4h";
+  return "1d"; // all
+}
+
+function rangeStartForTf(tf){
+  const now = Date.now();
+  if (tf === "1d") return now - 1 * 24 * 60 * 60 * 1000;
+  if (tf === "1w") return now - 7 * 24 * 60 * 60 * 1000;
+  if (tf === "1m") return now - 30 * 24 * 60 * 60 * 1000;
+  if (tf === "1y") return now - 365 * 24 * 60 * 60 * 1000;
+  if (tf === "all") return now - 2000 * 24 * 60 * 60 * 1000; // ~5.5y (enough)
+  return now - 24 * 60 * 60 * 1000;
+}
+
+async function fetchKlinesRange(tf){
+  const interval = binanceIntervalForTf(tf);
+  const startTime = rangeStartForTf(tf);
+  const endTime = Date.now();
+
+  // Binance max 1000 per request
+  const out = [];
+  let cursor = startTime;
+
+  while (cursor < endTime && out.length < 6000) {
+    const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=1000&startTime=${cursor}&endTime=${endTime}`;
+    const d = await fetchJSON(url);
+    if (!Array.isArray(d) || !d.length) break;
+
+    out.push(...d);
+
+    const lastOpenTime = safe(d[d.length - 1][0]);
+    if (!lastOpenTime) break;
+    cursor = lastOpenTime + 1;
+
+    if (d.length < 1000) break;
+  }
+
+  return out;
+}
+
+function setPriceTfButtons(){
+  const wrap = $("priceTfSwitch");
+  if (!wrap) return;
+  wrap.querySelectorAll(".tf-btn").forEach(b => {
+    b.classList.toggle("active", (b.dataset.tf === priceTf));
+  });
+}
+
+async function loadPriceChartSelected(isRefresh=false){
+  if (!isRefresh && !liveMode) return;
+  if (!hasInternet()) return;
+
+  if (!priceChart) initPriceChart();
+  if (!priceChart) return;
+
+  const kl = await fetchKlinesRange(priceTf);
+  if (!kl.length) return;
+
+  const labels = kl.map(k => fmtHHMM(safe(k[0])));
+  const data   = kl.map(k => safe(k[4]));
+
+  priceChart.data.labels = labels;
+  priceChart.data.datasets[0].data = data;
+
+  // keep last open time for 1m live update
+  priceLastOpenTime = safe(kl[kl.length - 1][0]) || 0;
+
+  // seed targetPrice
+  const lastClose = safe(kl[kl.length - 1][4]);
+  if (!targetPrice && lastClose) targetPrice = lastClose;
+
+  applyPriceChartScale();
+  priceChart.update("none");
+
+  priceChartBoot = true;
+  setPriceTfButtons();
+  setUIReady(true);
+}
+
+async function ensurePriceChartBootstrapped(){
   if (!liveMode) return;
-  if (priceTF !== "1d") return;
-  if (!chartPrice || !priceTimesAll.length) return;
+  if (priceChartBoot) return;
+  await loadPriceChartSelected();
+}
+
+function updatePriceChartFrom1mKline(k){
+  // Only update live chart when tf=1d and interval is 1m
+  if (!liveMode) return;
+  if (!priceChart || !priceChartBoot) return;
+  if (priceTf !== "1d") return;
 
   const openTime = safe(k.t);
   const close = safe(k.c);
   if (!openTime || !close) return;
 
-  const lastT = safe(priceTimesAll[priceTimesAll.length - 1]);
-  if (openTime === lastT){
-    priceDataAll[priceDataAll.length - 1] = close;
-    priceLabelsAll[priceLabelsAll.length - 1] = fmtHHMM(openTime);
-  } else if (openTime > lastT){
-    priceTimesAll.push(openTime);
-    priceDataAll.push(close);
-    priceLabelsAll.push(fmtHHMM(openTime));
-    while (priceDataAll.length > DAY_MINUTES){ priceTimesAll.shift(); priceDataAll.shift(); priceLabelsAll.shift(); }
-  } else {
+  if (priceLastOpenTime === openTime) {
+    const idx = priceChart.data.datasets[0].data.length - 1;
+    if (idx >= 0) {
+      priceChart.data.datasets[0].data[idx] = close;
+      priceChart.update("none");
+    }
     return;
   }
 
-  applyPriceView();
+  priceLastOpenTime = openTime;
+  priceChart.data.labels.push(fmtHHMM(openTime));
+  priceChart.data.datasets[0].data.push(close);
+
+  // cap to reasonable size for 1d
+  while (priceChart.data.labels.length > 1600) priceChart.data.labels.shift();
+  while (priceChart.data.datasets[0].data.length > 1600) priceChart.data.datasets[0].data.shift();
+
+  priceChart.update("none");
 }
 
-function bindPriceTFButtons(){
-  const wrap = $("priceTfSwitch");
-  if (!wrap) return;
-  wrap.addEventListener("click", async (e) => {
-    const btn = e.target?.closest(".tf-btn");
-    if (!btn) return;
-    const tf = btn.dataset.tf || "1d";
-    if (!["1d","1w","1m","1y","all"].includes(tf)) return;
+/* ================= PRICE CHART UI CONTROLS ================= */
+$("priceTfSwitch")?.addEventListener("click", async (e) => {
+  const btn = e.target?.closest(".tf-btn");
+  if (!btn) return;
+  const tf = btn.dataset.tf || "1d";
+  if (!["1d","1w","1m","1y","all"].includes(tf)) return;
+  priceTf = tf;
+  priceChartBoot = false;
+  await loadPriceChartSelected(true);
+}, { passive:true });
 
-    priceTF = tf;
-    price5mView = false;
-    const b5 = $("price5mBtn");
-    if (b5) b5.classList.remove("active");
+$("priceScaleToggle")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  priceScale = (priceScale === "log") ? "linear" : "log";
+  const b = $("priceScaleToggle");
+  if (b) b.textContent = (priceScale === "log") ? "LOG" : "LIN";
+  applyPriceChartScale();
+}, { passive:false });
 
-    wrap.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
-    await loadPriceTF(true);
-  }, { passive:true });
+$("price5mBtn")?.addEventListener("click", async (e) => {
+  e.preventDefault();
+  // "5m" shortcut: use 1w chart with 15m would not be 5m; so we load 1d but later you can refine
+  priceTf = "1d";
+  priceChartBoot = false;
+  await loadPriceChartSelected(true);
+  pushEvent({ kind:"system", title:"Price Chart", detail:"Loaded 1D (closest live mode).", status:"ok" });
+}, { passive:false });
 
-  $("priceScaleToggle")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    priceScale = (priceScale === "log") ? "linear" : "log";
-    const b = $("priceScaleToggle");
-    if (b) b.textContent = (priceScale === "log") ? "LOG" : "LIN";
-    applyPriceView();
-  }, { passive:false });
-
-  $("price5mBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    price5mView = !price5mView;
-    const b = $("price5mBtn");
-    if (b) b.classList.toggle("active", price5mView);
-    applyPriceView();
-  }, { passive:false });
-}
-
-/* ================= STAKE CHART (TF + LIN/LOG) ================= */
+/* ================= STAKE SERIES (persist) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -1386,26 +1667,18 @@ let stakeTypes = [];
 let lastStakeRecordedRounded = null;
 let stakeBaselineCaptured = false;
 
-let stakeTf = "all";          // all|1d|1w|1m
-let stakeScale = "linear";    // linear|log
-
-const STAKE_TARGET_KEY = "inj_stake_target_max";
-function getStakeTargetMax(){
-  const v = safe(localStorage.getItem(STAKE_TARGET_KEY));
-  return v > 0 ? v : DEFAULT_STAKE_TARGET_MAX;
-}
-function setStakeTargetMax(v){
-  v = safe(v);
-  if (!v) localStorage.removeItem(STAKE_TARGET_KEY);
-  else localStorage.setItem(STAKE_TARGET_KEY, String(v));
-}
+let stakeTf = "all";
+let stakeScale = "linear";
 
 function stakeStoreKey(addr) {
   const a = (addr || "").trim();
   return a ? `inj_stake_series_v${STAKE_LOCAL_VER}_${a}` : null;
 }
-function clampArray(arr, max) { if (!Array.isArray(arr)) return []; return arr.length <= max ? arr : arr.slice(arr.length - max); }
-
+function clampArray(arr, max) {
+  if (!Array.isArray(arr)) return [];
+  if (arr.length <= max) return arr;
+  return arr.slice(arr.length - max);
+}
 function saveStakeSeriesLocal() {
   const key = stakeStoreKey(address);
   if (!key) return;
@@ -1436,7 +1709,6 @@ function loadStakeSeriesLocal() {
     stakeLabels = stakeLabels.slice(0, n);
     stakeMoves  = stakeMoves.slice(0, n);
     stakeTypes  = stakeTypes.slice(0, n);
-
     while (stakeMoves.length < n) stakeMoves.push(0);
     while (stakeTypes.length < n) stakeTypes.push("Stake update");
 
@@ -1448,33 +1720,54 @@ function loadStakeSeriesLocal() {
   }
 }
 
-function stakeWindowMs(tf){
-  if (tf === "1d") return 24*60*60*1000;
-  if (tf === "1w") return 7*24*60*60*1000;
-  if (tf === "1m") return 30*24*60*60*1000;
-  return 10*365*24*60*60*1000;
-}
-function buildStakeView(){
+function stakeViewByTf(){
   const now = Date.now();
-  const minT = (stakeTf === "all") ? 0 : (now - stakeWindowMs(stakeTf));
-  const L = [], D = [], M = [], T = [];
-  for (let i=0;i<stakeLabels.length;i++){
-    const ts = labelToTs(stakeLabels[i]);
-    if (!ts) continue;
-    if (ts < minT) continue;
-    L.push(stakeLabels[i]);
-    D.push(safe(stakeData[i]));
-    M.push(safe(stakeMoves[i]));
-    T.push(String(stakeTypes[i] || "Stake update"));
+  const ms = stakeTf === "1d" ? 86400000 : stakeTf === "1w" ? 7*86400000 : stakeTf === "1m" ? 30*86400000 : 1e18;
+  const minT = (stakeTf === "all") ? 0 : (now - ms);
+
+  const labels = [];
+  const data = [];
+  const moves = [];
+  const types = [];
+  for (let i=0;i<stakeData.length;i++){
+    const t = labelToTs(stakeLabels[i]);
+    if (!t || t < minT) continue;
+    labels.push(stakeLabels[i]);
+    data.push(safe(stakeData[i]));
+    moves.push(safe(stakeMoves[i]));
+    types.push(stakeTypes[i] || "Stake update");
   }
-  return { labels:L, data:D, moves:M, types:T };
+  return { labels, data, moves, types };
 }
+
+const stakeLastDotPlugin = {
+  id: "stakeLastDotPlugin",
+  afterDatasetsDraw(ch){
+    const ds = ch.data.datasets?.[0];
+    if (!ds) return;
+    const meta = ch.getDatasetMeta(0);
+    const pts = meta?.data || [];
+    if (!pts.length) return;
+    const el = pts[pts.length - 1];
+    if (!el) return;
+
+    const t = Date.now();
+    const pulse = 0.35 + 0.65 * Math.abs(Math.sin(t / 320));
+    const ctx = ch.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(el.x, el.y, 3.1, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250,204,21,${0.95 * pulse})`;
+    ctx.fill();
+    ctx.restore();
+  }
+};
 
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas || !window.Chart) return;
 
-  const view = buildStakeView();
+  const view = stakeViewByTf();
 
   stakeChart = new Chart(canvas, {
     type: "line",
@@ -1488,83 +1781,1712 @@ function initStakeChart() {
         tension: 0.25,
         cubicInterpolationMode: "monotone",
         spanGaps: true,
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        pointBackgroundColor: (ctx) => (view.moves[ctx.dataIndex] || 0) < 0 ? "#ef4444" : "#22c55e",
-        pointBorderColor: (ctx) => (view.moves[ctx.dataIndex] || 0) < 0 ? "rgba(239,68,68,.95)" : "rgba(34,197,94,.90)",
-        pointBorderWidth: 1
+        pointRadius: 0,
+        borderWidth: 2,
+        clip: { left: 0, top: 0, right: 22, bottom: 0 }
       }]
-   },
-options: {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: false,
-  normalized: true,
-
-  scales: {
-    x: {
-      type: 'time',
-      time: {
-        unit: 'minute',
-        tooltipFormat: 'dd/MM HH:mm'
-      },
-      ticks: {
-        maxRotation: 0,
-        autoSkip: true,
-        color: 'rgba(150,150,150,.6)'
-      },
-      grid: {
-        display: false
-      }
     },
-
-    y: {
-      type: 'linear', // 👈 verrà switchato LIN / LOG
-      beginAtZero: false,
-      ticks: {
-        color: 'rgba(150,150,150,.7)',
-        callback: v => v.toLocaleString()
-      },
-      grid: {
-        color: 'rgba(255,255,255,.05)'
-      }
-    }
-  },
-
-  plugins: {
-    legend: { display: false },
-
-    tooltip: {
-      enabled: true,
-      displayColors: false,
-      callbacks: {
-        title: (items) => {
-          const d = items[0].parsed.x
-          return new Date(d).toLocaleString()
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          displayColors: false,
+          callbacks: {
+            title: (items) => {
+              const lbl = view.labels[items?.[0]?.dataIndex ?? 0] || "";
+              const ts = labelToTs(lbl);
+              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : String(lbl);
+            },
+            label: (item) => {
+              const i = item.dataIndex;
+              const v = safe(view.data[i]);
+              const t = view.types?.[i] || "Stake update";
+              return `${t} • ${v.toFixed(6)} INJ`;
+            }
+          }
         },
-        label: (item) => {
-          return item.parsed.y.toLocaleString()
+        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: axisTickColor(),
+            callback: (val, idx) => {
+              const ts = labelToTs(stakeChart?.data?.labels?.[idx]);
+              return ts ? fmtHHMM(ts) : "";
+            },
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 6
+          },
+          grid: { color: axisGridColor() }
+        },
+        y: {
+          type: (stakeScale === "log") ? "logarithmic" : "linear",
+          ticks: { color: axisTickColor() },
+          grid: { color: axisGridColor() }
         }
       }
-    }
-  },
-
-  elements: {
-    line: {
-      borderWidth: 2,
-      tension: 0.35
     },
-    point: {
-      radius: ctx => {
-        const i = ctx.dataIndex
-        const len = ctx.dataset.data.length - 1
-        return i === len ? 4 : 0
-      },
-      backgroundColor: ctx => {
-        const i = ctx.dataIndex
-        const len = ctx.dataset.data.length - 1
-        return i === len ? '#22c55e' : 'transparent'
-      }
-    }
+    plugins: [stakeLastDotPlugin]
+  });
+
+  applyStakeRangeToChart();
+}
+
+function drawStakeChart() {
+  if (!stakeChart) initStakeChart();
+  if (!stakeChart) return;
+
+  const view = stakeViewByTf();
+
+  stakeChart.data.labels = view.labels;
+  stakeChart.data.datasets[0].data = view.data;
+
+  stakeChart.options.scales.y.type = (stakeScale === "log") ? "logarithmic" : "linear";
+
+  applyStakeRangeToChart();
+  stakeChart.update("none");
+}
+
+function maybeAddStakePoint(currentStake) {
+  const s = safe(currentStake);
+  if (!Number.isFinite(s)) return;
+  const rounded = Number(s.toFixed(6));
+
+  if (!stakeBaselineCaptured) {
+    stakeLabels.push(tsLabel());
+    stakeData.push(rounded);
+    stakeMoves.push(1);
+    stakeTypes.push("Baseline (current)");
+    lastStakeRecordedRounded = rounded;
+    stakeBaselineCaptured = true;
+    saveStakeSeriesLocal();
+    drawStakeChart();
+    return;
+  }
+
+  if (lastStakeRecordedRounded == null) { lastStakeRecordedRounded = rounded; return; }
+  if (rounded === lastStakeRecordedRounded) return;
+
+  const delta = rounded - lastStakeRecordedRounded;
+  lastStakeRecordedRounded = rounded;
+
+  stakeLabels.push(tsLabel());
+  stakeData.push(rounded);
+  stakeMoves.push(delta > 0 ? 1 : -1);
+  stakeTypes.push(delta > 0 ? "Delegate / Compound" : "Undelegate");
+
+  stakeLabels = clampArray(stakeLabels, SERIES_MAX_POINTS);
+  stakeData   = clampArray(stakeData,   SERIES_MAX_POINTS);
+  stakeMoves  = clampArray(stakeMoves,  SERIES_MAX_POINTS);
+  stakeTypes  = clampArray(stakeTypes,  SERIES_MAX_POINTS);
+
+  saveStakeSeriesLocal();
+  drawStakeChart();
+
+  pushEvent({
+    kind: "tx",
+    title: delta > 0 ? "Stake increased" : "Stake decreased",
+    detail: `${delta > 0 ? "+" : ""}${delta.toFixed(6)} INJ`,
+    status: "pending"
+  });
+}
+
+/* ================= REWARD WITHDRAWALS (persist) ================= */
+let wdLabelsAll = [];
+let wdValuesAll = [];
+let wdTimesAll  = [];
+let wdLastRewardsSeen = null;
+let wdMinFilter = 0;
+
+let rewardTf = "all";
+let rewardScale = "linear";
+
+function wdStoreKey(addr) {
+  const a = (addr || "").trim();
+  return a ? `inj_reward_withdrawals_v${REWARD_WD_LOCAL_VER}_${a}` : null;
+}
+function saveWdAllLocal() {
+  const key = wdStoreKey(address);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      v: REWARD_WD_LOCAL_VER, t: Date.now(),
+      labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
+    }));
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
+}
+function loadWdAllLocal() {
+  const key = wdStoreKey(address);
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== REWARD_WD_LOCAL_VER) return false;
+
+    wdLabelsAll = Array.isArray(obj.labels) ? obj.labels : [];
+    wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
+    wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
+
+    rebuildWdView();
+    return true;
+  } catch {
+    return false;
   }
 }
+
+function rewardViewByTf(){
+  const now = Date.now();
+  const ms = rewardTf === "1d" ? 86400000 : rewardTf === "1w" ? 7*86400000 : rewardTf === "1m" ? 30*86400000 : 1e18;
+  const minT = (rewardTf === "all") ? 0 : (now - ms);
+
+  const labels = [];
+  const values = [];
+  const times = [];
+
+  for (let i=0;i<wdValuesAll.length;i++){
+    const t = safe(wdTimesAll[i]) || labelToTs(wdLabelsAll[i]);
+    const v = safe(wdValuesAll[i]);
+    if (!t || t < minT) continue;
+    if (v < wdMinFilter) continue;
+    times.push(t);
+    labels.push(wdLabelsAll[i] || tsLabel(t));
+    values.push(v);
+  }
+
+  return { labels, values, times };
+}
+
+let rewardChart = null;
+
+const rewardLastDotPlugin = {
+  id: "rewardLastDotPlugin",
+  afterDatasetsDraw(ch){
+    const ds = ch.data.datasets?.[0];
+    if (!ds) return;
+    const meta = ch.getDatasetMeta(0);
+    const pts = meta?.data || [];
+    if (!pts.length) return;
+    const el = pts[pts.length - 1];
+    if (!el) return;
+
+    const t = Date.now();
+    const pulse = 0.35 + 0.65 * Math.abs(Math.sin(t / 320));
+    const ctx = ch.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(el.x, el.y, 3.1, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250,204,21,${0.95 * pulse})`;
+    ctx.fill();
+    ctx.restore();
+  }
+};
+
+function initRewardChart() {
+  const canvas = $("rewardChart");
+  if (!canvas || !window.Chart) return;
+
+  const view = rewardViewByTf();
+
+  rewardChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: view.labels,
+      datasets: [{
+        data: view.values,
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59,130,246,.14)",
+        fill: true,
+        tension: 0.25,
+        cubicInterpolationMode: "monotone",
+        spanGaps: true,
+        pointRadius: 0,
+        borderWidth: 2,
+        clip: { left: 0, top: 0, right: 22, bottom: 0 }
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          displayColors: false,
+          callbacks: {
+            title: (items) => {
+              const i = items?.[0]?.dataIndex ?? 0;
+              const ts = view.times[i] || labelToTs(view.labels[i]);
+              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : (view.labels[i] || "");
+            },
+            label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
+          }
+        },
+        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
+      },
+      scales: {
+        x: { ticks: { color: axisTickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }, grid: { color: axisGridColor() } },
+        y: {
+          type: (rewardScale === "log") ? "logarithmic" : "linear",
+          position: "right",
+          ticks: { color: axisTickColor(), padding: 6, callback: (val) => fmtSmart(val) },
+          grid: { color: axisGridColor() }
+        }
+      }
+    },
+    plugins: [rewardLastDotPlugin]
+  });
+
+  applyRewardRangeToChart();
+}
+
+function drawRewardChart(){
+  if (!rewardChart) initRewardChart();
+  if (!rewardChart) return;
+
+  const view = rewardViewByTf();
+
+  rewardChart.data.labels = view.labels;
+  rewardChart.data.datasets[0].data = view.values;
+
+  rewardChart.options.scales.y.type = (rewardScale === "log") ? "logarithmic" : "linear";
+
+  applyRewardRangeToChart();
+  rewardChart.update("none");
+
+  syncRewardTimelineUI(true);
+}
+
+function rebuildWdView(){
+  drawRewardChart();
+}
+
+function syncRewardTimelineUI(forceToEnd=false) {
+  const slider = $("rewardTimeline");
+  const meta = $("rewardTimelineMeta");
+  if (!slider || !meta) return;
+
+  const view = rewardViewByTf();
+  const n = view.values.length;
+
+  if (!n) {
+    slider.min = 0; slider.max = 0; slider.value = 0;
+    meta.textContent = "—";
+    if (rewardChart) {
+      rewardChart.options.scales.x.min = undefined;
+      rewardChart.options.scales.x.max = undefined;
+      rewardChart.update("none");
+    }
+    return;
+  }
+
+  slider.min = 0;
+  slider.max = String(n - 1);
+  if (forceToEnd) slider.value = String(n - 1);
+
+  const idx = clamp(parseInt(slider.value || "0", 10), 0, n - 1);
+  const win = Math.min(60, n);
+  const minIdx = Math.max(0, idx - win + 1);
+  const maxIdx = idx;
+
+  if (rewardChart) {
+    rewardChart.options.scales.x.min = minIdx;
+    rewardChart.options.scales.x.max = maxIdx;
+    rewardChart.update("none");
+  }
+
+  const fromTs = view.times[minIdx] || labelToTs(view.labels[minIdx]);
+  const toTs   = view.times[maxIdx] || labelToTs(view.labels[maxIdx]);
+  const from = fromTs ? fmtHHMM(fromTs) : (view.labels[minIdx] || "");
+  const to   = toTs ? fmtHHMM(toTs) : (view.labels[maxIdx] || "");
+  meta.textContent = n <= 1 ? `${to}` : `${from} → ${to}`;
+}
+
+$("rewardTimeline")?.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
+
+$("rewardFilter")?.addEventListener("change", () => {
+  wdMinFilter = safe($("rewardFilter")?.value || 0);
+  rebuildWdView();
+  syncRewardTimelineUI(true);
+}, { passive:true });
+
+function maybeRecordRewardWithdrawal(newRewards) {
+  const r = safe(newRewards);
+  if (wdLastRewardsSeen == null) { wdLastRewardsSeen = r; return; }
+
+  const diff = wdLastRewardsSeen - r;
+  if (diff > REWARD_WITHDRAW_THRESHOLD) {
+    const ts = Date.now();
+    wdTimesAll.push(ts);
+    wdLabelsAll.push(tsLabel(ts));
+    wdValuesAll.push(diff);
+
+    wdTimesAll  = clampArray(wdTimesAll,  SERIES_MAX_POINTS);
+    wdLabelsAll = clampArray(wdLabelsAll, SERIES_MAX_POINTS);
+    wdValuesAll = clampArray(wdValuesAll, SERIES_MAX_POINTS);
+
+    saveWdAllLocal();
+    rebuildWdView();
+    syncRewardTimelineUI(true);
+
+    pushEvent({
+      kind: "rewards",
+      title: "Rewards withdrawn",
+      detail: `+${diff.toFixed(6)} INJ`,
+      status: "pending"
+    });
+  }
+  wdLastRewardsSeen = r;
+}
+
+/* ================= NET WORTH (persist + chart) ================= */
+let nwTf = "live";        // live | 1d | 1w | 1m | 1y | all
+let nwScale = "linear";   // linear | log
+let nwTAll = [];
+let nwUsdAll = [];
+let nwInjAll = [];
+let netWorthChart = null;
+let nwHoverActive = false;
+let nwHoverIndex = null;
+
+function nwStoreKey(addr){
+  const a = (addr || "").trim();
+  return a ? `inj_networth_v${NW_LOCAL_VER}_${a}` : null;
+}
+function clampNWArrays(){
+  const n = Math.min(nwTAll.length, nwUsdAll.length, nwInjAll.length);
+  nwTAll = nwTAll.slice(-n);
+  nwUsdAll = nwUsdAll.slice(-n);
+  nwInjAll = nwInjAll.slice(-n);
+  if (nwTAll.length > NW_MAX_POINTS){
+    nwTAll = nwTAll.slice(-NW_MAX_POINTS);
+    nwUsdAll = nwUsdAll.slice(-NW_MAX_POINTS);
+    nwInjAll = nwInjAll.slice(-NW_MAX_POINTS);
+  }
+}
+function saveNWLocal(){
+  const key = nwStoreKey(address);
+  if (!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({
+      v: NW_LOCAL_VER, t: Date.now(),
+      tAll: nwTAll, usdAll: nwUsdAll, injAll: nwInjAll,
+      tf: nwTf, scale: nwScale
+    }));
+    cloudBumpLocal(1);
+  } catch {}
+  cloudMarkDirty();
+}
+function loadNWLocal(){
+  const key = nwStoreKey(address);
+  if (!key) return false;
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.v !== NW_LOCAL_VER) return false;
+
+    nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
+    nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
+    nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
+    nwTf = typeof obj.tf === "string" ? obj.tf : "live";
+    nwScale = (obj.scale === "log") ? "log" : "linear";
+
+    clampNWArrays();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nwWindowMs(tf){
+  if (tf === "live") return NW_LIVE_WINDOW_MS;
+  if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
+  if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
+  if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
+  if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000;
+  return 24 * 60 * 60 * 1000; // 1d
+}
+
+function nwBuildView(tf){
+  const now = Date.now();
+  const w = nwWindowMs(tf);
+  const minT = (tf === "all") ? 0 : (now - w);
+
+  const labels = [];
+  const data = [];
+  const times = [];
+
+  for (let i = 0; i < nwTAll.length; i++){
+    const t = safe(nwTAll[i]);
+    const u = safe(nwUsdAll[i]);
+    if (t >= minT && Number.isFinite(u) && u > 0) {
+      times.push(t);
+      labels.push(tsLabel(t));
+      data.push(u);
+    }
+  }
+
+  if (tf === "live") {
+    const liveMin = now - NW_LIVE_WINDOW_MS;
+    const outL = [], outD = [], outT = [];
+    for (let i = 0; i < times.length; i++){
+      if (times[i] >= liveMin) { outT.push(times[i]); outL.push(labels[i]); outD.push(data[i]); }
+    }
+    return { labels: outL, data: outD, times: outT };
+  }
+
+  return { labels, data, times };
+}
+
+const nwVerticalLinePlugin = {
+  id: "nwVerticalLinePlugin",
+  afterDraw(ch){
+    if (!nwHoverActive || nwHoverIndex == null) return;
+    const meta = ch.getDatasetMeta(0);
+    const el = meta?.data?.[nwHoverIndex];
+    if (!el) return;
+    const ctx = ch.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(el.x, ch.chartArea.top);
+    ctx.lineTo(el.x, ch.chartArea.bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(250,204,21,0.65)";
+    ctx.stroke();
+    ctx.restore();
+  }
+};
+
+const nwLastDotPlugin = {
+  id: "nwLastDotPlugin",
+  afterDatasetsDraw(ch) {
+    const ds = ch.data.datasets?.[0];
+    if (!ds) return;
+
+    const meta = ch.getDatasetMeta(0);
+    const pts = meta?.data || [];
+    if (!pts.length) return;
+
+    const el = pts[pts.length - 1];
+    if (!el) return;
+
+    const t = Date.now();
+    const pulse = 0.35 + 0.65 * Math.abs(Math.sin(t / 320));
+
+    const ctx = ch.ctx;
+    ctx.save();
+
+    ctx.shadowColor = `rgba(250,204,21,${0.35 * pulse})`;
+    ctx.shadowBlur = 10;
+
+    ctx.beginPath();
+    ctx.arc(el.x, el.y, 6.5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250,204,21,${0.22 * pulse})`;
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(el.x, el.y, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250,204,21,${0.95 * pulse})`;
+    ctx.fill();
+
+    ctx.restore();
+  }
+};
+
+function initNWChart(){
+  const canvas = $("netWorthChart");
+  if (!canvas || !window.Chart) return;
+
+  const view = nwBuildView(nwTf);
+
+  netWorthChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: view.labels,
+      datasets: [{
+        data: view.data,
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59,130,246,.12)",
+        borderWidth: 2,
+        fill: true,
+        tension: 0.35,
+        cubicInterpolationMode: "monotone",
+        pointRadius: 0,
+        pointHitRadius: 18,
+        clip: { left: 0, top: 0, right: 22, bottom: 0 },
+        spanGaps: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      normalized: true,
+      layout: { padding: { left: 8, right: 34, top: 8, bottom: 12 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        ...(ZOOM_OK ? {
+          zoom: {
+            pan: { enabled: true, mode: "x", threshold: 2 },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
+          }
+        } : {})
+      },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: {
+          display: true,
+          ticks: {
+            color: axisTickColor(),
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 6,
+            padding: 8,
+            callback: (val, idx) => {
+              const ts = labelToTs(netWorthChart?.data?.labels?.[idx]);
+              return ts ? fmtHHMM(ts) : "";
+            }
+          },
+          grid: { display: false },
+          border: { display: false }
+        },
+        y: {
+          type: (nwScale === "log") ? "logarithmic" : "linear",
+          position: "right",
+          ticks: {
+            mirror: false,
+            color: axisTickColor(),
+            padding: 10,
+            maxTicksLimit: 5,
+            callback: (v) => `$${fmtSmart(v)}`
+          },
+          grid: { color: axisGridColor() },
+          border: { display: false }
+        }
+      }
+    },
+    plugins: [nwVerticalLinePlugin, nwLastDotPlugin]
+  });
+
+  attachNWInteractions();
+}
+
+function drawNW(){
+  if (!netWorthChart) initNWChart();
+  if (!netWorthChart) return;
+
+  const view = nwBuildView(nwTf);
+
+  netWorthChart.data.labels = view.labels;
+  netWorthChart.data.datasets[0].data = view.data;
+
+  netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
+  netWorthChart.update("none");
+
+  // pnl
+  const pnlEl = $("netWorthPnl");
+  if (view.data.length >= 2){
+    const first = safe(view.data[0]);
+    const last  = safe(view.data[view.data.length - 1]);
+    const pnl = last - first;
+    const pnlPct = first ? (pnl / first) * 100 : 0;
+
+    if (pnlEl){
+      pnlEl.classList.remove("good","bad","flat");
+      const cls = pnl > 0 ? "good" : (pnl < 0 ? "bad" : "flat");
+      pnlEl.classList.add(cls);
+      const sign = pnl > 0 ? "+" : "";
+      pnlEl.textContent = `PnL: ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
+    }
+  } else {
+    if (pnlEl){
+      pnlEl.classList.remove("good","bad");
+      pnlEl.classList.add("flat");
+      pnlEl.textContent = "PnL: —";
+    }
+  }
+
+  updateNWTFButtons();
+}
+
+function updateNWTFButtons(){
+  const wrap = $("nwTfSwitch");
+  if (!wrap) return;
+  wrap.querySelectorAll(".tf-btn").forEach(b => {
+    b.classList.toggle("active", (b.dataset.tf === nwTf));
+  });
+}
+
+/* hover interactions */
+function nwGetIndexFromEvent(evt){
+  if (!netWorthChart) return null;
+  const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
+  if (!pts || !pts.length) return null;
+  return pts[0].index;
+}
+function nwShowHoverValue(idx){
+  if (!netWorthChart) return;
+  const data = netWorthChart.data.datasets?.[0]?.data || [];
+  const labels = netWorthChart.data.labels || [];
+  idx = clamp(idx, 0, data.length - 1);
+  const v = safe(data[idx]);
+  const ts = labelToTs(labels[idx]);
+  if (!v) return;
+
+  const el = $("netWorthUsd");
+  if (el) el.textContent = `$${v.toFixed(2)}`;
+
+  const pnlEl = $("netWorthPnl");
+  if (pnlEl){
+    pnlEl.classList.remove("good","bad","flat");
+    pnlEl.classList.add("flat");
+    pnlEl.textContent = `Point: ${ts ? fmtHHMMSS(ts) : ""} • $${v.toFixed(2)}`;
+  }
+}
+function attachNWInteractions(){
+  const canvas = $("netWorthChart");
+  if (!canvas || !netWorthChart) return;
+
+  const onMove = (evt) => {
+    const idx = nwGetIndexFromEvent(evt);
+    if (idx == null) return;
+    nwHoverActive = true;
+    nwHoverIndex = idx;
+    nwShowHoverValue(idx);
+    netWorthChart.update("none");
+  };
+
+  const onLeave = () => {
+    nwHoverActive = false;
+    nwHoverIndex = null;
+    netWorthChart.update("none");
+  };
+
+  canvas.addEventListener("mousemove", onMove, { passive: true });
+  canvas.addEventListener("mouseleave", onLeave, { passive: true });
+
+  canvas.addEventListener("touchstart", (e) => onMove(e), { passive: true });
+  canvas.addEventListener("touchmove", (e) => onMove(e), { passive: true });
+  canvas.addEventListener("touchend", onLeave, { passive: true });
+  canvas.addEventListener("touchcancel", onLeave, { passive: true });
+}
+
+/* Net worth UI handlers (HTML aligned) */
+$("nwTfSwitch")?.addEventListener("click", (e) => {
+  const btn = e.target?.closest(".tf-btn");
+  if (!btn) return;
+  const tf = btn.dataset.tf || "live";
+  if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
+  nwTf = tf;
+  saveNWLocal();
+  drawNW();
+}, { passive:true });
+
+$("nwScaleToggle")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  nwScale = (nwScale === "log") ? "linear" : "log";
+  const b = $("nwScaleToggle");
+  if (b) b.textContent = (nwScale === "log") ? "LOG" : "LIN";
+  saveNWLocal();
+  drawNW();
+}, { passive:false });
+
+/* record points */
+function recordNetWorthPoint(){
+  if (!address) return;
+  const px = safe(targetPrice);
+  if (!Number.isFinite(px) || px <= 0) return;
+
+  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
+  const totalUsd = totalInj * px;
+  if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
+
+  const now = Date.now();
+  const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
+  const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwUsdAll.length - 1]) : 0;
+
+  const dt = now - lastT;
+  const dUsd = Math.abs(totalUsd - lastUsd);
+
+  if (lastT && dt < 5_000 && dUsd < 0.25) return;
+
+  nwTAll.push(now);
+  nwUsdAll.push(totalUsd);
+  nwInjAll.push(totalInj);
+
+  clampNWArrays();
+  saveNWLocal();
+  drawNW();
+}
+
+/* ================= APR CHART (simple persist) ================= */
+const APR_LOCAL_KEY = "inj_apr_series_v1";
+let aprLabels = [];
+let aprData = [];
+let aprScale = "linear";
+let aprChart = null;
+
+function loadAprLocal(){
+  try{
+    const raw = localStorage.getItem(APR_LOCAL_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    aprLabels = Array.isArray(obj?.labels) ? obj.labels : [];
+    aprData = Array.isArray(obj?.data) ? obj.data : [];
+  } catch {}
+}
+function saveAprLocal(){
+  try{
+    localStorage.setItem(APR_LOCAL_KEY, JSON.stringify({ t: Date.now(), labels: aprLabels, data: aprData }));
+  } catch {}
+}
+
+function recordAprPoint(v){
+  v = safe(v);
+  if (!Number.isFinite(v)) return;
+  const ts = Date.now();
+
+  // density: 30s
+  const lastTs = aprLabels.length ? labelToTs(aprLabels[aprLabels.length - 1]) : 0;
+  if (lastTs && (ts - lastTs) < 30_000) return;
+
+  aprLabels.push(tsLabel(ts));
+  aprData.push(v);
+
+  aprLabels = clampArray(aprLabels, 1800);
+  aprData = clampArray(aprData, 1800);
+
+  saveAprLocal();
+  drawAprChart();
+}
+
+const aprLastDotPlugin = {
+  id: "aprLastDotPlugin",
+  afterDatasetsDraw(ch){
+    const ds = ch.data.datasets?.[0];
+    if (!ds) return;
+    const meta = ch.getDatasetMeta(0);
+    const pts = meta?.data || [];
+    if (!pts.length) return;
+    const el = pts[pts.length - 1];
+    if (!el) return;
+
+    const t = Date.now();
+    const pulse = 0.35 + 0.65 * Math.abs(Math.sin(t / 320));
+    const ctx = ch.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(el.x, el.y, 3.1, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250,204,21,${0.95 * pulse})`;
+    ctx.fill();
+    ctx.restore();
+  }
+};
+
+function initAprChart(){
+  const canvas = $("aprChart");
+  if (!canvas || !window.Chart) return;
+
+  aprChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: aprLabels,
+      datasets: [{
+        data: aprData,
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59,130,246,.12)",
+        fill: true,
+        tension: 0.25,
+        cubicInterpolationMode: "monotone",
+        pointRadius: 0,
+        borderWidth: 2,
+        clip: { left: 0, top: 0, right: 22, bottom: 0 }
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display:false }, tooltip: { enabled:true } },
+      scales: {
+        x: { ticks: { display:false }, grid: { display:false } },
+        y: {
+          type: (aprScale === "log") ? "logarithmic" : "linear",
+          ticks: { color: axisTickColor(), callback: v => `${fmtSmart(v)}%` },
+          grid: { color: axisGridColor() }
+        }
+      }
+    },
+    plugins: [aprLastDotPlugin]
+  });
+}
+
+function drawAprChart(){
+  if (!aprChart) initAprChart();
+  if (!aprChart) return;
+  aprChart.data.labels = aprLabels;
+  aprChart.data.datasets[0].data = aprData;
+  aprChart.options.scales.y.type = (aprScale === "log") ? "logarithmic" : "linear";
+  aprChart.update("none");
+}
+
+$("aprScaleToggle")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  aprScale = (aprScale === "log") ? "linear" : "log";
+  const b = $("aprScaleToggle");
+  if (b) b.textContent = (aprScale === "log") ? "LOG" : "LIN";
+  drawAprChart();
+}, { passive:false });
+
+/* ================= RANGE MODALS (Stake / Reward) ================= */
+const RANGE_KEY_STAKE = "inj_range_stake_max";
+const RANGE_KEY_REWARD = "inj_range_reward_max";
+let stakeRangeMax = safe(localStorage.getItem(RANGE_KEY_STAKE)) || STAKE_TARGET_DEFAULT_MAX;
+let rewardRangeMax = safe(localStorage.getItem(RANGE_KEY_REWARD)) || REWARD_TARGET_DEFAULT_MAX;
+
+function applyStakeRangeToChart(){
+  if (!stakeChart) return;
+  stakeChart.options.scales.y.min = 0;
+  stakeChart.options.scales.y.max = stakeRangeMax > 0 ? stakeRangeMax : undefined;
+}
+function applyRewardRangeToChart(){
+  if (!rewardChart) return;
+  rewardChart.options.scales.y.min = 0;
+  rewardChart.options.scales.y.max = rewardRangeMax > 0 ? rewardRangeMax : undefined;
+}
+
+function openModal(id){
+  const m = $(id);
+  if (!m) return;
+  m.setAttribute("aria-hidden","false");
+  m.style.display = "block";
+}
+function closeModal(id){
+  const m = $(id);
+  if (!m) return;
+  m.setAttribute("aria-hidden","true");
+  m.style.display = "none";
+}
+
+$("stakeRangeBtn")?.addEventListener("click", () => {
+  $("stakeRangeValue") && ($("stakeRangeValue").value = String(stakeRangeMax || ""));
+  openModal("stakeRangeModal");
+}, { passive:true });
+$("stakeRangeCancel")?.addEventListener("click", () => closeModal("stakeRangeModal"), { passive:true });
+$("stakeRangeApply")?.addEventListener("click", () => {
+  const v = safe($("stakeRangeValue")?.value);
+  if (v > 0) {
+    stakeRangeMax = v;
+    localStorage.setItem(RANGE_KEY_STAKE, String(v));
+    setText("stakeMax", String(v));
+    drawStakeChart();
+  }
+  closeModal("stakeRangeModal");
+}, { passive:true });
+
+$("rewardRangeBtn")?.addEventListener("click", () => {
+  $("rewardRangeValue") && ($("rewardRangeValue").value = String(rewardRangeMax || ""));
+  openModal("rewardRangeModal");
+}, { passive:true });
+$("rewardRangeCancel")?.addEventListener("click", () => closeModal("rewardRangeModal"), { passive:true });
+$("rewardRangeApply")?.addEventListener("click", () => {
+  const v = safe($("rewardRangeValue")?.value);
+  if (v > 0) {
+    rewardRangeMax = v;
+    localStorage.setItem(RANGE_KEY_REWARD, String(v));
+    setText("rewardMax", String(v));
+    drawRewardChart();
+  }
+  closeModal("rewardRangeModal");
+}, { passive:true });
+
+/* Scale toggles for stake/reward */
+$("stakeScaleToggle")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  stakeScale = (stakeScale === "log") ? "linear" : "log";
+  const b = $("stakeScaleToggle");
+  if (b) b.textContent = (stakeScale === "log") ? "LOG" : "LIN";
+  drawStakeChart();
+}, { passive:false });
+
+$("rewardScaleToggle")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  rewardScale = (rewardScale === "log") ? "linear" : "log";
+  const b = $("rewardScaleToggle");
+  if (b) b.textContent = (rewardScale === "log") ? "LOG" : "LIN";
+  drawRewardChart();
+}, { passive:false });
+
+/* TF switches for stake/reward */
+$("stakeTfSwitch")?.addEventListener("click", (e) => {
+  const btn = e.target?.closest(".tf-btn");
+  if (!btn) return;
+  const tf = btn.dataset.tf || "all";
+  if (!["all","1d","1w","1m"].includes(tf)) return;
+  stakeTf = tf;
+  $("stakeTfSwitch")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
+  drawStakeChart();
+}, { passive:true });
+
+$("rewardTfSwitch")?.addEventListener("click", (e) => {
+  const btn = e.target?.closest(".tf-btn");
+  if (!btn) return;
+  const tf = btn.dataset.tf || "all";
+  if (!["all","1d","1w","1m"].includes(tf)) return;
+  rewardTf = tf;
+  $("rewardTfSwitch")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
+  drawRewardChart();
+}, { passive:true });
+
+/* ================= REWARD BAR ESTIMATES ================= */
+function updateRewardEstimates(){
+  const dayEl = $("rewardEstDay");
+  const weekEl = $("rewardEstWeek");
+  const monthEl = $("rewardEstMonth");
+  if (!dayEl || !weekEl || !monthEl) return;
+
+  // simple estimate: APR% * staked / 365
+  const st = safe(stakeInj);
+  const a = safe(apr) / 100;
+  if (!st || !a){
+    dayEl.textContent = "Day: —";
+    weekEl.textContent = "Week: —";
+    monthEl.textContent = "Month: —";
+    return;
+  }
+
+  const perDay = st * a / 365;
+  const perWeek = perDay * 7;
+  const perMonth = perDay * 30;
+
+  dayEl.textContent = `Day: ~${perDay.toFixed(6)} INJ`;
+  weekEl.textContent = `Week: ~${perWeek.toFixed(6)} INJ`;
+  monthEl.textContent = `Month: ~${perMonth.toFixed(6)} INJ`;
+}
+
+/* ================= CLOUD SYNC ================= */
+const CLOUD_VER = 2;
+const CLOUD_KEY = `inj_cloudmeta_v${CLOUD_VER}`;
+let cloudPts = 0;
+let cloudLastSync = 0;
+let cloudDirty = false;
+let cloudPushTimer = null;
+
+/* HTML IDs aligned */
+const cloudMenuDot = $("cloudMenuDot");
+const cloudMenuStatus = $("cloudMenuStatus");
+const cloudMenuLast = $("cloudMenuLast");
+
+function cloudLoadMeta(){
+  try{
+    const raw = localStorage.getItem(CLOUD_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    cloudPts = safe(obj?.pts);
+    cloudLastSync = safe(obj?.lastSync);
+  } catch {}
+}
+function cloudSaveMeta(){
+  try{
+    localStorage.setItem(CLOUD_KEY, JSON.stringify({ v:CLOUD_VER, pts: cloudPts, lastSync: cloudLastSync }));
+  } catch {}
+}
+function cloudRenderMeta(){
+  const hist = $("cloudHistory");
+  if (hist) hist.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
+
+  if (cloudMenuLast){
+    cloudMenuLast.textContent = cloudLastSync ? new Date(cloudLastSync).toLocaleString() : "—";
+  }
+}
+function cloudBumpLocal(points = 1){
+  cloudPts = safe(cloudPts) + safe(points);
+  cloudLastSync = Date.now();
+  cloudSaveMeta();
+  cloudRenderMeta();
+}
+function cloudSetState(state){
+  const root = $("appRoot");
+  const st = $("cloudStatus");
+  if (!root || !st) return;
+
+  root.classList.remove("cloud-synced","cloud-saving","cloud-error");
+
+  if (state === "saving"){
+    root.classList.add("cloud-saving");
+    st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
+  } else if (state === "error"){
+    root.classList.add("cloud-error");
+    st.textContent = "Cloud: Error";
+  } else {
+    root.classList.add("cloud-synced");
+    st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
+  }
+
+  // menu status
+  if (cloudMenuDot){
+    cloudMenuDot.classList.remove("ok","saving","err");
+    if (state === "saving") cloudMenuDot.classList.add("saving");
+    else if (state === "error") cloudMenuDot.classList.add("err");
+    else cloudMenuDot.classList.add("ok");
+  }
+  if (cloudMenuStatus){
+    cloudMenuStatus.textContent = (state === "saving") ? "Saving"
+      : (state === "error") ? "Error"
+      : hasInternet() ? "Synced" : "Offline cache";
+  }
+
+  cloudRenderMeta();
+}
+
+function cloudMarkDirty(){
+  if (!address) return;
+  cloudDirty = true;
+  if (!hasInternet()) return;
+  scheduleCloudPush();
+}
+function scheduleCloudPush(){
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => cloudPush(), CLOUD_PUSH_DEBOUNCE_MS);
+}
+function buildCloudPayload(){
+  return {
+    v: 2,
+    t: Date.now(),
+    stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
+    wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll },
+    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll },
+    apr: { labels: aprLabels, data: aprData }
+  };
+}
+
+function mergeStakeByLabel(payloadStake){
+  if (!payloadStake) return;
+  const pl = Array.isArray(payloadStake.labels) ? payloadStake.labels : [];
+  const pd = Array.isArray(payloadStake.data) ? payloadStake.data : [];
+  const pm = Array.isArray(payloadStake.moves) ? payloadStake.moves : [];
+  const pt = Array.isArray(payloadStake.types) ? payloadStake.types : [];
+
+  const map = new Map();
+  for (let i=0;i<stakeLabels.length;i++){
+    const k = String(stakeLabels[i]);
+    map.set(k, { d: safe(stakeData[i]), m: safe(stakeMoves[i]), t: String(stakeTypes[i] || "Stake update") });
+  }
+  for (let i=0;i<pl.length;i++){
+    const k = String(pl[i]);
+    if (!map.has(k)) {
+      map.set(k, { d: safe(pd[i]), m: safe(pm[i]), t: String(pt[i] || "Stake update") });
+    }
+  }
+
+  const keys = [...map.keys()].sort((a,b)=>labelToTs(a)-labelToTs(b));
+  stakeLabels = keys;
+  stakeData = keys.map(k => map.get(k).d);
+  stakeMoves = keys.map(k => map.get(k).m);
+  stakeTypes = keys.map(k => map.get(k).t);
+
+  stakeLabels = clampArray(stakeLabels, SERIES_MAX_POINTS);
+  stakeData   = clampArray(stakeData,   SERIES_MAX_POINTS);
+  stakeMoves  = clampArray(stakeMoves,  SERIES_MAX_POINTS);
+  stakeTypes  = clampArray(stakeTypes,  SERIES_MAX_POINTS);
+
+  stakeBaselineCaptured = stakeData.length > 0;
+  lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
+}
+
+function mergeWd(payloadWd){
+  if (!payloadWd) return;
+  const pl = Array.isArray(payloadWd.labels) ? payloadWd.labels : [];
+  const pv = Array.isArray(payloadWd.values) ? payloadWd.values : [];
+  const pt = Array.isArray(payloadWd.times) ? payloadWd.times : [];
+
+  const map = new Map();
+  for (let i=0;i<wdTimesAll.length;i++){
+    const t = safe(wdTimesAll[i]) || labelToTs(wdLabelsAll[i]);
+    if (!t) continue;
+    map.set(t, { v: safe(wdValuesAll[i]), l: String(wdLabelsAll[i] || tsLabel(t)) });
+  }
+  for (let i=0;i<pt.length;i++){
+    const t = safe(pt[i]) || labelToTs(pl[i]);
+    if (!t) continue;
+    if (!map.has(t)) map.set(t, { v: safe(pv[i]), l: String(pl[i] || tsLabel(t)) });
+  }
+
+  const times = [...map.keys()].sort((a,b)=>a-b);
+  wdTimesAll  = clampArray(times, SERIES_MAX_POINTS);
+  wdValuesAll = clampArray(times.map(t => map.get(t).v), SERIES_MAX_POINTS);
+  wdLabelsAll = clampArray(times.map(t => map.get(t).l), SERIES_MAX_POINTS);
+}
+
+function mergeUniqueByTs(baseTimes, baseVals, addTimes, addVals){
+  const map = new Map();
+  for (let i=0;i<baseTimes.length;i++){
+    const t = safe(baseTimes[i]);
+    if (!t) continue;
+    map.set(t, safe(baseVals[i]));
+  }
+  for (let i=0;i<addTimes.length;i++){
+    const t = safe(addTimes[i]);
+    if (!t) continue;
+    if (!map.has(t)) map.set(t, safe(addVals[i]));
+  }
+  const times = [...map.keys()].sort((a,b)=>a-b);
+  const vals = times.map(t => map.get(t));
+  return { times, vals };
+}
+
+function mergeNW(payloadNw){
+  if (!payloadNw) return;
+  const t = Array.isArray(payloadNw.times) ? payloadNw.times : [];
+  const u = Array.isArray(payloadNw.usd) ? payloadNw.usd : [];
+  const j = Array.isArray(payloadNw.inj) ? payloadNw.inj : [];
+
+  const m1 = mergeUniqueByTs(nwTAll, nwUsdAll, t, u);
+  const m2 = mergeUniqueByTs(nwTAll, nwInjAll, t, j);
+
+  nwTAll = m1.times;
+  nwUsdAll = m1.vals;
+  nwInjAll = m2.vals;
+
+  clampNWArrays();
+}
+
+function mergeApr(payloadApr){
+  if (!payloadApr) return;
+  const pl = Array.isArray(payloadApr.labels) ? payloadApr.labels : [];
+  const pd = Array.isArray(payloadApr.data) ? payloadApr.data : [];
+
+  const map = new Map();
+  for (let i=0;i<aprLabels.length;i++){
+    const t = labelToTs(aprLabels[i]);
+    if (!t) continue;
+    map.set(t, safe(aprData[i]));
+  }
+  for (let i=0;i<pl.length;i++){
+    const t = labelToTs(pl[i]);
+    if (!t) continue;
+    if (!map.has(t)) map.set(t, safe(pd[i]));
+  }
+  const times = [...map.keys()].sort((a,b)=>a-b);
+  aprLabels = clampArray(times.map(t => tsLabel(t)), 1800);
+  aprData = clampArray(times.map(t => map.get(t)), 1800);
+  saveAprLocal();
+}
+
+async function cloudPull(){
+  if (!address) return;
+  if (!hasInternet()) { cloudSetState("synced"); return; }
+
+  const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
+  const res = await fetchJSON(url);
+  if (!res?.ok) { cloudSetState("error"); return; }
+  if (!res.data) { cloudSetState("synced"); return; }
+
+  try{
+    const data = res.data;
+    mergeStakeByLabel(data.stake);
+    mergeWd(data.wd);
+    mergeNW(data.nw);
+    mergeApr(data.apr);
+
+    saveStakeSeriesLocal();
+    saveWdAllLocal();
+    saveNWLocal();
+    drawStakeChart();
+    rebuildWdView();
+    drawNW();
+    drawAprChart();
+
+    cloudLastSync = Date.now();
+    cloudSaveMeta();
+    cloudSetState("synced");
+  } catch {
+    cloudSetState("error");
+  }
+}
+
+async function cloudPush(){
+  if (!address) return;
+  if (!hasInternet()) return;
+  if (!cloudDirty) return;
+
+  cloudSetState("saving");
+
+  const url = `${CLOUD_API}?address=${encodeURIComponent(address)}`;
+  const payload = buildCloudPayload();
+
+  const res = await fetchJSON(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res?.ok) {
+    cloudSetState("error");
+    return;
+  }
+
+  cloudDirty = false;
+  cloudLastSync = Date.now();
+  cloudSaveMeta();
+  cloudSetState("synced");
+}
+
+/* ================= NET WORTH UI rows ================= */
+function updateNetWorthMiniRows(){
+  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
+  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+}
+
+/* ================= IMPORTANT PRICE EVENTS (24h thresholds) ================= */
+let lastPriceStepUp = 0;
+let lastPriceStepDown = 0;
+function maybePriceEvent(pct24h){
+  const step = 5;
+  const upSteps = Math.floor(Math.max(0, pct24h) / step);
+  const dnSteps = Math.floor(Math.max(0, -pct24h) / step);
+
+  if (upSteps > lastPriceStepUp) {
+    lastPriceStepUp = upSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ +${(upSteps*step).toFixed(0)}% (24h)`, dir:"up", status:"ok" });
+  }
+  if (dnSteps > lastPriceStepDown) {
+    lastPriceStepDown = dnSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ -${(dnSteps*step).toFixed(0)}% (24h)`, dir:"down", status:"ok" });
+  }
+}
+
+/* ================= CHART THEME REFRESH ================= */
+function refreshChartsTheme(){
+  try{
+    if (stakeChart) {
+      stakeChart.options.scales.y.grid.color = axisGridColor();
+      stakeChart.options.scales.y.ticks.color = axisTickColor();
+      stakeChart.options.scales.x.grid.color = axisGridColor();
+      stakeChart.options.scales.x.ticks.color = axisTickColor();
+      stakeChart.update("none");
+    }
+    if (rewardChart) {
+      rewardChart.options.scales.x.grid.color = axisGridColor();
+      rewardChart.options.scales.y.grid.color = axisGridColor();
+      rewardChart.options.scales.x.ticks.color = axisTickColor();
+      rewardChart.options.scales.y.ticks.color = axisTickColor();
+      rewardChart.update("none");
+    }
+    if (priceChart) {
+      priceChart.options.scales.y.grid.color = axisGridColor();
+      priceChart.options.scales.y.ticks.color = axisTickColor();
+      priceChart.update("none");
+    }
+    if (netWorthChart) {
+      netWorthChart.options.scales.y.grid.color = axisGridColor();
+      netWorthChart.options.scales.y.ticks.color = axisTickColor();
+      netWorthChart.options.scales.x.ticks.color = axisTickColor();
+      netWorthChart.update("none");
+    }
+    if (aprChart) {
+      aprChart.options.scales.y.grid.color = axisGridColor();
+      aprChart.options.scales.y.ticks.color = axisTickColor();
+      aprChart.update("none");
+    }
+  } catch {}
+}
+
+/* ================= SETTINGS PAGE ================= */
+function syncSettingsUI(){
+  setText("settingsModeNow", liveMode ? "LIVE" : "REFRESH");
+  setText("settingsCloudNow", hasInternet() ? "Online" : "Offline cache");
+}
+
+$("settingsTabs")?.addEventListener("click", (e) => {
+  const btn = e.target?.closest(".tf-btn");
+  if (!btn) return;
+  const tab = btn.dataset.tab;
+  if (!tab) return;
+
+  $("settingsTabs")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".settings-panel").forEach(p => {
+    p.classList.toggle("active", p.dataset.tab === tab);
+  });
+}, { passive:true });
+
+$("resetCancelBtn")?.addEventListener("click", () => {
+  $("resetStakeChk") && ($("resetStakeChk").checked = false);
+  $("resetRewardChk") && ($("resetRewardChk").checked = false);
+  $("resetAprChk") && ($("resetAprChk").checked = false);
+  setText("resetNote","Seleziona cosa vuoi resettare e premi “Applica Reset”.");
+}, { passive:true });
+
+$("resetApplyBtn")?.addEventListener("click", () => {
+  const rs = !!$("resetStakeChk")?.checked;
+  const rr = !!$("resetRewardChk")?.checked;
+  const ra = !!$("resetAprChk")?.checked;
+
+  if (rs && address){
+    localStorage.removeItem(stakeStoreKey(address));
+    stakeLabels=[]; stakeData=[]; stakeMoves=[]; stakeTypes=[];
+    stakeBaselineCaptured=false; lastStakeRecordedRounded=null;
+    drawStakeChart();
+  }
+  if (rr && address){
+    localStorage.removeItem(wdStoreKey(address));
+    wdLabelsAll=[]; wdValuesAll=[]; wdTimesAll=[];
+    wdLastRewardsSeen=null;
+    rebuildWdView();
+  }
+  if (ra){
+    localStorage.removeItem(APR_LOCAL_KEY);
+    aprLabels=[]; aprData=[];
+    drawAprChart();
+  }
+
+  setText("resetNote","Reset applicato ✅");
+  pushEvent({ kind:"system", title:"Reset", detail:"Selected resets applied.", status:"ok" });
+}, { passive:true });
+
+/* ================= TOOLS PAGE (simple converter) ================= */
+function updateTools(){
+  const eur = safe($("convEur")?.value);
+  const px = safe(displayed.price);
+  if (!eur || !px){
+    setText("convUsd","—");
+    setText("convInj","—");
+    setText("convInjPrice", px ? `$${px.toFixed(2)}` : "—");
+    setText("convFx","—");
+    return;
+  }
+  // FX not fetched here (optional); keep as placeholder
+  const fx = 1.0;
+  setText("convFx", "—");
+  const usd = eur * fx;
+  const inj = px ? usd / px : 0;
+  setText("convUsd", usd.toFixed(2));
+  setText("convInj", inj.toFixed(6));
+  setText("convInjPrice", `$${px.toFixed(2)}`);
+}
+$("convEur")?.addEventListener("input", updateTools, { passive:true });
+
+/* ================= ADDRESS COMMIT ================= */
+async function commitAddress(newAddr) {
+  const a = (newAddr || "").trim();
+  if (!a) return;
+
+  address = a;
+  localStorage.setItem("inj_address", address);
+
+  setAddressDisplay(address);
+  settleStart = Date.now();
+
+  // reset runtime
+  availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
+
+     targetPrice = 0;
+  displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0, apr: 0 };
+
+  // reset chart boot flags
+  priceChartBoot = false;
+  pinnedIndex = null;
+  hoverIndex = null;
+  hoverActive = false;
+
+  // reset account status for LIVE readiness
+  accountOnline = false;
+  modeLoading = true;
+  refreshConnUI();
+
+  // reload local persistent series for this address
+  loadEvents();
+  loadStakeSeriesLocal();
+  loadWdAllLocal();
+  loadNWLocal();
+  loadAprLocal();
+
+  // draw charts from persisted data (if any)
+  drawStakeChart();
+  rebuildWdView();
+  drawNW();
+  drawAprChart();
+
+  // reflect saved scale labels (buttons)
+  const bNW = $("nwScaleToggle"); if (bNW) bNW.textContent = (nwScale === "log") ? "LOG" : "LIN";
+  const bStake = $("stakeScaleToggle"); if (bStake) bStake.textContent = (stakeScale === "log") ? "LOG" : "LIN";
+  const bRw = $("rewardScaleToggle"); if (bRw) bRw.textContent = (rewardScale === "log") ? "LOG" : "LIN";
+  const bApr = $("aprScaleToggle"); if (bApr) bApr.textContent = (aprScale === "log") ? "LOG" : "LIN";
+  const bPrice = $("priceScaleToggle"); if (bPrice) bPrice.textContent = (priceScale === "log") ? "LOG" : "LIN";
+
+  // sync TF buttons
+  updateNWTFButtons();
+  setPriceTfButtons();
+
+  // range labels
+  setText("stakeMax", String(stakeRangeMax || STAKE_TARGET_DEFAULT_MAX));
+  setText("rewardMax", String(rewardRangeMax || REWARD_TARGET_DEFAULT_MAX));
+
+  // kick: pull cloud + load fresh snapshots
+  cloudSetState("saving");
+  cloudPull(); // merge cloud into local if exists
+
+  // load immediate data
+  try {
+    await loadCandleSnapshot(true);
+    await loadPriceChartSelected(true);
+    await loadAccount(true);
+  } catch {}
+
+  // after first commit, mark UI ready
+  modeLoading = false;
+  refreshConnUI();
+  setUIReady(true);
+}
+
+/* ================= STAKED/REWARD BAR + RANGE CONTROL ================= */
+/* NOTE: HTML attuale ha ancora i bottoni range in alto.
+   Qui rendiamo la barra coerente col range impostato e aggiorniamo percentuali. */
+
+function renderStakeProgressBar(){
+  const bar = $("stakeBar");
+  const line = $("stakeLine");
+  const pctEl = $("stakePercent");
+  const minEl = $("stakeMin");
+  const maxEl = $("stakeMax");
+
+  const v = safe(stakeInj);
+  const max = Math.max(0.000001, safe(stakeRangeMax) || STAKE_TARGET_DEFAULT_MAX);
+  const pct = clamp((v / max) * 100, 0, 100);
+
+  if (minEl) minEl.textContent = "0";
+  if (maxEl) maxEl.textContent = String(max);
+
+  if (bar) {
+    bar.style.left = "0%";
+    bar.style.width = pct + "%";
+  }
+  if (line) line.style.left = pct + "%";
+  if (pctEl) pctEl.textContent = Math.round(pct) + "%";
+}
+
+function renderRewardProgressBar(){
+  const bar = $("rewardBar");
+  const line = $("rewardLine");
+  const pctEl = $("rewardPercent");
+  const minEl = $("rewardMin");
+  const maxEl = $("rewardMax");
+
+  const v = safe(rewardsInj);
+  const max = Math.max(0.00000001, safe(rewardRangeMax) || REWARD_TARGET_DEFAULT_MAX);
+  const pct = clamp((v / max) * 100, 0, 100);
+
+  if (minEl) minEl.textContent = "0";
+  if (maxEl) maxEl.textContent = String(max);
+
+  if (bar) {
+    bar.style.left = "0%";
+    bar.style.width = pct + "%";
+  }
+  if (line) line.style.left = pct + "%";
+  if (pctEl) pctEl.textContent = Math.round(pct) + "%";
+}
+
+/* ================= PRICE BARS (1D / 1W / 1M) ================= */
+function renderPriceBars(){
+  const p = safe(displayed.price || targetPrice);
+  if (!p) return;
+
+  // 1D
+  if (tfReady.d) {
+    const open = safe(candle.d.open), low = safe(candle.d.low), high = safe(candle.d.high);
+    renderBar($("priceBar"), $("priceLine"), p, open, low, high,
+      "linear-gradient(90deg, rgba(34,197,94,.10), rgba(34,197,94,.55))",
+      "linear-gradient(90deg, rgba(239,68,68,.55), rgba(239,68,68,.10))"
+    );
+
+    setText("priceMin", low ? low.toFixed(2) : "--");
+    setText("priceOpen", open ? open.toFixed(2) : "--");
+    setText("priceMax", high ? high.toFixed(2) : "--");
+
+    const pct = pctChange(p, open);
+    updatePerf("arrow24h", "pct24h", pct);
+
+    // event thresholds
+    maybePriceEvent(pct);
+
+    // flash extremes
+    if (lastExtremes.d.low != null && low && low < lastExtremes.d.low) flash($("priceMin"));
+    if (lastExtremes.d.high != null && high && high > lastExtremes.d.high) flash($("priceMax"));
+    lastExtremes.d.low = low || lastExtremes.d.low;
+    lastExtremes.d.high = high || lastExtremes.d.high;
+  }
+
+  // 1W
+  if (tfReady.w) {
+    const open = safe(candle.w.open), low = safe(candle.w.low), high = safe(candle.w.high);
+    renderBar($("weekBar"), $("weekLine"), p, open, low, high,
+      "linear-gradient(90deg, rgba(34,197,94,.10), rgba(34,197,94,.55))",
+      "linear-gradient(90deg, rgba(239,68,68,.55), rgba(239,68,68,.10))"
+    );
+
+    setText("weekMin", low ? low.toFixed(2) : "--");
+    setText("weekOpen", open ? open.toFixed(2) : "--");
+    setText("weekMax", high ? high.toFixed(2) : "--");
+
+    updatePerf("arrowWeek", "pctWeek", pctChange(p, open));
+
+    if (lastExtremes.w.low != null && low && low < lastExtremes.w.low) flash($("weekMin"));
+    if (lastExtremes.w.high != null && high && high > lastExtremes.w.high) flash($("weekMax"));
+    lastExtremes.w.low = low || lastExtremes.w.low;
+    lastExtremes.w.high = high || lastExtremes.w.high;
+  }
+
+  // 1M
+  if (tfReady.m) {
+    const open = safe(candle.m.open), low = safe(candle.m.low), high = safe(candle.m.high);
+    renderBar($("monthBar"), $("monthLine"), p, open, low, high,
+      "linear-gradient(90deg, rgba(34,197,94,.10), rgba(34,197,94,.55))",
+      "linear-gradient(90deg, rgba(239,68,68,.55), rgba(239,68,68,.10))"
+    );
+
+    setText("monthMin", low ? low.toFixed(2) : "--");
+    setText("monthOpen", open ? open.toFixed(2) : "--");
+    setText("monthMax", high ? high.toFixed(2) : "--");
+
+    updatePerf("arrowMonth", "pctMonth", pctChange(p, open));
+
+    if (lastExtremes.m.low != null && low && low < lastExtremes.m.low) flash($("monthMin"));
+    if (lastExtremes.m.high != null && high && high > lastExtremes.m.high) flash($("monthMax"));
+    lastExtremes.m.low = low || lastExtremes.m.low;
+    lastExtremes.m.high = high || lastExtremes.m.high;
+  }
+}
+
+/* ================= MAIN UI LOOP (smooth numbers + repaint) ================= */
+function uiTick(){
+  // connection UI always
+  refreshConnUI();
+
+  // smooth target price
+  if (targetPrice) displayed.price = tick(displayed.price || targetPrice, targetPrice);
+
+  // smooth account numbers
+  displayed.available = tick(displayed.available, availableInj);
+  displayed.stake = tick(displayed.stake, stakeInj);
+  displayed.rewards = tick(displayed.rewards, rewardsInj);
+  displayed.apr = tick(displayed.apr, apr);
+
+  // compute net worth
+  const totalInj = safe(displayed.available) + safe(displayed.stake) + safe(displayed.rewards);
+  const nwUsd = totalInj * safe(displayed.price);
+  displayed.netWorthUsd = tick(displayed.netWorthUsd, nwUsd);
+
+  // UI numbers
+  colorNumber($("available"), displayed.available, availableInj, 6);
+  colorNumber($("stake"), displayed.stake, stakeInj, 4);
+  colorNumber($("rewards"), displayed.rewards, rewardsInj, 7);
+
+  const aprEl = $("apr");
+  if (aprEl) aprEl.textContent = `${safe(displayed.apr).toFixed(2)}%`;
+
+  // price UI
+  colorNumber($("price"), displayed.price, targetPrice, 4);
+
+  // USD rows
+  setText("availableUsd", `≈ $${(safe(displayed.available) * safe(displayed.price)).toFixed(2)}`);
+  setText("stakeUsd", `≈ $${(safe(displayed.stake) * safe(displayed.price)).toFixed(2)}`);
+  setText("rewardsUsd", `≈ $${(safe(displayed.rewards) * safe(displayed.price)).toFixed(4)}`);
+
+  // Net worth
+  colorMoney($("netWorthUsd"), displayed.netWorthUsd, nwUsd, 2);
+  updateNetWorthMiniRows();
+
+  // bars
+  renderStakeProgressBar();
+  renderRewardProgressBar();
+  renderPriceBars();
+
+  // tools panel
+  updateTools();
+
+  // last update
+  setText("updated", `Last update: ${fmtHHMMSS(Date.now())}`);
+}
+
+/* ================= BOOTSTRAP ================= */
+function boot(){
+  // theme
+  applyTheme(theme);
+
+  // zoom plugin
+  ZOOM_OK = tryRegisterZoom();
+
+  // bind expand buttons
+  bindExpandButtons();
+
+  // pull-to-refresh
+  initPullToRefresh();
+
+  // cloud meta
+  cloudLoadMeta();
+  cloudRenderMeta();
+  cloudSetState("synced");
+
+  // init charts
+  initPriceChart();
+  initStakeChart();
+  initRewardChart();
+  initNWChart();
+  initAprChart();
+
+  // load local series for stored address
+  loadAprLocal();
+  loadEvents();
+
+  // default mode icon
+  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
+  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
+
+  // start mode
+  setMode(liveMode);
+
+  // if we have saved address, show it and load
+  if (address) {
+    setAddressDisplay(address);
+    commitAddress(address);
+  } else {
+    // still show UI
+    setUIReady(true);
+    refreshConnUI();
+  }
+
+  // UI tick loop
+  setInterval(uiTick, 250);
+}
+
+document.addEventListener("DOMContentLoaded", boot, { once:true });
+
+/* ================= SAFETY: ONLINE/OFFLINE EVENTS ================= */
+window.addEventListener("online", () => {
+  refreshConnUI();
+  cloudSetState("synced");
+  if (address) cloudPull();
+  if (liveMode) {
+    startTradeWS();
+    startKlineWS();
+  }
+}, { passive:true });
+
+window.addEventListener("offline", () => {
+  refreshConnUI();
+  cloudSetState("synced");
+}, { passive:true });
+
