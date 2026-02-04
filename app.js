@@ -5386,4 +5386,460 @@ animate();
 
 })();
 
+/* ================= PATCH FINAL (Validator + Controls + Reset + Stake precise) ================= */
+(function FINAL_PATCH_V203(){
+  "use strict";
+
+  /* ====== SETTINGS ====== */
+  const AUTO_INJECT_CARD_ACTIONS = true; // se non vuoi toccare HTML, lascia true
+
+  /* ====== 1) VALIDATOR: name ONLY inside Validator card + yellow pulsing dot ====== */
+  function getValidatorEls(){
+    const card = document.querySelector(".validator-card");
+    if (!card) return { card:null, line:null, dot:null };
+    return {
+      card,
+      line: card.querySelector("#validatorLine"),
+      dot:  card.querySelector("#validatorDot")
+    };
+  }
+
+  // Override: always keep it inside card (no random top IDs)
+  window.setValidatorLine = function(txt){
+    const { line } = getValidatorEls();
+    if (line) line.textContent = txt || "—";
+  };
+
+  // Requested behavior: yellow blinking dot + red offline
+  window.setValidatorDot = function(state){
+    const { dot } = getValidatorEls();
+    if (!dot) return;
+
+    dot.style.animation = "";
+    dot.style.boxShadow = "";
+
+    if (!hasInternet()) {
+      dot.style.background = "#ef4444";
+      dot.style.boxShadow = "0 0 16px rgba(239,68,68,.35)";
+      return;
+    }
+
+    // Always yellow pulsing when online (per tua richiesta)
+    dot.style.background = "#f59e0b";
+    dot.style.boxShadow = "0 0 16px rgba(245,158,11,.45)";
+    dot.style.animation = "evPulse 1.1s infinite";
+  };
+
+  // Ensure validator card exists + always show moniker in that card
+  const _ensureValidatorCard = window.ensureValidatorCard;
+  if (typeof _ensureValidatorCard === "function") {
+    window.ensureValidatorCard = function(){
+      const card = _ensureValidatorCard();
+      // force dot style coherence
+      setValidatorDot("loading");
+      return card;
+    };
+  }
+
+  /* Better "effective validator": choose largest delegation (not first) */
+  async function pickPrimaryValidatorByLargestDelegation(){
+    if (!address || !hasInternet()) return;
+    try{
+      const base = "https://lcd.injective.network";
+      const s = await fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`);
+      const delgs = s?.delegation_responses || [];
+      if (!delgs.length) {
+        loadValidatorInfo("");
+        return;
+      }
+      let best = delgs[0];
+      let bestAmt = safe(best?.balance?.amount);
+      for (const d of delgs) {
+        const amt = safe(d?.balance?.amount);
+        if (amt > bestAmt) { best = d; bestAmt = amt; }
+      }
+      const op = best?.delegation?.validator_address || "";
+      if (op && op !== validatorAddr) loadValidatorInfo(op);
+    } catch {
+      // silent
+    }
+  }
+
+  // Wrap loadAccount → after success pick largest validator and keep in card
+  if (!window.__patchedLoadAccountFinal && typeof window.loadAccount === "function") {
+    window.__patchedLoadAccountFinal = true;
+    const _loadAccount = window.loadAccount;
+    window.loadAccount = async function(isRefresh=false){
+      await _loadAccount(isRefresh);
+      if (accountOnline) {
+        ensureValidatorCard();
+        setValidatorDot("loading");
+        pickPrimaryValidatorByLargestDelegation();
+      } else {
+        setValidatorDot("fail");
+      }
+    };
+  }
+
+  /* ====== 2) STAKE: create a point ONLY on increase (precise), never on decrease/baseline ====== */
+  if (!window.__patchedStakeIncreaseOnly && typeof window.maybeAddStakePoint === "function") {
+    window.__patchedStakeIncreaseOnly = true;
+
+    window.maybeAddStakePoint = function(currentStake){
+      const s = safe(currentStake);
+      if (!Number.isFinite(s)) return;
+      const rounded = Number(s.toFixed(6));
+
+      // baseline: just initialize reference, DO NOT push a point
+      if (!stakeBaselineCaptured) {
+        lastStakeRecordedRounded = rounded;
+        stakeBaselineCaptured = true;
+        // keep series empty until first real increase
+        saveStakeSeriesLocalOnly();
+        drawStakeChart();
+        return;
+      }
+
+      if (lastStakeRecordedRounded == null) {
+        lastStakeRecordedRounded = rounded;
+        return;
+      }
+
+      if (rounded === lastStakeRecordedRounded) return;
+
+      const delta = rounded - lastStakeRecordedRounded;
+      // always update last known, so next increases are correct
+      lastStakeRecordedRounded = rounded;
+
+      // only record if increase
+      if (delta <= 0) return;
+
+      stakeLabels.push(nowLabel());
+      stakeData.push(rounded);
+      stakeMoves.push(1);
+      stakeTypes.push("Stake increased");
+
+      // event (stake increased)
+      pushEvent({
+        type: "stake",
+        title: "Stake increased",
+        value: `+${delta.toFixed(6)} INJ`,
+        status: hasInternet() ? "ok" : "pending"
+      });
+
+      saveStakeSeries();
+      drawStakeChart();
+    };
+  }
+
+  /* ====== 3) EVENTS: remove UI/error noise from Event page ====== */
+  // 3a) prevent saving UI/debug/error events at source
+  if (!window.__patchedPushEventFilter && typeof window.pushEvent === "function") {
+    window.__patchedPushEventFilter = true;
+    const _pushEvent = window.pushEvent;
+
+    window.pushEvent = function(ev){
+      const t = String(ev?.type || "");
+      const title = String(ev?.title || "");
+      if (t === "ui" || t === "debug" || t === "error") {
+        // show toast only (optional), but don't persist
+        try { showToastEvent({ t:Date.now(), title, value:String(ev?.value||""), status:"pending" }); } catch {}
+        return;
+      }
+      // block specific noisy titles too
+      if (/timeframe locked|manual refresh|js error|promise error/i.test(title)) {
+        try { showToastEvent({ t:Date.now(), title, value:String(ev?.value||""), status:"pending" }); } catch {}
+        return;
+      }
+      return _pushEvent(ev);
+    };
+  }
+
+  // 3b) clean rendering if old noisy events are already stored
+  if (!window.__patchedRenderEventRows && typeof window.renderEventRows === "function") {
+    window.__patchedRenderEventRows = true;
+    const _render = window.renderEventRows;
+
+    window.renderEventRows = function(){
+      const orig = eventsAll;
+      const filtered = (orig || []).filter(ev => {
+        const t = String(ev?.type || "");
+        const title = String(ev?.title || "");
+        if (t === "ui" || t === "debug" || t === "error") return false;
+        if (/timeframe locked|manual refresh|js error|promise error/i.test(title)) return false;
+        return true;
+      });
+
+      // render using filtered without touching storage
+      eventsAll = filtered;
+      try { _render(); } finally { eventsAll = orig; }
+    };
+  }
+
+  /* ====== 4) EVENT PAGE: add Reset Stake+Reward button (only current address) ====== */
+  function resetStakeRewardForCurrentWallet(){
+    if (!address) return;
+
+    // Stake reset (for this wallet)
+    stakeLabels = [];
+    stakeData = [];
+    stakeMoves = [];
+    stakeTypes = [];
+    stakeBaselineCaptured = false;
+    lastStakeRecordedRounded = null;
+    try { saveStakeSeriesLocalOnly(); } catch {}
+    try { drawStakeChart(); } catch {}
+
+    // Reward reset (for this wallet)
+    wdLabelsAll = [];
+    wdValuesAll = [];
+    wdTimesAll  = [];
+    wdLastRewardsSeen = null;
+    try { saveWdAllLocalOnly(); } catch {}
+    try {
+      rebuildWdView();
+      goRewardLive();
+    } catch {}
+
+    // keep everything strictly tied to this address
+    try { cloudRenderCounts(); cloudSchedulePush(); } catch {}
+
+    // subtle toast (not persisted as event)
+    try { showToastEvent({ t:Date.now(), title:"Reset applied", value:`Stake + Reward cleared for ${shortAddr(address)}`, status:"ok" }); } catch {}
+  }
+
+  function injectEventResetButton(){
+    ensureEventPage();
+    if (!eventPage) return;
+
+    // If already injected, stop
+    if (eventPage.querySelector("#evResetBtn")) return;
+
+    const headerRow = eventPage.querySelector("div[style*='justify-content:space-between']");
+    if (!headerRow) return;
+
+    // Insert button near "Close"
+    const closeBtn = eventPage.querySelector("#eventCloseBtn");
+    const wrapRight = document.createElement("div");
+    wrapRight.style.display = "flex";
+    wrapRight.style.alignItems = "center";
+    wrapRight.style.gap = "10px";
+
+    const resetBtn = document.createElement("button");
+    resetBtn.id = "evResetBtn";
+    resetBtn.type = "button";
+    resetBtn.textContent = "Reset Stake + Reward";
+    resetBtn.style.height = "40px";
+    resetBtn.style.padding = "0 14px";
+    resetBtn.style.borderRadius = "14px";
+    resetBtn.style.fontWeight = "950";
+    resetBtn.style.cursor = "pointer";
+
+    // theme-friendly
+    const isLight = (document.body.dataset.theme === "light");
+    resetBtn.style.color = isLight ? "rgba(15,23,42,.92)" : "rgba(249,250,251,.92)";
+    resetBtn.style.border = isLight ? "1px solid rgba(15,23,42,.14)" : "1px solid rgba(255,255,255,.14)";
+    resetBtn.style.background = isLight ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)";
+
+    resetBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!address) return;
+
+      const ok = confirm(
+        `Reset Stake + Reward history for this wallet?\n\n${address}\n\nThis cannot be undone.`
+      );
+      if (!ok) return;
+      resetStakeRewardForCurrentWallet();
+      // update event table view too (clean)
+      try { renderEventRows(); } catch {}
+    }, { passive:false });
+
+    // Move closeBtn into right wrap
+    if (closeBtn) {
+      closeBtn.parentElement?.removeChild(closeBtn);
+      wrapRight.appendChild(resetBtn);
+      wrapRight.appendChild(closeBtn);
+      headerRow.appendChild(wrapRight);
+    } else {
+      headerRow.appendChild(resetBtn);
+    }
+  }
+
+  /* ====== 5) Card controls: LOG/LIN + EXPAND under cards (non invasive) ====== */
+  function chartHasValidLogData(ch){
+    const data = ch?.data?.datasets?.[0]?.data || [];
+    const positives = data.filter(v => safe(v) > 0);
+    return positives.length > 0;
+  }
+
+  function setChartScale(ch, toLog){
+    if (!ch?.options?.scales?.y) return false;
+
+    if (toLog) {
+      if (!chartHasValidLogData(ch)) return false;
+      ch.options.scales.y.type = "logarithmic";
+      // keep ticks readable
+      if (!ch.options.scales.y.ticks) ch.options.scales.y.ticks = {};
+      // no special colors here; uses existing callbacks
+    } else {
+      ch.options.scales.y.type = "linear";
+    }
+    ch.update("none");
+    return true;
+  }
+
+  // Fullscreen toggle
+  let zoomBackdrop = null;
+  function ensureZoomBackdrop(){
+    if (zoomBackdrop) return zoomBackdrop;
+    zoomBackdrop = document.createElement("div");
+    zoomBackdrop.className = "card-zoom-backdrop";
+    zoomBackdrop.style.display = "none";
+    zoomBackdrop.addEventListener("click", () => exitZoom(), { passive:true });
+    document.body.appendChild(zoomBackdrop);
+    return zoomBackdrop;
+  }
+
+  function exitZoom(){
+    document.body.classList.remove("card-zoom-lock");
+    const z = document.querySelector(".card.card-zoomed");
+    if (z) z.classList.remove("card-zoomed");
+    if (zoomBackdrop) zoomBackdrop.style.display = "none";
+    // resize charts
+    try { chart?.resize?.(); } catch {}
+    try { netWorthChart?.resize?.(); } catch {}
+    try { stakeChart?.resize?.(); } catch {}
+    try { rewardChart?.resize?.(); } catch {}
+  }
+
+  function toggleZoom(cardEl){
+    if (!cardEl) return;
+    ensureZoomBackdrop();
+
+    const isZoomed = cardEl.classList.contains("card-zoomed");
+    if (isZoomed) {
+      exitZoom();
+      return;
+    }
+
+    // close any other zoomed card
+    const other = document.querySelector(".card.card-zoomed");
+    if (other) other.classList.remove("card-zoomed");
+
+    cardEl.classList.add("card-zoomed");
+    zoomBackdrop.style.display = "block";
+    document.body.classList.add("card-zoom-lock");
+
+    // force chart resize
+    setTimeout(() => {
+      try { chart?.resize?.(); } catch {}
+      try { netWorthChart?.resize?.(); } catch {}
+      try { stakeChart?.resize?.(); } catch {}
+      try { rewardChart?.resize?.(); } catch {}
+    }, 50);
+  }
+
+  function bindCardActions(cardEl, getChart){
+    if (!cardEl) return;
+
+    // find actions container
+    let actions = cardEl.querySelector(".card-actions");
+    if (!actions && AUTO_INJECT_CARD_ACTIONS) {
+      actions = document.createElement("div");
+      actions.className = "card-actions";
+      actions.innerHTML = `
+        <button class="icon-btn" type="button" data-action="scale" aria-label="Switch scale log/linear">LIN</button>
+        <button class="icon-btn" type="button" data-action="expand" aria-label="Expand card">⛶</button>
+      `;
+      cardEl.appendChild(actions);
+    }
+    if (!actions) return;
+
+    const scaleBtn = actions.querySelector('[data-action="scale"]');
+    const expandBtn = actions.querySelector('[data-action="expand"]');
+
+    // init label
+    if (scaleBtn) scaleBtn.textContent = "LIN";
+
+    scaleBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      const ch = getChart();
+      if (!ch) return;
+
+      const isLog = (ch.options?.scales?.y?.type === "logarithmic");
+      const ok = setChartScale(ch, !isLog);
+      if (!ok) {
+        try { showToastEvent({ t:Date.now(), title:"Log scale unavailable", value:"Need values > 0", status:"pending" }); } catch {}
+        return;
+      }
+      scaleBtn.textContent = (!isLog) ? "LOG" : "LIN";
+    }, { passive:false });
+
+    expandBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      toggleZoom(cardEl);
+    }, { passive:false });
+  }
+
+  function setupControls(){
+    // Bind per chart card by finding closest .card from canvas IDs
+    const nwCanvas = document.getElementById("netWorthChart");
+    const stakeCanvas = document.getElementById("stakeChart");
+    const rewardCanvas = document.getElementById("rewardChart");
+    const priceCanvas = document.getElementById("priceChart");
+
+    const nwCard = nwCanvas?.closest?.(".card");
+    const stakeCardEl = stakeCanvas?.closest?.(".card");
+    const rewardCardEl = rewardCanvas?.closest?.(".card");
+    const priceCardEl = priceCanvas?.closest?.(".card");
+
+    bindCardActions(nwCard, () => netWorthChart);
+    bindCardActions(stakeCardEl, () => stakeChart);
+    bindCardActions(rewardCardEl, () => rewardChart);
+    bindCardActions(priceCardEl, () => chart);
+  }
+
+  /* ====== 6) Staked y-axis like Reward (numeric column right, not ugly) ====== */
+  function patchStakeAxisLikeReward(){
+    if (!stakeChart?.options?.scales?.y) return;
+    stakeChart.options.scales.y.position = "right";
+    stakeChart.options.scales.y.ticks = stakeChart.options.scales.y.ticks || {};
+    stakeChart.options.scales.y.ticks.mirror = true;
+    stakeChart.options.scales.y.ticks.padding = 6;
+    stakeChart.update("none");
+  }
+
+  /* ====== RUN PATCH ====== */
+  function run(){
+    try { ensureValidatorCard(); setValidatorDot("loading"); } catch {}
+    try { setupControls(); } catch {}
+    try { injectEventResetButton(); } catch {}
+    try { patchStakeAxisLikeReward(); } catch {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", run, { passive:true });
+  } else {
+    run();
+  }
+
+  // keep event page button styled on theme change
+  const _applyTheme = window.applyTheme;
+  if (typeof _applyTheme === "function" && !window.__patchedApplyThemeForResetBtn) {
+    window.__patchedApplyThemeForResetBtn = true;
+    window.applyTheme = function(t){
+      _applyTheme(t);
+      try{
+        const btn = document.querySelector("#evResetBtn");
+        if (btn) {
+          const isLight = (document.body.dataset.theme === "light");
+          btn.style.color = isLight ? "rgba(15,23,42,.92)" : "rgba(249,250,251,.92)";
+          btn.style.border = isLight ? "1px solid rgba(15,23,42,.14)" : "1px solid rgba(255,255,255,.14)";
+          btn.style.background = isLight ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)";
+        }
+      } catch {}
+    };
+  }
+})();
 
