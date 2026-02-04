@@ -3090,2756 +3090,341 @@ function animate() {
 }
 animate();
 
-/* =======================================================================
-   INJ PORTFOLIO PATCH v2.1.0
-   Incolla in fondo a app.js (dopo animate();)
-   ======================================================================= */
-(() => {
+/* ================= PATCH v2.0.2.1 — Clean headers + bottom controls + validator card + advanced reset ================= */
+(function(){
   "use strict";
 
-  const PATCH_FLAG = "__INJ_PATCH_V210__";
-  if (window[PATCH_FLAG]) return;
-  window[PATCH_FLAG] = true;
-
-  const PATCH_VER = "2.1.0";
-  const $id = (id) => document.getElementById(id);
-
-  const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
-  const safe = (n) => (Number.isFinite(+n) ? +n : 0);
-
-  const onReady = (fn) => {
-    if (document.readyState !== "loading") fn();
-    else document.addEventListener("DOMContentLoaded", fn, { once: true });
-  };
-
-  function getAddr() {
-    try {
-      const a = (typeof address === "string" ? address : localStorage.getItem("inj_address") || "").trim();
-      return a;
-    } catch {
-      return "";
-    }
-  }
-
-  function keyFor(suffix) {
-    const a = getAddr();
-    return a ? `inj_patch_${suffix}_${a}` : `inj_patch_${suffix}`;
-  }
-
-  function loadJSON(k, fallback) {
-    try {
-      const raw = localStorage.getItem(k);
-      if (!raw) return fallback;
-      return JSON.parse(raw);
-    } catch {
-      return fallback;
-    }
-  }
-
-  function saveJSON(k, v) {
-    try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
-  }
-
-  function fmtCompactUsd(v) {
-    v = safe(v);
-    const av = Math.abs(v);
-    if (av >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
-    if (av >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
-    if (av >= 1e3) return `$${(v / 1e3).toFixed(2)}k`;
-    return `$${v.toFixed(2)}`;
-  }
-
-  function fmtSmart(v) {
-    v = safe(v);
-    const av = Math.abs(v);
-    if (av >= 1000) return v.toFixed(0);
-    if (av >= 100) return v.toFixed(1);
-    if (av >= 10) return v.toFixed(2);
-    if (av >= 1) return v.toFixed(3);
-    if (av >= 0.1) return v.toFixed(4);
-    return v.toFixed(6);
-  }
-
-  function themeIsLight() {
-    return document.body?.dataset?.theme === "light";
-  }
-
-  function makeMiniBtn(text, title) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = text;
-    b.title = title || "";
-    b.className = "patch-mini-btn";
-    b.style.cssText = `
-      height:30px; padding:0 10px; border-radius:12px;
-      border:1px solid ${themeIsLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.14)"};
-      background:${themeIsLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
-      color:${themeIsLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)"};
-      font-weight:900; letter-spacing:.02em; cursor:pointer;
-      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-      user-select:none;
-    `;
-    return b;
-  }
-
-  function makeIconBtn(icon, title) {
-    const b = makeMiniBtn(icon, title);
-    b.style.width = "34px";
-    b.style.padding = "0";
-    b.style.display = "grid";
-    b.style.placeItems = "center";
-    return b;
-  }
-
-  function ensureCardRelative(card) {
-    if (!card) return;
-    const cs = getComputedStyle(card);
-    if (cs.position === "static") card.style.position = "relative";
-  }
-
-  function findCardByChildId(childId) {
-    const el = $id(childId);
-    if (!el) return null;
-    return el.closest(".card") || el.closest("[data-card]") || el.parentElement;
-  }
-
-  /* ===================== SCALE: linear/log ===================== */
-  function computePositiveMin(data) {
-    let m = Infinity;
-    for (const x of data || []) {
-      const v = safe(x);
-      if (v > 0 && v < m) m = v;
-    }
-    return Number.isFinite(m) ? m : 1;
-  }
-
-  function applyTightRightAxis(chart, axisKey, kind) {
-    try {
-      if (!chart?.options?.scales?.[axisKey]) return;
-      const ax = chart.options.scales[axisKey];
-
-      ax.position = "right";
-      ax.ticks = ax.ticks || {};
-      ax.grid = ax.grid || {};
-
-      ax.ticks.mirror = true;
-      ax.ticks.padding = 4;
-      ax.ticks.maxTicksLimit = 4;
-      ax.ticks.color = (typeof axisTickColor === "function") ? axisTickColor() : (themeIsLight() ? "rgba(15,23,42,.65)" : "rgba(249,250,251,.60)");
-      ax.grid.color = (typeof axisGridColor === "function") ? axisGridColor() : (themeIsLight() ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)");
-      ax.border = ax.border || {};
-      ax.border.display = false;
-
-      // shorten labels
-      if (kind === "usd") ax.ticks.callback = (v) => fmtCompactUsd(v);
-      else ax.ticks.callback = (v) => fmtSmart(v);
-
-      chart.options.layout = chart.options.layout || {};
-      chart.options.layout.padding = chart.options.layout.padding || {};
-      chart.options.layout.padding.right = Math.min(18, safe(chart.options.layout.padding.right || 18));
-
-      chart.update("none");
-    } catch {}
-  }
-
-  function setYAxisScale(chart, axisKey, type /* linear|logarithmic */) {
-    try {
-      if (!chart?.options?.scales?.[axisKey]) return;
-      const ax = chart.options.scales[axisKey];
-      ax.type = type;
-
-      // for log axis, force positive suggestedMin
-      if (type === "logarithmic") {
-        const ds = chart.data?.datasets?.[0]?.data || [];
-        const minPos = computePositiveMin(ds);
-        ax.suggestedMin = Math.max(minPos * 0.95, minPos / 1.8, 1e-8);
-      } else {
-        ax.suggestedMin = undefined;
-      }
-      chart.update("none");
-    } catch {}
-  }
-
-  function getScaleState(name) {
-    const st = loadJSON(keyFor(`scale_${name}`), { y: "linear" });
-    const y = (st?.y === "logarithmic") ? "logarithmic" : "linear";
-    return { y };
-  }
-
-  function setScaleState(name, yType) {
-    saveJSON(keyFor(`scale_${name}`), { y: yType });
-  }
-
-  function ensureScaleToggleOnCard(card, name, getChart, axisKey = "y") {
-    if (!card) return;
-
-    ensureCardRelative(card);
-    if (card.querySelector(`.patch-scale-toggle[data-name="${name}"]`)) return;
-
-    const btn = makeMiniBtn("LIN", "Switch Y scale: Linear / Log");
-    btn.classList.add("patch-scale-toggle");
-    btn.dataset.name = name;
-
-    // place top-right with small offset (avoid collisions)
-    btn.style.position = "absolute";
-    btn.style.top = "12px";
-    btn.style.right = "12px";
-    btn.style.zIndex = "5";
-
-    function syncLabel() {
-      const st = getScaleState(name);
-      btn.textContent = (st.y === "logarithmic") ? "LOG" : "LIN";
-    }
-
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const ch = getChart();
-      if (!ch) return;
-
-      const cur = getScaleState(name).y;
-      const next = (cur === "linear") ? "logarithmic" : "linear";
-      setScaleState(name, next);
-
-      // apply
-      applyTightRightAxis(ch, axisKey, name.includes("nw") || name.includes("price") || name.includes("apr") ? "usd" : "num");
-      setYAxisScale(ch, axisKey, next);
-
-      // also force autoscale once
-      autoscaleYToVisible(ch, axisKey);
-      syncLabel();
-    });
-
-    card.appendChild(btn);
-    syncLabel();
-  }
-
-  /* ===================== AUTOSCALE Y to visible slice ===================== */
-  function autoscaleYToVisible(chart, axisKey = "y") {
-    try {
-      if (!chart?.data?.datasets?.[0]) return;
-
-      const data = chart.data.datasets[0].data || [];
-      if (!data.length) return;
-
-      // Determine visible indices on category scale (same logic as reward timeline usage)
-      let minIdx = 0;
-      let maxIdx = data.length - 1;
-
-      // prefer options range if present (category scale min/max are indices)
-      const xOpt = chart.options?.scales?.x;
-      if (xOpt && Number.isFinite(+xOpt.min)) minIdx = clamp(Math.floor(+xOpt.min), 0, data.length - 1);
-      if (xOpt && Number.isFinite(+xOpt.max)) maxIdx = clamp(Math.ceil(+xOpt.max), 0, data.length - 1);
-
-      if (maxIdx < minIdx) [minIdx, maxIdx] = [maxIdx, minIdx];
-
-      const slice = data.slice(minIdx, maxIdx + 1).map(safe).filter((v) => Number.isFinite(v));
-      if (!slice.length) return;
-
-      let mn = Math.min(...slice);
-      let mx = Math.max(...slice);
-
-      // padding
-      const span = Math.max(1e-12, mx - mn);
-      mn = mn - span * 0.08;
-      mx = mx + span * 0.12;
-
-      const ax = chart.options?.scales?.[axisKey];
-      if (!ax) return;
-
-      if (ax.type === "logarithmic") {
-        // keep >0
-        const minPos = computePositiveMin(slice);
-        ax.suggestedMin = Math.max(minPos * 0.92, minPos / 2, 1e-8);
-        ax.suggestedMax = Math.max(mx, minPos * 3);
-      } else {
-        ax.suggestedMin = mn;
-        ax.suggestedMax = mx;
-      }
-
-      chart.update("none");
-    } catch {}
-  }
-
-  /* ===================== COPY ADDRESS (📋) ===================== */
-  function ensureCopyAddressBtn() {
-    const host = $id("addressDisplay");
-    if (!host) return;
-    if (host.querySelector(".patch-copy-addr")) return;
-
-    const btn = makeIconBtn("📋", "Copy full address");
-    btn.classList.add("patch-copy-addr");
-    btn.style.marginLeft = "10px";
-    btn.style.height = "28px";
-    btn.style.width = "34px";
-    btn.style.borderRadius = "12px";
-
-    btn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const a = getAddr();
-      if (!a) return;
-
-      try {
-        await navigator.clipboard.writeText(a);
-        if (typeof showToastEvent === "function") {
-          showToastEvent({ title: "Copied", t: Date.now(), value: a, status: "ok" });
-        }
-      } catch {
-        // fallback
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = a;
-          ta.style.position = "fixed";
-          ta.style.left = "-9999px";
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-          if (typeof showToastEvent === "function") {
-            showToastEvent({ title: "Copied", t: Date.now(), value: a, status: "ok" });
-          }
-        } catch {}
-      }
-    });
-
-    // try place next to tag, otherwise append
-    const tag = host.querySelector(".tag") || host.firstElementChild;
-    if (tag && tag.parentElement) {
-      tag.insertAdjacentElement("afterend", btn);
-    } else {
-      host.appendChild(btn);
-    }
-  }
-
-  /* ===================== MENU labels near icons ===================== */
-  function ensureMenuLabels() {
-    const themeBtn = $id("themeToggle");
-    if (themeBtn && !themeBtn.querySelector(".patch-label")) {
-      const s = document.createElement("span");
-      s.className = "patch-label";
-      s.textContent = "Theme";
-      s.style.cssText = "margin-left:10px;font-weight:900;opacity:.82;font-size:.82rem;";
-      themeBtn.appendChild(s);
-    }
-
-    const modeBtn = $id("liveToggle");
-    if (modeBtn && !modeBtn.querySelector(".patch-label")) {
-      const s = document.createElement("span");
-      s.className = "patch-label";
-      s.textContent = "Mode";
-      s.style.cssText = "margin-left:10px;font-weight:900;opacity:.82;font-size:.82rem;";
-      modeBtn.appendChild(s);
-    }
-  }
-
-  /* ===================== TARGET gear (Stake/Reward) ===================== */
-  function ensureModalCSS() {
-    if (document.getElementById("patchModalCSS")) return;
-    const st = document.createElement("style");
-    st.id = "patchModalCSS";
-    st.textContent = `
-      .patch-modal-backdrop{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
-      .patch-modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1000;width:min(520px,92vw);
-        border-radius:18px;border:1px solid rgba(255,255,255,.14);background:rgba(11,18,32,.92);color:rgba(249,250,251,.92);
-        box-shadow:0 30px 110px rgba(0,0,0,.55);padding:14px;}
-      body[data-theme="light"] .patch-modal{background:rgba(240,242,246,.96);color:rgba(15,23,42,.92);border-color:rgba(15,23,42,.14);}
-      .patch-modal h3{margin:0 0 6px 0;font-size:1.02rem;letter-spacing:.02em;}
-      .patch-modal p{margin:0 0 12px 0;opacity:.75;font-weight:800;font-size:.86rem;}
-      .patch-modal .row{display:flex;gap:10px;align-items:center;}
-      .patch-modal input{flex:1;height:40px;border-radius:14px;padding:0 12px;font-weight:900;outline:none;
-        border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;}
-      body[data-theme="light"] .patch-modal input{border-color:rgba(15,23,42,.14);background:rgba(15,23,42,.06);}
-    `;
-    document.head.appendChild(st);
-  }
-
-  function openTargetModal(kind /* stake|reward */) {
-    ensureModalCSS();
-
-    const a = getAddr();
-    if (!a) return;
-
-    const key = keyFor(kind === "stake" ? "stake_target" : "reward_target");
-    const cur = safe(loadJSON(key, null));
-
-    const back = document.createElement("div");
-    back.className = "patch-modal-backdrop";
-
-    const box = document.createElement("div");
-    box.className = "patch-modal";
-    box.innerHTML = `
-      <h3>${kind === "stake" ? "Stake target" : "Reward range"}</h3>
-      <p>Imposta un valore massimo (da 0 a MAX). Viene salvato per questo wallet e non si resetta.</p>
-      <div class="row">
-        <input id="patchTargetInput" inputmode="decimal" placeholder="Es: 1200" value="${cur ? String(cur) : ""}"/>
-        <button id="patchApplyBtn" type="button" style="height:40px;border-radius:14px;padding:0 14px;font-weight:950;cursor:pointer;
-          border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;">Apply</button>
-        <button id="patchCancelBtn" type="button" style="height:40px;border-radius:14px;padding:0 14px;font-weight:950;cursor:pointer;
-          border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;">Cancel</button>
-      </div>
-      <div style="margin-top:10px;display:flex;justify-content:space-between;gap:10px;opacity:.8;font-weight:850;font-size:.82rem;">
-        <span>Tip: lascia vuoto per tornare su Auto</span>
-        <button id="patchClearBtn" type="button" style="height:32px;border-radius:12px;padding:0 12px;font-weight:950;cursor:pointer;
-          border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;">Clear</button>
-      </div>
-    `;
-
-    function close() { try { back.remove(); box.remove(); } catch {} }
-
-    back.addEventListener("click", close, { passive: true });
-    box.querySelector("#patchCancelBtn")?.addEventListener("click", close, { passive: true });
-
-    box.querySelector("#patchClearBtn")?.addEventListener("click", () => {
-      try { localStorage.removeItem(key); } catch {}
-      if (typeof showToastEvent === "function") showToastEvent({ title: "Saved", t: Date.now(), value: "Auto mode", status: "ok" });
-      close();
-    }, { passive: true });
-
-    box.querySelector("#patchApplyBtn")?.addEventListener("click", () => {
-      const v = box.querySelector("#patchTargetInput")?.value;
-      const num = safe(v);
-      if (!v || !Number.isFinite(num) || num <= 0) {
-        try { localStorage.removeItem(key); } catch {}
-        if (typeof showToastEvent === "function") showToastEvent({ title: "Saved", t: Date.now(), value: "Auto mode", status: "ok" });
-        close();
-        return;
-      }
-      saveJSON(key, num);
-      if (typeof showToastEvent === "function") showToastEvent({ title: "Saved", t: Date.now(), value: `Max = ${num}`, status: "ok" });
-      close();
-    }, { passive: true });
-
-    document.body.appendChild(back);
-    document.body.appendChild(box);
-
-    setTimeout(() => box.querySelector("#patchTargetInput")?.focus(), 30);
-  }
-
-  function ensureGearNearBar(barId, kind) {
-    const bar = $id(barId);
-    if (!bar) return;
-    const host = bar.parentElement;
-    if (!host) return;
-    if (host.querySelector(`.patch-gear[data-kind="${kind}"]`)) return;
-
-    const gear = makeIconBtn("⚙️", kind === "stake" ? "Set stake target" : "Set reward range");
-    gear.classList.add("patch-gear");
-    gear.dataset.kind = kind;
-    gear.style.position = "absolute";
-    gear.style.right = "8px";
-    gear.style.top = "50%";
-    gear.style.transform = "translateY(-50%)";
-    gear.style.zIndex = "3";
-
-    const hs = getComputedStyle(host);
-    if (hs.position === "static") host.style.position = "relative";
-    host.appendChild(gear);
-
-    gear.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openTargetModal(kind);
-    }, { passive: false });
-  }
-
-  /* ===================== Reward estimates row ===================== */
-  function ensureRewardEstimateRow() {
-    const card = findCardByChildId("rewardBar") || findCardByChildId("rewards");
-    if (!card) return;
-    if (card.querySelector("#patchRewardEstRow")) return;
-
-    const row = document.createElement("div");
-    row.id = "patchRewardEstRow";
-    row.style.cssText = `
-      margin-top:10px; display:flex; flex-wrap:wrap; gap:10px;
-      font-weight:900; opacity:.86; font-size:.86rem;
-    `;
-    row.innerHTML = `
-      <span id="patchEstDay">Day: —</span>
-      <span id="patchEstWeek">Week: —</span>
-      <span id="patchEstMonth">Month: —</span>
-    `;
-
-    // insert under reward bar if possible
-    const rb = $id("rewardBar");
-    const anchor = rb?.closest(".bar-wrap") || rb?.parentElement || card;
-    anchor.insertAdjacentElement("afterend", row);
-  }
-
-  function updateRewardEstimates() {
-    const a = getAddr();
-    if (!a) return;
-
-    const estDay = $id("patchEstDay");
-    const estWeek = $id("patchEstWeek");
-    const estMonth = $id("patchEstMonth");
-    if (!estDay || !estWeek || !estMonth) return;
-
-    // Use staked * APR (simple estimate)
-    const st = safe(typeof stakeInj !== "undefined" ? stakeInj : 0);
-    const A = safe(typeof apr !== "undefined" ? apr : 0) / 100;
-    const day = st * A / 365;
-    const week = day * 7;
-    const month = day * 30;
-
-    estDay.textContent = `Day: ${day.toFixed(4)} INJ`;
-    estWeek.textContent = `Week: ${week.toFixed(4)} INJ`;
-    estMonth.textContent = `Month: ${month.toFixed(4)} INJ`;
-  }
-
-  /* ===================== Override bars to use user targets ===================== */
-  function getUserTarget(kind) {
-    const key = keyFor(kind === "stake" ? "stake_target" : "reward_target");
-    const v = loadJSON(key, null);
-    const n = safe(v);
-    return (Number.isFinite(n) && n > 0) ? n : null;
-  }
-
-  function patchBarsLoop() {
-    try {
-      const a = getAddr();
-      if (a) {
-        // Stake override
-        const stakeTarget = getUserTarget("stake");
-        if (stakeTarget) {
-          const st = safe(typeof displayed !== "undefined" ? displayed.stake : (typeof stakeInj !== "undefined" ? stakeInj : 0));
-          const pct = clamp((st / stakeTarget) * 100, 0, 100);
-
-          const stakeBar = $id("stakeBar");
-          const stakeLine = $id("stakeLine");
-          if (stakeBar) stakeBar.style.width = pct + "%";
-          if (stakeLine) stakeLine.style.left = pct + "%";
-
-          const sp = $id("stakePercent");
-          const smx = $id("stakeMax");
-          if (sp) sp.textContent = pct.toFixed(1) + "%";
-          if (smx) smx.textContent = String(stakeTarget);
-        }
-
-        // Reward override
-        const rewardTarget = getUserTarget("reward");
-        if (rewardTarget) {
-          const rw = safe(typeof displayed !== "undefined" ? displayed.rewards : (typeof rewardsInj !== "undefined" ? rewardsInj : 0));
-          const pct = clamp((rw / rewardTarget) * 100, 0, 100);
-
-          const rewardBar = $id("rewardBar");
-          const rewardLine = $id("rewardLine");
-          if (rewardBar) rewardBar.style.width = pct + "%";
-          if (rewardLine) rewardLine.style.left = pct + "%";
-
-          const rp = $id("rewardPercent");
-          const rmx = $id("rewardMax");
-          if (rp) rp.textContent = pct.toFixed(1) + "%";
-          if (rmx) rmx.textContent = rewardTarget.toFixed(4).replace(/0+$/,"").replace(/\.$/,"");
-        }
-
-        updateRewardEstimates();
-      }
-    } catch {}
-    requestAnimationFrame(patchBarsLoop);
-  }
-
-  /* ===================== Reward filter options (All / <0.05 / >=0.05 / >=0.1) ===================== */
-  function ensureRewardFilterOptions() {
-    const sel = $id("rewardFilter");
-    if (!sel) return;
-
-    const hasPatch = Array.from(sel.options || []).some(o => o.value === "lt005");
-    if (hasPatch) return;
-
-    // Replace options safely (keep existing as fallback)
-    sel.innerHTML = "";
-    const opts = [
-      ["all", "All"],
-      ["lt005", "< 0.05"],
-      ["ge005", "≥ 0.05"],
-      ["ge01",  "≥ 0.1"]
-    ];
-    for (const [v, t] of opts) {
-      const o = document.createElement("option");
-      o.value = v;
-      o.textContent = t;
-      sel.appendChild(o);
-    }
-
-    // restore previous selection if possible
-    const prev = loadJSON(keyFor("reward_filter"), "all");
-    sel.value = prev && opts.some(x => x[0] === prev) ? prev : "all";
-  }
-
-  function getRewardFilterMode() {
-    const sel = $id("rewardFilter");
-    const v = (sel?.value || "all").trim();
-    if (["all","lt005","ge005","ge01"].includes(v)) return v;
-    return "all";
-  }
-
-  /* ===================== Patch rebuildWdView + syncRewardTimelineUI (autoscale Y visible) ===================== */
-  function patchRewardFunctions() {
-    try {
-      if (typeof rebuildWdView === "function" && !rebuildWdView.__patched) {
-        const orig = rebuildWdView;
-        const patched = function() {
-          // rebuild using current filter mode on wdValuesAll for this address
-          try {
-            const mode = getRewardFilterMode();
-
-            // keep global arrays used by the app
-            wdLabels = [];
-            wdValues = [];
-            wdTimes = [];
-
-            for (let i = 0; i < (wdValuesAll?.length || 0); i++) {
-              const v = safe(wdValuesAll[i]);
-              const ok =
-                mode === "all" ? true :
-                mode === "lt005" ? (v > 0 && v < 0.05) :
-                mode === "ge005" ? (v >= 0.05) :
-                mode === "ge01" ? (v >= 0.1) :
-                true;
-
-              if (ok) {
-                wdLabels.push(wdLabelsAll?.[i] || "");
-                wdValues.push(v);
-                wdTimes.push(wdTimesAll?.[i] || 0);
-              }
-            }
-
-            if (typeof drawRewardWdChart === "function") drawRewardWdChart();
-            if (typeof syncRewardTimelineUI === "function") syncRewardTimelineUI(true);
-          } catch {
-            // fallback to original if anything strange happens
-            orig();
-          }
-        };
-        patched.__patched = true;
-        rebuildWdView = patched;
-      }
-
-      if (typeof syncRewardTimelineUI === "function" && !syncRewardTimelineUI.__patched) {
-        const orig = syncRewardTimelineUI;
-        const patched = function(forceToEnd = false) {
-          orig(forceToEnd);
-          // autoscale Y to visible window
-          if (typeof rewardChart !== "undefined" && rewardChart) {
-            applyTightRightAxis(rewardChart, "y", "num");
-            autoscaleYToVisible(rewardChart, "y");
-          }
-        };
-        patched.__patched = true;
-        syncRewardTimelineUI = patched;
-      }
-    } catch {}
-  }
-
-  /* ===================== Patch Reward tooltip to show date/time ===================== */
-  function patchRewardTooltip() {
-    try {
-      if (!rewardChart?.options?.plugins?.tooltip) return;
-
-      rewardChart.options.plugins.tooltip.callbacks = rewardChart.options.plugins.tooltip.callbacks || {};
-      rewardChart.options.plugins.tooltip.callbacks.title = (items) => {
-        const i = items?.[0]?.dataIndex ?? 0;
-        const t = safe(wdTimes?.[i] || 0);
-        return t ? new Date(t).toLocaleString() : (wdLabels?.[i] || "");
-      };
-      rewardChart.options.plugins.tooltip.callbacks.label = (item) => {
-        const i = item?.dataIndex ?? 0;
-        const v = safe(item?.raw);
-        return `Withdrawn • +${v.toFixed(6)} INJ`;
-      };
-
-      // click a point -> toast
-      rewardChart.options.onClick = (evt) => {
-        try {
-          const pts = rewardChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
-          if (!pts?.length) return;
-          const i = pts[0].index;
-          const t = safe(wdTimes?.[i] || 0);
-          const v = safe(wdValues?.[i] || 0);
-          if (typeof showToastEvent === "function") {
-            showToastEvent({
-              title: "Reward withdrawal",
-              t: t || Date.now(),
-              value: `+${v.toFixed(6)} INJ`,
-              status: "ok"
-            });
-          }
-        } catch {}
-      };
-
-      rewardChart.update("none");
-    } catch {}
-  }
-
-  /* ===================== Stake axis to the right + scale toggle ===================== */
-  function patchStakeChartAxis() {
-    try {
-      if (!stakeChart) return;
-      stakeChart.options.scales = stakeChart.options.scales || {};
-      stakeChart.options.scales.y = stakeChart.options.scales.y || {};
-      applyTightRightAxis(stakeChart, "y", "num");
-
-      // improve readability
-      stakeChart.options.scales.x = stakeChart.options.scales.x || {};
-      stakeChart.options.scales.x.display = false;
-
-      stakeChart.update("none");
-    } catch {}
-  }
-
-  /* ===================== Net Worth live sampling (1 point/min, update last point inside minute) ===================== */
-  function patchNetWorthSampling() {
-    try {
-      if (typeof recordNetWorthPoint !== "function") return;
-      if (recordNetWorthPoint.__patched) return;
-
-      const orig = recordNetWorthPoint;
-
-      const patched = function() {
-        try {
-          const a = getAddr();
-          if (!a) return;
-
-          const px = safe(typeof targetPrice !== "undefined" ? targetPrice : 0);
-          if (!px || px <= 0) return;
-
-          const totalInj = safe(typeof availableInj !== "undefined" ? availableInj : 0)
-            + safe(typeof stakeInj !== "undefined" ? stakeInj : 0)
-            + safe(typeof rewardsInj !== "undefined" ? rewardsInj : 0);
-
-          const totalUsd = totalInj * px;
-          if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
-
-          const now = Date.now();
-          const lastT = nwTAll?.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
-
-          // within 60s -> update last point (no spam, no cloud push)
-          if (lastT && (now - lastT) < 60_000 && nwUsdAll?.length && nwInjAll?.length) {
-            nwTAll[nwTAll.length - 1] = now;
-            nwUsdAll[nwUsdAll.length - 1] = totalUsd;
-            nwInjAll[nwInjAll.length - 1] = totalInj;
-
-            if (typeof clampNWArrays === "function") clampNWArrays();
-            if (typeof saveNWLocalOnly === "function") saveNWLocalOnly();
-            if (typeof drawNW === "function") drawNW();
-            return;
-          }
-
-          // otherwise original logic (adds a point + cloud schedule)
-          orig();
-        } catch {
-          try { orig(); } catch {}
-        }
-      };
-
-      patched.__patched = true;
-      recordNetWorthPoint = patched;
-    } catch {}
-  }
-
-  /* ===================== Patch drawNW autoscale + tight axis + apply saved scale ===================== */
-  function patchDrawNW() {
-    try {
-      if (typeof drawNW !== "function") return;
-      if (drawNW.__patched) return;
-
-      const orig = drawNW;
-      const patched = function() {
-        orig();
-        try {
-          if (!netWorthChart) return;
-
-          applyTightRightAxis(netWorthChart, "y", "usd");
-
-          // apply stored scale
-          const st = getScaleState("nw").y;
-          setYAxisScale(netWorthChart, "y", st);
-
-          // autoscale visible
-          autoscaleYToVisible(netWorthChart, "y");
-        } catch {}
-      };
-      patched.__patched = true;
-      drawNW = patched;
-    } catch {}
-  }
-
-  /* ===================== Hide non-essential Net Worth sub-card (best-effort) ===================== */
-  function hideNetWorthExtraCardBestEffort() {
-    try {
-      const nwCard = $id("netWorthCard") || findCardByChildId("netWorthChart");
-      if (!nwCard) return;
-
-      const keepEl = $id("netWorthInj");
-      const keepBox = keepEl ? (keepEl.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card") || keepEl.parentElement) : null;
-
-      const qty = $id("nwAssetQty");
-      const price = $id("nwAssetPrice");
-      const usd = $id("nwAssetUsd");
-
-      const cand = qty?.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card") ||
-                   price?.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card") ||
-                   usd?.closest(".mini-card, .sub-card, .nw-mini, .card-mini, .asset-card");
-
-      if (cand && cand !== keepBox) {
-        cand.style.display = "none";
-      }
-    } catch {}
-  }
-
-  /* ===================== Fullscreen per card (charts) ===================== */
-  function ensureFullscreenButtons() {
-    try {
-      const canvases = Array.from(document.querySelectorAll("canvas"));
-      for (const c of canvases) {
-        const card = c.closest(".card") || c.parentElement;
-        if (!card) continue;
-        if (card.querySelector(".patch-fs-btn")) continue;
-
-        ensureCardRelative(card);
-
-        const btn = makeIconBtn("⛶", "Fullscreen");
-        btn.classList.add("patch-fs-btn");
-        btn.style.position = "absolute";
-        btn.style.left = "12px";
-        btn.style.top = "12px";
-        btn.style.zIndex = "6";
-
-        btn.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-
-          const isOn = card.dataset.patchFullscreen === "1";
-          if (isOn) {
-            card.dataset.patchFullscreen = "0";
-            card.style.position = "";
-            card.style.left = "";
-            card.style.top = "";
-            card.style.right = "";
-            card.style.bottom = "";
-            card.style.width = "";
-            card.style.height = "";
-            card.style.zIndex = "";
-            card.style.borderRadius = "";
-            card.style.margin = "";
-            card.style.overflow = "";
-            document.body.classList.remove("patch-fs-open");
-            document.querySelector(".patch-fs-backdrop")?.remove();
-            try {
-              if (typeof netWorthChart !== "undefined" && netWorthChart) netWorthChart.resize();
-              if (typeof stakeChart !== "undefined" && stakeChart) stakeChart.resize();
-              if (typeof rewardChart !== "undefined" && rewardChart) rewardChart.resize();
-              if (typeof chart !== "undefined" && chart) chart.resize();
-              if (typeof aprChart !== "undefined" && aprChart) aprChart.resize();
-            } catch {}
-            return;
-          }
-
-          card.dataset.patchFullscreen = "1";
-
-          // backdrop
-          let back = document.querySelector(".patch-fs-backdrop");
-          if (!back) {
-            back = document.createElement("div");
-            back.className = "patch-fs-backdrop";
-            back.style.cssText = "position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);";
-            back.addEventListener("click", () => btn.click(), { passive: true });
-            document.body.appendChild(back);
-          }
-
-          card.style.position = "fixed";
-          card.style.left = "10px";
-          card.style.right = "10px";
-          card.style.top = "10px";
-          card.style.bottom = "10px";
-          card.style.width = "auto";
-          card.style.height = "auto";
-          card.style.zIndex = "901";
-          card.style.borderRadius = "18px";
-          card.style.margin = "0";
-          card.style.overflow = "hidden";
-          document.body.classList.add("patch-fs-open");
-
-          setTimeout(() => {
-            try {
-              if (typeof netWorthChart !== "undefined" && netWorthChart) netWorthChart.resize();
-              if (typeof stakeChart !== "undefined" && stakeChart) stakeChart.resize();
-              if (typeof rewardChart !== "undefined" && rewardChart) rewardChart.resize();
-              if (typeof chart !== "undefined" && chart) chart.resize();
-              if (typeof aprChart !== "undefined" && aprChart) aprChart.resize();
-            } catch {}
-          }, 60);
-        }, { passive: false });
-
-        card.appendChild(btn);
-      }
-    } catch {}
-  }
-
-  /* ===================== APR mini chart + events ===================== */
-  let aprChart = null;
-  let aprT = [];
-  let aprV = [];
-  let lastAprSeen = null;
-
-  function aprStoreKey() { return keyFor("apr_series"); }
-
-  function loadAprSeries() {
-    const obj = loadJSON(aprStoreKey(), null);
-    if (!obj?.t || !obj?.v) return;
-    aprT = Array.isArray(obj.t) ? obj.t.map(Number) : [];
-    aprV = Array.isArray(obj.v) ? obj.v.map(Number) : [];
-    // clamp
-    const n = Math.min(aprT.length, aprV.length);
-    aprT = aprT.slice(-n).slice(-1200);
-    aprV = aprV.slice(-n).slice(-1200);
-  }
-
-  function saveAprSeries() {
-    saveJSON(aprStoreKey(), { t: aprT, v: aprV });
-  }
-
-  function ensureAprChart() {
-    const aprEl = $id("apr");
-    if (!aprEl) return;
-    const card = aprEl.closest(".card") || aprEl.parentElement;
-    if (!card) return;
-
-    // inject canvas
-    if (!card.querySelector("#patchAprCanvas")) {
-      const wrap = document.createElement("div");
-      wrap.style.cssText = "height:140px;margin-top:10px;";
-      wrap.innerHTML = `<canvas id="patchAprCanvas"></canvas>`;
-      card.appendChild(wrap);
-    }
-
-    const canvas = card.querySelector("#patchAprCanvas");
-    if (!canvas || !window.Chart) return;
-
-    if (!aprChart) {
-      aprChart = new Chart(canvas, {
-        type: "line",
-        data: {
-          labels: [],
-          datasets: [{
-            data: [],
-            borderColor: "#3b82f6",
-            backgroundColor: "rgba(59,130,246,.12)",
-            fill: true,
-            tension: 0.3,
-            pointRadius: 3,
-            pointHoverRadius: 6,
-            spanGaps: true
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          plugins: { legend: { display: false }, tooltip: { enabled: true, displayColors: false } },
-          scales: {
-            x: { display: true, ticks: { color: (typeof axisTickColor === "function") ? axisTickColor() : undefined, maxTicksLimit: 6 }, grid: { display: false }, border: { display: false } },
-            y: { display: true, position: "right", ticks: { color: (typeof axisTickColor === "function") ? axisTickColor() : undefined, mirror: true, padding: 4, callback: (v)=>`${safe(v).toFixed(2)}%` },
-                 grid: { color: (typeof axisGridColor === "function") ? axisGridColor() : undefined }, border: { display: false } }
-          }
-        }
-      });
-    }
-
-    // toggle scale on apr card
-    ensureScaleToggleOnCard(card, "apr", () => aprChart, "y");
-    applyTightRightAxis(aprChart, "y", "num");
-    setYAxisScale(aprChart, "y", getScaleState("apr").y);
-  }
-
-  function updateAprChart() {
-    if (!aprChart) return;
-    const labels = aprT.map(t => {
-      const d = new Date(safe(t));
-      return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-    });
-    aprChart.data.labels = labels;
-    aprChart.data.datasets[0].data = aprV;
-
-    applyTightRightAxis(aprChart, "y", "num");
-    setYAxisScale(aprChart, "y", getScaleState("apr").y);
-    autoscaleYToVisible(aprChart, "y");
-
-    aprChart.update("none");
-  }
-
-  function maybeRecordAprPoint() {
-    const a = getAddr();
-    if (!a) return;
-
-    const cur = safe(typeof apr !== "undefined" ? apr : 0);
-    if (!Number.isFinite(cur) || cur <= 0) return;
-
-    if (lastAprSeen == null) {
-      lastAprSeen = cur;
-      return;
-    }
-
-    // record only meaningful changes
-    if (Math.abs(cur - lastAprSeen) >= 0.02) {
-      const t = Date.now();
-      aprT.push(t);
-      aprV.push(cur);
-      if (aprT.length > 1200) { aprT = aprT.slice(-1200); aprV = aprV.slice(-1200); }
-      saveAprSeries();
-      updateAprChart();
-
-      // event
-      if (typeof pushEvent === "function") {
-        pushEvent({
-          type: "apr",
-          title: "APR changed",
-          value: `${lastAprSeen.toFixed(2)}% → ${cur.toFixed(2)}%`,
-          status: (navigator.onLine ? "ok" : "pending")
-        });
-      }
-
-      lastAprSeen = cur;
-    }
-  }
-
-  /* ===================== Market move events thresholds ===================== */
-  function marketStoreKeyForDay() {
-    const d = new Date();
-    const tag = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    return keyFor(`market_bucket_${tag}`);
-  }
-
-  function maybeMarketMoveEvent() {
-    const a = getAddr();
-    if (!a) return;
-
-    const open = safe(candle?.d?.open);
-    const px = safe(typeof targetPrice !== "undefined" ? targetPrice : 0);
-    if (!open || !px) return;
-
-    const pct = ((px - open) / open) * 100;
-    const ap = Math.abs(pct);
-
-    const buckets = [5,10,15,20,25,30,40,50];
-    let b = 0;
-    for (const x of buckets) if (ap >= x) b = x;
-
-    const prev = safe(loadJSON(marketStoreKeyForDay(), 0));
-    if (b > prev) {
-      saveJSON(marketStoreKeyForDay(), b);
-      if (typeof pushEvent === "function") {
-        pushEvent({
-          type: "market",
-          title: `Market move ${pct > 0 ? "up" : "down"}`,
-          value: `${pct > 0 ? "+" : ""}${pct.toFixed(2)}% (≥ ${b}%)`,
-          status: (navigator.onLine ? "ok" : "pending")
-        });
-      }
-    }
-  }
-
-  /* ===================== Event Page: filters + reset + pagination ===================== */
-  const EV_PAGE_SIZE = 25;
-  const evState = { page: 1, filter: "all" };
-
-  function ensureEventControls() {
-    try {
-      if (!window.eventPage || !eventPage) return;
-      if (eventPage.querySelector("#patchEvControls")) return;
-
-      // Insert controls in header near close
-      const closeBtn = eventPage.querySelector("#eventCloseBtn");
-      if (!closeBtn) return;
-
-      const ctr = document.createElement("div");
-      ctr.id = "patchEvControls";
-      ctr.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;";
-
-      const filter = document.createElement("select");
-      filter.id = "patchEvFilter";
-      filter.style.cssText = `
-        height:40px;border-radius:14px;padding:0 10px;font-weight:900;cursor:pointer;
-        border:1px solid ${themeIsLight() ? "rgba(15,23,42,.14)" : "rgba(255,255,255,.14)"};
-        background:${themeIsLight() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)"};
-        color:${themeIsLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)"};
-      `;
-      const types = [
-        ["all","All"],
-        ["reward","Reward"],
-        ["stake","Stake"],
-        ["apr","APR"],
-        ["market","Market"],
-        ["ui","UI"]
-      ];
-      for (const [v,t] of types) {
-        const o = document.createElement("option");
-        o.value = v;
-        o.textContent = t;
-        filter.appendChild(o);
-      }
-
-      const reset = makeMiniBtn("Reset", "Clear events for this wallet");
-      const pager = document.createElement("div");
-      pager.id = "patchEvPager";
-      pager.style.cssText = "width:100%;margin-top:10px;display:flex;gap:8px;align-items:center;justify-content:space-between;opacity:.9;font-weight:900;";
-
-      ctr.appendChild(filter);
-      ctr.appendChild(reset);
-
-      closeBtn.insertAdjacentElement("beforebegin", ctr);
-      closeBtn.closest("div")?.insertAdjacentElement("afterend", pager);
-
-      filter.addEventListener("change", () => {
-        evState.filter = filter.value || "all";
-        evState.page = 1;
-        if (typeof renderEventRows === "function") renderEventRows();
-      }, { passive: true });
-
-      reset.addEventListener("click", () => {
-        try {
-          if (Array.isArray(eventsAll)) eventsAll = [];
-          if (typeof saveEventsLocalOnly === "function") saveEventsLocalOnly();
-          if (typeof cloudSchedulePush === "function") cloudSchedulePush();
-          if (typeof renderEventRows === "function") renderEventRows();
-          if (typeof showToastEvent === "function") showToastEvent({ title: "Events reset", t: Date.now(), value: "Cleared", status: "ok" });
-        } catch {}
-      }, { passive: true });
-    } catch {}
-  }
-
-  function patchRenderEventRows() {
-    try {
-      if (typeof renderEventRows !== "function") return;
-      if (renderEventRows.__patched) return;
-
-      const orig = renderEventRows;
-
-      const patched = function() {
-        try {
-          if (!eventPage) return orig();
-
-          ensureEventControls();
-
-          const rows = eventPage.querySelector("#eventRows");
-          if (!rows) return;
-
-          const pager = eventPage.querySelector("#patchEvPager");
-
-          let items = Array.isArray(eventsAll) ? eventsAll.slice() : [];
-          // newest first display (keep original behavior)
-          items = items.slice().reverse();
-
-          // filter
-          const fSel = eventPage.querySelector("#patchEvFilter");
-          const f = (fSel?.value || evState.filter || "all");
-          if (f && f !== "all") {
-            items = items.filter(ev => String(ev?.type || "") === f);
-          }
-
-          const total = items.length;
-          const pages = Math.max(1, Math.ceil(total / EV_PAGE_SIZE));
-          evState.page = clamp(evState.page || 1, 1, pages);
-
-          const start = (evState.page - 1) * EV_PAGE_SIZE;
-          const pageItems = items.slice(start, start + EV_PAGE_SIZE);
-
-          // reuse original renderer styles if possible
-          const fg = themeIsLight() ? "rgba(15,23,42,.90)" : "rgba(249,250,251,.92)";
-          const muted = themeIsLight() ? "rgba(15,23,42,.62)" : "rgba(249,250,251,.62)";
-          const border = themeIsLight() ? "rgba(15,23,42,.10)" : "rgba(255,255,255,.10)";
-          const bgRow = themeIsLight() ? "rgba(15,23,42,.03)" : "rgba(255,255,255,.03)";
-
-          if (!pageItems.length) {
-            rows.innerHTML = `<div style="padding:14px;opacity:.75;font-weight:850;">No events.</div>`;
-          } else {
-            rows.innerHTML = pageItems.map((ev, idx) => {
-              const dt = new Date(safe(ev?.t) || Date.now());
-              const dtStr = dt.toLocaleDateString() + " " + dt.toLocaleTimeString();
-              const v = String(ev?.value || "—");
-              const title = String(ev?.title || "Event");
-              const badge = (typeof statusBadgeHTML === "function") ? statusBadgeHTML(ev?.status) : "";
-              return `
-                <div style="display:grid;grid-template-columns: 1.2fr .9fr .9fr .55fr;gap:10px;
-                  padding:12px 14px;border-top:1px solid ${border};background:${idx%2?bgRow:"transparent"};color:${fg};">
-                  <div style="font-weight:950;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
-                  <div style="color:${muted};font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${dtStr}</div>
-                  <div style="font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${v}</div>
-                  <div style="text-align:right;">${badge}</div>
-                </div>
-              `;
-            }).join("");
-          }
-
-          if (pager) {
-            pager.innerHTML = "";
-
-            const left = document.createElement("div");
-            left.style.display = "flex";
-            left.style.alignItems = "center";
-            left.style.gap = "8px";
-
-            const prev = makeMiniBtn("‹", "Prev");
-            const next = makeMiniBtn("›", "Next");
-            prev.style.width = next.style.width = "42px";
-
-            const info = document.createElement("div");
-            info.textContent = `Page ${evState.page}/${pages} · ${total} events`;
-            info.style.opacity = ".85";
-
-            prev.disabled = evState.page <= 1;
-            next.disabled = evState.page >= pages;
-            prev.style.opacity = prev.disabled ? ".4" : "1";
-            next.style.opacity = next.disabled ? ".4" : "1";
-
-            prev.addEventListener("click", () => { if (evState.page > 1) { evState.page--; patched(); } }, { passive: true });
-            next.addEventListener("click", () => { if (evState.page < pages) { evState.page++; patched(); } }, { passive: true });
-
-            left.appendChild(prev);
-            left.appendChild(next);
-            left.appendChild(info);
-
-            pager.appendChild(left);
-
-            const right = document.createElement("div");
-            right.style.opacity = ".8";
-            right.textContent = `Filter: ${f.toUpperCase()}`;
-            pager.appendChild(right);
-          }
-        } catch {
-          orig();
-        }
-      };
-
-      patched.__patched = true;
-      renderEventRows = patched;
-    } catch {}
-  }
-
-  /* ===================== PRICE TF (5m/1d/1w/1m/1y/all) + scale ===================== */
-  const priceState = {
-    tf: loadJSON("inj_patch_price_tf_global", "1d"), // global, not per address (market data)
-  };
-
-  async function fetchBinanceKlines(interval, startTimeMs, limit = 1000) {
-    try {
-      const st = Number.isFinite(+startTimeMs) ? `&startTime=${Math.floor(startTimeMs)}` : "";
-      const url = `https://api.binance.com/api/v3/klines?symbol=INJUSDT&interval=${interval}&limit=${limit}${st}`;
-      const d = (typeof fetchJSON === "function") ? await fetchJSON(url) : null;
-      return Array.isArray(d) ? d : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function priceTfToRequest(tf) {
-    const now = Date.now();
-    if (tf === "1w") return { interval: "15m", start: now - 7*24*60*60*1000, limit: 1000 };
-    if (tf === "1m") return { interval: "1h",  start: now - 30*24*60*60*1000, limit: 1000 };
-    if (tf === "1y") return { interval: "1d",  start: now - 365*24*60*60*1000, limit: 500 };
-    if (tf === "all") return { interval: "1w", start: now - 3650*24*60*60*1000, limit: 1000 };
-    return null;
-  }
-
-  function ensurePriceControls() {
-    const cv = $id("priceChart");
-    if (!cv) return;
-    const card = cv.closest(".card") || cv.parentElement;
-    if (!card) return;
-
-    ensureCardRelative(card);
-
-    if (!card.querySelector("#patchPriceControls")) {
-      const wrap = document.createElement("div");
-      wrap.id = "patchPriceControls";
-      wrap.style.cssText = "position:absolute;right:12px;top:12px;display:flex;gap:8px;flex-wrap:wrap;z-index:7;";
-      card.appendChild(wrap);
-
-      const buttons = [
-        ["5m", "5m"],
-        ["1d", "1D"],
-        ["1w", "1W"],
-        ["1m", "1M"],
-        ["1y", "1Y"],
-        ["all","ALL"],
-      ];
-
-      for (const [tf, label] of buttons) {
-        const b = makeMiniBtn(label, `Price timeframe ${label}`);
-        b.dataset.tf = tf;
-        if (tf === priceState.tf) b.style.outline = "2px solid rgba(250,204,21,.55)";
-        b.addEventListener("click", async () => {
-          priceState.tf = tf;
-          saveJSON("inj_patch_price_tf_global", tf);
-          // update UI selection
-          wrap.querySelectorAll("button[data-tf]").forEach(x => x.style.outline = "");
-          b.style.outline = "2px solid rgba(250,204,21,.55)";
-          await applyPriceTimeframe(tf);
-        }, { passive: true });
-        wrap.appendChild(b);
-      }
-
-      // scale toggle (Y)
-      const sc = makeMiniBtn("LIN", "Switch Y scale: Linear / Log");
-      sc.dataset.scale = "1";
-      sc.addEventListener("click", () => {
-        const cur = getScaleState("price").y;
-        const next = (cur === "linear") ? "logarithmic" : "linear";
-        setScaleState("price", next);
-        sc.textContent = (next === "logarithmic") ? "LOG" : "LIN";
-        if (typeof chart !== "undefined" && chart) {
-          applyTightRightAxis(chart, "y", "usd");
-          setYAxisScale(chart, "y", next);
-          autoscaleYToVisible(chart, "y");
-        }
-      }, { passive: true });
-      wrap.appendChild(sc);
-
-      // initial label
-      sc.textContent = (getScaleState("price").y === "logarithmic") ? "LOG" : "LIN";
-    }
-  }
-
-  async function applyPriceTimeframe(tf) {
-    try {
-      if (typeof chart === "undefined" || !chart) return;
-
-      // always apply tight Y + scale
-      applyTightRightAxis(chart, "y", "usd");
-      setYAxisScale(chart, "y", getScaleState("price").y);
-
-      // 5m = keep live 1m stream but show last 5 points
-      if (tf === "5m") {
-        chart.options.scales.x.display = false;
-        const n = chart.data.datasets?.[0]?.data?.length || 0;
-        if (n > 0) {
-          const minIdx = Math.max(0, n - 5);
-          chart.options.scales.x.min = minIdx;
-          chart.options.scales.x.max = n - 1;
-        }
-        autoscaleYToVisible(chart, "y");
-        chart.update("none");
-        return;
-      }
-
-      // 1d: restore core behavior
-      if (tf === "1d") {
-        chart.options.scales.x.display = false;
-        chart.options.scales.x.min = undefined;
-        chart.options.scales.x.max = undefined;
-
-        // allow core refresh to keep running
-        autoscaleYToVisible(chart, "y");
-        chart.update("none");
-        return;
-      }
-
-      // other TF: fetch and freeze live updates
-      const req = priceTfToRequest(tf);
-      if (!req) return;
-
-      const kl = await fetchBinanceKlines(req.interval, req.start, req.limit);
-      if (!kl?.length) return;
-
-      const labels = kl.map(k => {
-        const t = safe(k?.[0]);
-        const d = new Date(t);
-        if (tf === "1y" || tf === "all") return d.toLocaleDateString();
-        return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-      });
-
-      const data = kl.map(k => safe(k?.[4])).filter(v => Number.isFinite(v));
-
-      chart.data.labels = labels;
-      chart.data.datasets[0].data = data;
-
-      // show x in long TF
-      chart.options.scales.x.display = true;
-      chart.options.scales.x.grid = chart.options.scales.x.grid || {};
-      chart.options.scales.x.grid.display = false;
-      chart.options.scales.x.ticks = chart.options.scales.x.ticks || {};
-      chart.options.scales.x.ticks.color = (typeof axisTickColor === "function") ? axisTickColor() : undefined;
-      chart.options.scales.x.ticks.maxTicksLimit = 6;
-      chart.options.scales.x.min = undefined;
-      chart.options.scales.x.max = undefined;
-
-      autoscaleYToVisible(chart, "y");
-      chart.update("none");
-    } catch {}
-  }
-
-  function patchPriceUpdatersToRespectTF() {
-    try {
-      // block core loadChartToday when TF != 1d/5m
-      if (typeof loadChartToday === "function" && !loadChartToday.__patched) {
-        const orig = loadChartToday;
-        const patched = async function(isRefresh = false) {
-          const tf = loadJSON("inj_patch_price_tf_global", "1d");
-          if (tf !== "1d" && tf !== "5m") return;
-          return orig(isRefresh);
-        };
-        patched.__patched = true;
-        loadChartToday = patched;
-      }
-
-      if (typeof ensureChartBootstrapped === "function" && !ensureChartBootstrapped.__patched) {
-        const orig = ensureChartBootstrapped;
-        const patched = async function() {
-          const tf = loadJSON("inj_patch_price_tf_global", "1d");
-          if (tf !== "1d" && tf !== "5m") return;
-          return orig();
-        };
-        patched.__patched = true;
-        ensureChartBootstrapped = patched;
-      }
-
-      if (typeof updateChartFrom1mKline === "function" && !updateChartFrom1mKline.__patched) {
-        const orig = updateChartFrom1mKline;
-        const patched = function(k) {
-          const tf = loadJSON("inj_patch_price_tf_global", "1d");
-          if (tf !== "1d" && tf !== "5m") return;
-          orig(k);
-          // keep 5m window moving
-          if (tf === "5m" && typeof chart !== "undefined" && chart) {
-            const n = chart.data.datasets?.[0]?.data?.length || 0;
-            if (n > 0) {
-              chart.options.scales.x.min = Math.max(0, n - 5);
-              chart.options.scales.x.max = n - 1;
-              autoscaleYToVisible(chart, "y");
-              chart.update("none");
-            }
-          }
-        };
-        patched.__patched = true;
-        updateChartFrom1mKline = patched;
-      }
-    } catch {}
-  }
-
-  /* ===================== Attach scale toggles to cards ===================== */
-  function attachScaleToggles() {
-    try {
-      // Net Worth card toggle
-      const nwCard = $id("netWorthCard") || findCardByChildId("netWorthChart");
-      if (nwCard) ensureScaleToggleOnCard(nwCard, "nw", () => (typeof netWorthChart !== "undefined" ? netWorthChart : null), "y");
-
-      // Stake card toggle
-      const stCard = findCardByChildId("stakeChart") || findCardByChildId("stake");
-      if (stCard) ensureScaleToggleOnCard(stCard, "stake", () => (typeof stakeChart !== "undefined" ? stakeChart : null), "y");
-
-      // Reward card toggle
-      const rwCard = findCardByChildId("rewardChart") || findCardByChildId("rewards");
-      if (rwCard) ensureScaleToggleOnCard(rwCard, "reward", () => (typeof rewardChart !== "undefined" ? rewardChart : null), "y");
-
-      // Price controls includes scale already
-      ensurePriceControls();
-    } catch {}
-  }
-
-  /* ===================== Apply saved scales when charts exist ===================== */
-  function applyScalesOnceChartsReady() {
-    try {
-      // Net worth
-      if (typeof netWorthChart !== "undefined" && netWorthChart) {
-        applyTightRightAxis(netWorthChart, "y", "usd");
-        setYAxisScale(netWorthChart, "y", getScaleState("nw").y);
-        autoscaleYToVisible(netWorthChart, "y");
-      }
-
-      // Stake
-      if (typeof stakeChart !== "undefined" && stakeChart) {
-        patchStakeChartAxis();
-        setYAxisScale(stakeChart, "y", getScaleState("stake").y);
-        autoscaleYToVisible(stakeChart, "y");
-      }
-
-      // Reward
-      if (typeof rewardChart !== "undefined" && rewardChart) {
-        applyTightRightAxis(rewardChart, "y", "num");
-        setYAxisScale(rewardChart, "y", getScaleState("reward").y);
-        autoscaleYToVisible(rewardChart, "y");
-        patchRewardTooltip();
-      }
-
-      // Price
-      if (typeof chart !== "undefined" && chart) {
-        applyTightRightAxis(chart, "y", "usd");
-        setYAxisScale(chart, "y", getScaleState("price").y);
-        autoscaleYToVisible(chart, "y");
-      }
-
-      // APR
-      if (aprChart) {
-        applyTightRightAxis(aprChart, "y", "num");
-        setYAxisScale(aprChart, "y", getScaleState("apr").y);
-        autoscaleYToVisible(aprChart, "y");
-      }
-    } catch {}
-  }
-
-  /* ===================== Hook setAddressDisplay to re-add copy button ===================== */
-  function patchSetAddressDisplay() {
-    try {
-      if (typeof setAddressDisplay !== "function") return;
-      if (setAddressDisplay.__patched) return;
-
-      const orig = setAddressDisplay;
-      const patched = function(addr) {
-        orig(addr);
-        ensureCopyAddressBtn();
-      };
-      patched.__patched = true;
-      setAddressDisplay = patched;
-    } catch {}
-  }
-
-  /* ===================== Boot patch ===================== */
-  onReady(() => {
-    try {
-      // keep idempotent controls
-      ensureCopyAddressBtn();
-      ensureMenuLabels();
-
-      // reward filter options + functions
-      ensureRewardFilterOptions();
-      patchRewardFunctions();
-
-      // events page renderer
-      patchRenderEventRows();
-
-      // networth sampling + draw enhancements
-      patchNetWorthSampling();
-      patchDrawNW();
-
-      // price TF safety wrappers
-      patchPriceUpdatersToRespectTF();
-
-      // gear buttons
-      ensureGearNearBar("stakeBar", "stake");
-      ensureGearNearBar("rewardBar", "reward");
-
-      // reward estimates
-      ensureRewardEstimateRow();
-
-      // setAddressDisplay hook
-      patchSetAddressDisplay();
-
-      // hide net worth extra card if found
-      hideNetWorthExtraCardBestEffort();
-
-      // fullscreen buttons
-      ensureFullscreenButtons();
-
-      // APR chart
-      loadAprSeries();
-      ensureAprChart();
-      updateAprChart();
-
-      // Attach scale toggles on cards
-      attachScaleToggles();
-
-      // apply initial price TF (if chart exists)
-      setTimeout(async () => {
-        ensurePriceControls();
-        await applyPriceTimeframe(loadJSON("inj_patch_price_tf_global", "1d"));
-      }, 500);
-
-      // periodic “late init” (charts might appear after)
-      let tries = 0;
-      const t = setInterval(() => {
-        tries++;
-        ensureCopyAddressBtn();
-        ensureMenuLabels();
-        ensureRewardFilterOptions();
-        ensureGearNearBar("stakeBar", "stake");
-        ensureGearNearBar("rewardBar", "reward");
-        ensureRewardEstimateRow();
-        ensurePriceControls();
-        attachScaleToggles();
-        applyScalesOnceChartsReady();
-        patchRewardTooltip();
-        patchStakeChartAxis();
-        hideNetWorthExtraCardBestEffort();
-        ensureFullscreenButtons();
-        ensureAprChart();
-        updateAprChart();
-
-        if (tries > 30) clearInterval(t);
-      }, 650);
-
-      // start bars loop override
-      requestAnimationFrame(patchBarsLoop);
-
-      // background “events detectors”
-      setInterval(() => {
-        try {
-          maybeRecordAprPoint();
-          maybeMarketMoveEvent();
-        } catch {}
-      }, 1200);
-
-      // if price TF is 5m keep autoscale fresh
-      setInterval(() => {
-        try {
-          const tf = loadJSON("inj_patch_price_tf_global", "1d");
-          if (tf === "5m" && typeof chart !== "undefined" && chart) {
-            autoscaleYToVisible(chart, "y");
-          }
-        } catch {}
-      }, 1200);
-
-      // log patch version in console
-      console.log(`[INJ PATCH] v${PATCH_VER} loaded`);
-    } catch (e) {
-      console.warn("[INJ PATCH] failed to init:", e);
-    }
-  });
-
-})();
-
-/* =====================================================================
-   PATCH v2.0.2x — Validator effettivo + Stake points ONLY on increase
-   Incolla in fondo ad app.js
-   ===================================================================== */
-(function PATCH_VALIDATOR_AND_STAKE_ONLY_INCREASE(){
-  "use strict";
-
-  // ---------- guards ----------
-  const has = (name) => typeof window[name] !== "undefined";
-  const safeFn = (name) => (typeof window[name] === "function" ? window[name] : null);
-
-  // reuse your helpers if present
-  const _fetchJSON   = safeFn("fetchJSON");
-  const _hasInternet = safeFn("hasInternet") || (() => navigator.onLine === true);
-  const _shortAddr   = safeFn("shortAddr") || ((a)=>a);
-  const _safe        = safeFn("safe") || ((n)=> (Number.isFinite(+n) ? +n : 0));
-
-  // your validator UI functions (if present)
-  const _ensureValidatorCard = safeFn("ensureValidatorCard");
-  const _setValidatorDot     = safeFn("setValidatorDot");
-  const _setValidatorLine    = safeFn("setValidatorLine");
-  const _loadValidatorInfo   = safeFn("loadValidatorInfo"); // your existing loader
-
-  // Injective LCD base (same as your code)
-  const LCD_BASE = "https://lcd.injective.network";
-
-  // cache validator lookup per address (avoid hammering LCD)
-  const VAL_CACHE_MS = 10 * 60 * 1000;
-  const VAL_CACHE_KEY = (addr) => `inj_valcache_v1_${(addr||"").trim()}`;
-
-  function ensureValidatorTag(){
-    // If user added HTML patch -> use it. Otherwise try to inject inside addressDisplay.
-    let tag = document.getElementById("validatorTag");
-    let txt = document.getElementById("validatorTagText");
-
-    if (!tag || !txt){
-      const addrDisp = document.getElementById("addressDisplay");
-      if (!addrDisp) return { tag: null, txt: null };
-
-      // create only once
-      tag = document.createElement("div");
-      tag.id = "validatorTag";
-      tag.className = "validator-tag";
-      tag.hidden = true;
-
-      const k = document.createElement("span");
-      k.className = "validator-tag__k";
-      k.textContent = "Validator:";
-
-      txt = document.createElement("span");
-      txt.id = "validatorTagText";
-      txt.className = "validator-tag__v";
-      txt.textContent = "—";
-
-      tag.appendChild(k);
-      tag.appendChild(txt);
-      addrDisp.appendChild(tag);
-    }
-
-    return { tag, txt };
-  }
-
-  function setValidatorTagText(label){
-    const { tag, txt } = ensureValidatorTag();
-    if (!tag || !txt) return;
-    if (!label) {
-      tag.hidden = true;
-      txt.textContent = "—";
-      return;
-    }
-    txt.textContent = label;
-    tag.hidden = false;
-  }
-
-  function pickPrimaryValidatorFromDelegations(delgs){
-    // Choose the validator with the largest delegated balance.amount
-    let bestAddr = "";
-    let bestAmt = 0;
-
-    for (const d of (delgs || [])) {
-      const va = d?.delegation?.validator_address || "";
-      const amt = _safe(d?.balance?.amount) / 1e18; // inj denom uses 1e18
-      if (va && amt > bestAmt) {
-        bestAmt = amt;
-        bestAddr = va;
-      }
-    }
-    return { validator: bestAddr, amount: bestAmt };
-  }
-
-  async function fetchValidatorMoniker(validatorAddr){
-    if (!_fetchJSON || !validatorAddr) return { moniker: "", bonded: null };
-
-    const v = await _fetchJSON(`${LCD_BASE}/cosmos/staking/v1beta1/validators/${encodeURIComponent(validatorAddr)}`);
-    const moniker = v?.validator?.description?.moniker || "";
-    const st = String(v?.validator?.status || "");
-    const bonded = (st.includes("BONDED") || st === "BOND_STATUS_BONDED");
-    return { moniker, bonded };
-  }
-
-  async function resolveValidatorForAddress(addr){
-    const a = (addr || "").trim();
-    if (!a) return null;
-
-    // cache
-    try{
-      const raw = localStorage.getItem(VAL_CACHE_KEY(a));
-      if (raw){
-        const obj = JSON.parse(raw);
-        if (obj?.t && (Date.now() - obj.t) < VAL_CACHE_MS && obj?.validator){
-          return obj;
-        }
-      }
-    } catch {}
-
-    if (!_hasInternet()) return null;
-    if (!_fetchJSON) return null;
-
-    const s = await _fetchJSON(`${LCD_BASE}/cosmos/staking/v1beta1/delegations/${encodeURIComponent(a)}`);
-    const delgs = s?.delegation_responses || [];
-
-    const { validator, amount } = pickPrimaryValidatorFromDelegations(delgs);
-    if (!validator) {
-      const out = { t: Date.now(), validator: "", moniker: "", amount: 0 };
-      try { localStorage.setItem(VAL_CACHE_KEY(a), JSON.stringify(out)); } catch {}
-      return out;
-    }
-
-    const info = await fetchValidatorMoniker(validator);
-    const out = {
-      t: Date.now(),
-      validator,
-      moniker: info.moniker || "",
-      bonded: info.bonded,
-      amount
-    };
-
-    try { localStorage.setItem(VAL_CACHE_KEY(a), JSON.stringify(out)); } catch {}
-    return out;
-  }
-
-  async function refreshValidatorUI(){
-    try{
-      // uses your global "address" if present
-      if (typeof address === "undefined") return;
-      const a = (address || "").trim();
-
-      // show loading
-      if (_ensureValidatorCard) _ensureValidatorCard();
-      if (_setValidatorDot) _setValidatorDot(_hasInternet() ? "loading" : "fail");
-      if (_setValidatorLine) _setValidatorLine(a ? "Loading…" : "No wallet selected");
-      setValidatorTagText(a ? "Loading…" : "");
-
-      if (!a) return;
-      if (!_hasInternet()) {
-        setValidatorTagText("Offline");
-        if (_setValidatorDot) _setValidatorDot("fail");
-        if (_setValidatorLine) _setValidatorLine(`${_shortAddr(a)} · Offline`);
-        return;
-      }
-
-      const r = await resolveValidatorForAddress(a);
-      if (!r) return;
-
-      if (!r.validator){
-        setValidatorTagText("No delegation");
-        if (_setValidatorDot) _setValidatorDot("fail");
-        if (_setValidatorLine) _setValidatorLine("No validator found");
-        return;
-      }
-
-      const label = r.moniker
-        ? `${r.moniker} · ${_shortAddr(r.validator)}`
-        : `${_shortAddr(r.validator)}`;
-
-      setValidatorTagText(label);
-
-      // Update your existing validator card too
-      if (_loadValidatorInfo) {
-        // your function already fetches moniker + bonded + dot styling
-        _loadValidatorInfo(r.validator);
-      } else {
-        if (_setValidatorLine) _setValidatorLine(label);
-        if (_setValidatorDot) _setValidatorDot(r.bonded ? "ok" : "loading");
-      }
-    } catch (e){
-      console.warn("PATCH validator UI error:", e);
-    }
-  }
-
-  // ---------- STAKE: only record on increase + prevent cross-address bleed ----------
-  function hardResetStakeSeries(){
-    try{
-      if (typeof stakeLabels !== "undefined") stakeLabels = [];
-      if (typeof stakeData   !== "undefined") stakeData   = [];
-      if (typeof stakeMoves  !== "undefined") stakeMoves  = [];
-      if (typeof stakeTypes  !== "undefined") stakeTypes  = [];
-      if (typeof lastStakeRecordedRounded !== "undefined") lastStakeRecordedRounded = null;
-      if (typeof stakeBaselineCaptured !== "undefined") stakeBaselineCaptured = false;
-    } catch {}
-  }
-
-  // If loadStakeSeries fails, clear arrays (so you don't keep old address data)
-  if (typeof loadStakeSeries === "function") {
-    const _loadStakeSeries = loadStakeSeries;
-    loadStakeSeries = function(){
-      const ok = _loadStakeSeries.apply(this, arguments);
-      if (!ok) {
-        hardResetStakeSeries();
-        try { if (typeof drawStakeChart === "function") drawStakeChart(); } catch {}
-      }
-      return ok;
-    };
-  }
-
-  // Override stake point recorder: baseline once, then ONLY when it increases
-  if (typeof maybeAddStakePoint === "function") {
-    const EPS = 0.000001; // precision guard (INJ)
-    maybeAddStakePoint = function(currentStake){
-      try{
-        const s = _safe(currentStake);
-        if (!Number.isFinite(s)) return;
-
-        const rounded = Number(s.toFixed(6));
-
-        // baseline (first time only)
-        if (typeof stakeBaselineCaptured !== "undefined" && !stakeBaselineCaptured) {
-          if (typeof nowLabel === "function") stakeLabels.push(nowLabel());
-          else stakeLabels.push(new Date().toLocaleTimeString());
-
-          stakeData.push(rounded);
-          stakeMoves.push(1);
-          stakeTypes.push("Baseline (current)");
-          lastStakeRecordedRounded = rounded;
-          stakeBaselineCaptured = true;
-
-          if (typeof saveStakeSeries === "function") saveStakeSeries();
-          if (typeof drawStakeChart === "function") drawStakeChart();
-          return;
-        }
-
-        // no baseline variable? fallback
-        if (typeof lastStakeRecordedRounded === "undefined" || lastStakeRecordedRounded == null) {
-          lastStakeRecordedRounded = rounded;
-          return;
-        }
-
-        // ONLY record when it increases
-        if (rounded > (lastStakeRecordedRounded + EPS)) {
-          const delta = rounded - lastStakeRecordedRounded;
-          lastStakeRecordedRounded = rounded;
-
-          if (typeof nowLabel === "function") stakeLabels.push(nowLabel());
-          else stakeLabels.push(new Date().toLocaleTimeString());
-
-          stakeData.push(rounded);
-          stakeMoves.push(1);
-          stakeTypes.push("Stake increased");
-
-          // optional: keep your event system if present
-          if (typeof pushEvent === "function") {
-            pushEvent({
-              type: "stake",
-              title: "Stake increased",
-              value: `+${delta.toFixed(6)} INJ`,
-              status: (_hasInternet() ? "ok" : "pending")
-            });
-          }
-
-          if (typeof saveStakeSeries === "function") saveStakeSeries();
-          if (typeof drawStakeChart === "function") drawStakeChart();
-          return;
-        }
-
-        // If it decreases, update reference so future increases are measured correctly,
-        // but DO NOT create a point.
-        if (rounded < lastStakeRecordedRounded) {
-          lastStakeRecordedRounded = rounded;
-        }
-      } catch (e){
-        console.warn("PATCH maybeAddStakePoint error:", e);
-      }
-    };
-  }
-
-  // Wrap commitAddress to ensure no stake data bleed + refresh validator immediately
-  if (typeof commitAddress === "function") {
-    const _commitAddress = commitAddress;
-    commitAddress = async function(newAddr){
-      // pre-clear stake series to prevent old arrays being shown if load fails
-      hardResetStakeSeries();
-      try { if (typeof drawStakeChart === "function") drawStakeChart(); } catch {}
-      const r = await _commitAddress.apply(this, arguments);
-      // refresh validator UI after address is set
-      refreshValidatorUI();
-      return r;
-    };
-  }
-
-  // periodic refresh (safe)
-  setTimeout(refreshValidatorUI, 900);
-  setInterval(() => {
-    try{
-      if (typeof address === "undefined") return;
-      if (!(address || "").trim()) return;
-      refreshValidatorUI();
-    } catch {}
-  }, 45_000);
-
-})();
-
-/* =====================================================================
-   PATCH — Reward filters + No cross-address bleed + Staked axis like Reward
-   + Linear/Log toggle for Reward & Staked
-   Incolla in fondo ad app.js
-   ===================================================================== */
-(function PATCH_REWARD_STAKE_AXES_AND_FILTERS(){
-  "use strict";
-
-  const _safe = (typeof safe === "function") ? safe : (n)=> (Number.isFinite(+n) ? +n : 0);
-  const _clamp = (typeof clamp === "function") ? clamp : (n,a,b)=>Math.min(Math.max(n,a),b);
-
-  /* ---------------------------
-     1) Reward filter modes (persist)
-     --------------------------- */
-  const REWARD_FILTER_KEY = "inj_reward_filter_mode_v1"; // global (ok)
-  let wdFilterMode = localStorage.getItem(REWARD_FILTER_KEY) || "all";
-  // modes: all | lt0_05 | gte0_05 | gte0_1
-
-  function ensureRewardFilterOptions(){
-    const sel = document.getElementById("rewardFilter");
-    if (!sel) return;
-
-    // If select already has our modes, don't touch
-    const hasModes = Array.from(sel.options).some(o => ["all","lt0_05","gte0_05","gte0_1"].includes(o.value));
-    if (hasModes) return;
-
-    // Replace options safely (user requested these)
-    sel.innerHTML = `
-      <option value="all">Tutti</option>
-      <option value="lt0_05">Minori di 0.05</option>
-      <option value="gte0_05">Maggiori di 0.05</option>
-      <option value="gte0_1">0.1 in su</option>
-    `;
-  }
-
-  function applyRewardFilterModeToSelect(){
-    const sel = document.getElementById("rewardFilter");
-    if (!sel) return;
-    ensureRewardFilterOptions();
-    const opt = Array.from(sel.options).find(o => o.value === wdFilterMode);
-    if (opt) sel.value = wdFilterMode;
-  }
-
-  // Patch rebuildWdView to respect new modes
-  if (typeof rebuildWdView === "function") {
-    const _rebuildWdView = rebuildWdView;
-    rebuildWdView = function(){
-      try{
-        // If the app created numeric filter previously, we override with modes.
-        // We rebuild manually (same output arrays: wdLabels, wdValues, wdTimes)
-        wdLabels = [];
-        wdValues = [];
-        wdTimes  = [];
-
-        const mode = wdFilterMode || "all";
-        for (let i = 0; i < (wdValuesAll?.length || 0); i++){
-          const v = _safe(wdValuesAll[i]);
-          const ok =
-            (mode === "all") ||
-            (mode === "lt0_05"  && v < 0.05) ||
-            (mode === "gte0_05" && v >= 0.05) ||
-            (mode === "gte0_1"  && v >= 0.10);
-
-          if (ok) {
-            wdLabels.push(String(wdLabelsAll[i] || ""));
-            wdValues.push(v);
-            wdTimes.push(_safe(wdTimesAll[i] || 0));
-          }
-        }
-
-        // redraw like original
-        if (typeof drawRewardWdChart === "function") drawRewardWdChart();
-        if (typeof syncRewardTimelineUI === "function") syncRewardTimelineUI(true);
-      } catch (e){
-        // fallback to original if something unexpected
-        try { _rebuildWdView.apply(this, arguments); } catch {}
-      }
-    };
-  }
-
-  // Patch attachRewardFilterHandler to use modes + persist
-  if (typeof attachRewardFilterHandler === "function") {
-    attachRewardFilterHandler = function(){
-      const sel = document.getElementById("rewardFilter");
-      if (!sel) return;
-
-      ensureRewardFilterOptions();
-      applyRewardFilterModeToSelect();
-
-      sel.addEventListener("change", () => {
-        wdFilterMode = String(sel.value || "all");
-        localStorage.setItem(REWARD_FILTER_KEY, wdFilterMode);
-
-        if (typeof rebuildWdView === "function") rebuildWdView();
-        if (typeof goRewardLive === "function") goRewardLive();
-      }, { passive: true });
-    };
-  }
-
-  /* ---------------------------
-     2) No cross-address bleed for Reward data
-     If loadWdAll fails -> clear arrays so old wallet points never show
-     --------------------------- */
-  function clearWdArrays(){
-    try{
-      wdLabelsAll = [];
-      wdValuesAll = [];
-      wdTimesAll  = [];
-      wdLabels = [];
-      wdValues = [];
-      wdTimes  = [];
-    } catch {}
-  }
-
-  if (typeof loadWdAll === "function") {
-    const _loadWdAll = loadWdAll;
-    loadWdAll = function(){
-      const ok = _loadWdAll.apply(this, arguments);
-      if (!ok) {
-        clearWdArrays();
-        try { if (typeof drawRewardWdChart === "function") drawRewardWdChart(); } catch {}
-        try { if (typeof syncRewardTimelineUI === "function") syncRewardTimelineUI(true); } catch {}
-      }
-      return ok;
-    };
-  }
-
-  /* ---------------------------
-     3) Linear / Log scale toggles (Reward & Staked) + persist
-     --------------------------- */
-  const SCALE_KEY_REWARD = "inj_scale_reward_v1"; // linear | log
-  const SCALE_KEY_STAKE  = "inj_scale_stake_v1";  // linear | log
-
-  function getScale(key){
-    const v = localStorage.getItem(key) || "linear";
-    return (v === "log") ? "log" : "linear";
-  }
-  function setScale(key, v){
-    localStorage.setItem(key, (v === "log") ? "log" : "linear");
-  }
-
-  function ensureScaleButton(id, fallbackLabel, attachIntoEl){
-    let btn = document.getElementById(id);
-    if (btn) return btn;
-
-    if (!attachIntoEl) return null;
-
-    btn = document.createElement("button");
-    btn.id = id;
-    btn.className = "scale-toggle-btn";
-    btn.type = "button";
-    btn.textContent = fallbackLabel || "Scale: LINEAR";
-
-    // Put it at the end of the header area if possible
-    attachIntoEl.appendChild(btn);
-    return btn;
-  }
-
-  function findCardHeaderForCanvas(canvasId){
-    const cv = document.getElementById(canvasId);
-    if (!cv) return null;
-
-    // Try common patterns: card -> header row
-    // We'll climb to a card container and append to its first header-like row
-    let p = cv.parentElement;
-    while (p && p !== document.body){
-      if (p.classList && (p.classList.contains("card") || p.id?.toLowerCase().includes("card"))) {
-        // look for an existing header row
-        const header = p.querySelector(".card-head, .card-header, .card-top, .card-title-row, .head, header, .top-row");
-        return header || p;
-      }
-      p = p.parentElement;
-    }
-    return null;
-  }
-
-  function applyRewardScale(){
-    if (!window.rewardChart) return;
-    const type = (getScale(SCALE_KEY_REWARD) === "log") ? "logarithmic" : "linear";
-    rewardChart.options.scales.y.type = type;
-
-    // log needs >0
-    if (type === "logarithmic"){
-      rewardChart.options.scales.y.min = 0.000001;
-    } else {
-      rewardChart.options.scales.y.min = undefined;
-    }
-
-    rewardChart.update("none");
-  }
-
-  function applyStakeScale(){
-    if (!window.stakeChart) return;
-    const type = (getScale(SCALE_KEY_STAKE) === "log") ? "logarithmic" : "linear";
-    stakeChart.options.scales.y.type = type;
-
-    if (type === "logarithmic"){
-      stakeChart.options.scales.y.min = 0.000001;
-    } else {
-      stakeChart.options.scales.y.min = undefined;
-    }
-
-    stakeChart.update("none");
-  }
-
-  function initScaleToggles(){
-    // Reward button
-    const rewardHeader = findCardHeaderForCanvas("rewardChart");
-    const rBtn = ensureScaleButton("rewardScaleToggle", "Scale: LINEAR", rewardHeader);
-    if (rBtn) {
-      const syncLabel = () => {
-        rBtn.textContent = (getScale(SCALE_KEY_REWARD) === "log") ? "Scale: LOG" : "Scale: LINEAR";
-      };
-      syncLabel();
-      rBtn.addEventListener("click", () => {
-        const next = (getScale(SCALE_KEY_REWARD) === "log") ? "linear" : "log";
-        setScale(SCALE_KEY_REWARD, next);
-        syncLabel();
-        applyRewardScale();
-      }, { passive:true });
-    }
-
-    // Stake button
-    const stakeHeader = findCardHeaderForCanvas("stakeChart");
-    const sBtn = ensureScaleButton("stakeScaleToggle", "Scale: LINEAR", stakeHeader);
-    if (sBtn) {
-      const syncLabel = () => {
-        sBtn.textContent = (getScale(SCALE_KEY_STAKE) === "log") ? "Scale: LOG" : "Scale: LINEAR";
-      };
-      syncLabel();
-      sBtn.addEventListener("click", () => {
-        const next = (getScale(SCALE_KEY_STAKE) === "log") ? "linear" : "log";
-        setScale(SCALE_KEY_STAKE, next);
-        syncLabel();
-        applyStakeScale();
-      }, { passive:true });
-    }
-  }
-
-  /* ---------------------------
-     4) Staked y-axis style like Reward + tight autoscale
-     --------------------------- */
-  function tightAutoscaleY(chart, data, padPct=0.06){
-    if (!chart || !Array.isArray(data) || !data.length) return;
-
-    const vals = data.map(_safe).filter(v => Number.isFinite(v) && v > 0);
-    if (!vals.length) return;
-
-    const minV = Math.min(...vals);
-    const maxV = Math.max(...vals);
-
-    // If constant line, give it breathing room
-    const span = Math.max(1e-6, maxV - minV);
-    const pad = Math.max(span * padPct, maxV * 0.002);
-
-    const scaleType = chart.options?.scales?.y?.type || "linear";
-    if (scaleType === "logarithmic"){
-      // log axis must be >0
-      const min = Math.max(1e-6, minV * (1 - padPct));
-      const max = maxV * (1 + padPct);
-      chart.options.scales.y.min = min;
-      chart.options.scales.y.max = max;
-    } else {
-      chart.options.scales.y.min = Math.max(0, minV - pad);
-      chart.options.scales.y.max = maxV + pad;
-    }
-  }
-
-  function patchStakeAxisLikeReward(){
-    if (!window.stakeChart) return;
-
-    // right side ticks like reward
-    stakeChart.options.scales.x.display = false;
-
-    stakeChart.options.scales.y.position = "right";
-    stakeChart.options.scales.y.ticks = stakeChart.options.scales.y.ticks || {};
-    stakeChart.options.scales.y.ticks.mirror = true;
-    stakeChart.options.scales.y.ticks.padding = 6;
-    stakeChart.options.scales.y.ticks.maxTicksLimit = 5;
-
-    // smart number formatting if you have fmtSmart
-    if (typeof fmtSmart === "function"){
-      stakeChart.options.scales.y.ticks.callback = (v)=> fmtSmart(v);
-    }
-
-    // grid colors already handled by refreshChartsTheme; keep consistent
-    stakeChart.update("none");
-  }
-
-  function patchRewardAxisTight(){
-    if (!window.rewardChart) return;
-    // keep your existing right axis, just tighten
-    rewardChart.options.scales.y.position = "right";
-    rewardChart.options.scales.y.ticks = rewardChart.options.scales.y.ticks || {};
-    rewardChart.options.scales.y.ticks.mirror = true;
-    rewardChart.options.scales.y.ticks.padding = 6;
-    rewardChart.options.scales.y.ticks.maxTicksLimit = 5;
-
-    if (typeof fmtSmart === "function"){
-      rewardChart.options.scales.y.ticks.callback = (v)=> fmtSmart(v);
-    }
-
-    rewardChart.update("none");
-  }
-
-  // Hook initStakeChart/initRewardWdChart so patches apply even on first creation
-  if (typeof initStakeChart === "function") {
-    const _initStakeChart = initStakeChart;
-    initStakeChart = function(){
-      _initStakeChart.apply(this, arguments);
-      try{
-        patchStakeAxisLikeReward();
-        applyStakeScale();
-        tightAutoscaleY(stakeChart, stakeData);
-      } catch {}
-    };
-  }
-  if (typeof initRewardWdChart === "function") {
-    const _initRewardWdChart = initRewardWdChart;
-    initRewardWdChart = function(){
-      _initRewardWdChart.apply(this, arguments);
-      try{
-        patchRewardAxisTight();
-        applyRewardScale();
-        tightAutoscaleY(rewardChart, wdValues);
-      } catch {}
-    };
-  }
-
-  // Wrap draw functions to keep autoscaling as points grow
-  if (typeof drawStakeChart === "function") {
-    const _drawStakeChart = drawStakeChart;
-    drawStakeChart = function(){
-      _drawStakeChart.apply(this, arguments);
-      try{
-        patchStakeAxisLikeReward();
-        applyStakeScale();
-        tightAutoscaleY(stakeChart, stakeData);
-        stakeChart.update("none");
-      } catch {}
-    };
-  }
-  if (typeof drawRewardWdChart === "function") {
-    const _drawRewardWdChart = drawRewardWdChart;
-    drawRewardWdChart = function(){
-      _drawRewardWdChart.apply(this, arguments);
-      try{
-        patchRewardAxisTight();
-        applyRewardScale();
-        tightAutoscaleY(rewardChart, wdValues);
-        rewardChart.update("none");
-      } catch {}
-    };
-  }
-
-  /* ---------------------------
-     5) Boot: ensure filters + toggles once UI exists
-     --------------------------- */
-  function bootPatch(){
-    try{
-      ensureRewardFilterOptions();
-      applyRewardFilterModeToSelect();
-      initScaleToggles();
-
-      // if charts already exist, patch immediately
-      if (window.stakeChart) { patchStakeAxisLikeReward(); applyStakeScale(); tightAutoscaleY(stakeChart, stakeData); stakeChart.update("none"); }
-      if (window.rewardChart) { patchRewardAxisTight(); applyRewardScale(); tightAutoscaleY(rewardChart, wdValues); rewardChart.update("none"); }
-    } catch {}
-  }
-
-  // run soon + after a moment (in case DOM builds late)
-  setTimeout(bootPatch, 250);
-  setTimeout(bootPatch, 1200);
-
-})();
-
-/* ================= PATCH FINAL (Validator + Controls + Reset + Stake precise) ================= */
-(function FINAL_PATCH_V203(){
-  "use strict";
-
-  /* ====== SETTINGS ====== */
-  const AUTO_INJECT_CARD_ACTIONS = true; // se non vuoi toccare HTML, lascia true
-
-  /* ====== 1) VALIDATOR: name ONLY inside Validator card + yellow pulsing dot ====== */
-  function getValidatorEls(){
-    const card = document.querySelector(".validator-card");
-    if (!card) return { card:null, line:null, dot:null };
-    return {
-      card,
-      line: card.querySelector("#validatorLine"),
-      dot:  card.querySelector("#validatorDot")
-    };
-  }
-
-  // Override: always keep it inside card (no random top IDs)
-  window.setValidatorLine = function(txt){
-    const { line } = getValidatorEls();
-    if (line) line.textContent = txt || "—";
-  };
-
-  // Requested behavior: yellow blinking dot + red offline
-  window.setValidatorDot = function(state){
-    const { dot } = getValidatorEls();
-    if (!dot) return;
+  const q  = (sel, root=document)=> root.querySelector(sel);
+  const qa = (sel, root=document)=> Array.from(root.querySelectorAll(sel));
+  const on = (el, ev, fn, opts)=> el && el.addEventListener(ev, fn, opts);
+
+  /* 1) Rimuovi qualsiasi validator mostrato in alto vicino al wallet/status */
+  function removeHeaderValidator(){
+    const ids = ["validatorHeader","validatorMeta","headerValidator","validatorTop","validatorNameTop","validatorPill"];
+    ids.forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+    qa(".validator-header, .validator-meta, .header-validator, .validator-pill-top").forEach(el => el.remove());
+  }
+
+  /* 2) Dot validator sempre giallo lampeggiante (offline -> rosso) */
+  const _origSetValidatorDot = window.setValidatorDot;
+  window.setValidatorDot = function(){
+    const dot = document.getElementById("validatorDot") || q(".validator-card #validatorDot");
+    if (!dot) { try{ _origSetValidatorDot && _origSetValidatorDot("loading"); } catch{}; return; }
 
     dot.style.animation = "";
     dot.style.boxShadow = "";
 
-    if (!hasInternet()) {
+    if (!navigator.onLine) {
       dot.style.background = "#ef4444";
       dot.style.boxShadow = "0 0 16px rgba(239,68,68,.35)";
       return;
     }
-
-    // Always yellow pulsing when online (per tua richiesta)
     dot.style.background = "#f59e0b";
     dot.style.boxShadow = "0 0 16px rgba(245,158,11,.45)";
     dot.style.animation = "evPulse 1.1s infinite";
   };
 
-  // Ensure validator card exists + always show moniker in that card
-  const _ensureValidatorCard = window.ensureValidatorCard;
-  if (typeof _ensureValidatorCard === "function") {
-    window.ensureValidatorCard = function(){
-      const card = _ensureValidatorCard();
-      // force dot style coherence
-      setValidatorDot("loading");
-      return card;
-    };
-  }
-
-  /* Better "effective validator": choose largest delegation (not first) */
-  async function pickPrimaryValidatorByLargestDelegation(){
-    if (!address || !hasInternet()) return;
+  /* 3) Validator effettivo = delega più grande (non il primo) */
+  async function patchLoadEffectiveValidator(){
     try{
-      const base = "https://lcd.injective.network";
-      const s = await fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`);
-      const delgs = s?.delegation_responses || [];
-      if (!delgs.length) {
-        loadValidatorInfo("");
-        return;
-      }
-      let best = delgs[0];
-      let bestAmt = safe(best?.balance?.amount);
-      for (const d of delgs) {
-        const amt = safe(d?.balance?.amount);
-        if (amt > bestAmt) { best = d; bestAmt = amt; }
-      }
-      const op = best?.delegation?.validator_address || "";
-      if (op && op !== validatorAddr) loadValidatorInfo(op);
-    } catch {
-      // silent
-    }
-  }
-
-  // Wrap loadAccount → after success pick largest validator and keep in card
-  if (!window.__patchedLoadAccountFinal && typeof window.loadAccount === "function") {
-    window.__patchedLoadAccountFinal = true;
-    const _loadAccount = window.loadAccount;
-    window.loadAccount = async function(isRefresh=false){
-      await _loadAccount(isRefresh);
-      if (accountOnline) {
-        ensureValidatorCard();
-        setValidatorDot("loading");
-        pickPrimaryValidatorByLargestDelegation();
-      } else {
-        setValidatorDot("fail");
-      }
-    };
-  }
-
-  /* ====== 2) STAKE: create a point ONLY on increase (precise), never on decrease/baseline ====== */
-  if (!window.__patchedStakeIncreaseOnly && typeof window.maybeAddStakePoint === "function") {
-    window.__patchedStakeIncreaseOnly = true;
-
-    window.maybeAddStakePoint = function(currentStake){
-      const s = safe(currentStake);
-      if (!Number.isFinite(s)) return;
-      const rounded = Number(s.toFixed(6));
-
-      // baseline: just initialize reference, DO NOT push a point
-      if (!stakeBaselineCaptured) {
-        lastStakeRecordedRounded = rounded;
-        stakeBaselineCaptured = true;
-        // keep series empty until first real increase
-        saveStakeSeriesLocalOnly();
-        drawStakeChart();
-        return;
-      }
-
-      if (lastStakeRecordedRounded == null) {
-        lastStakeRecordedRounded = rounded;
-        return;
-      }
-
-      if (rounded === lastStakeRecordedRounded) return;
-
-      const delta = rounded - lastStakeRecordedRounded;
-      // always update last known, so next increases are correct
-      lastStakeRecordedRounded = rounded;
-
-      // only record if increase
-      if (delta <= 0) return;
-
-      stakeLabels.push(nowLabel());
-      stakeData.push(rounded);
-      stakeMoves.push(1);
-      stakeTypes.push("Stake increased");
-
-      // event (stake increased)
-      pushEvent({
-        type: "stake",
-        title: "Stake increased",
-        value: `+${delta.toFixed(6)} INJ`,
-        status: hasInternet() ? "ok" : "pending"
-      });
-
-      saveStakeSeries();
-      drawStakeChart();
-    };
-  }
-
-  /* ====== 3) EVENTS: remove UI/error noise from Event page ====== */
-  // 3a) prevent saving UI/debug/error events at source
-  if (!window.__patchedPushEventFilter && typeof window.pushEvent === "function") {
-    window.__patchedPushEventFilter = true;
-    const _pushEvent = window.pushEvent;
-
-    window.pushEvent = function(ev){
-      const t = String(ev?.type || "");
-      const title = String(ev?.title || "");
-      if (t === "ui" || t === "debug" || t === "error") {
-        // show toast only (optional), but don't persist
-        try { showToastEvent({ t:Date.now(), title, value:String(ev?.value||""), status:"pending" }); } catch {}
-        return;
-      }
-      // block specific noisy titles too
-      if (/timeframe locked|manual refresh|js error|promise error/i.test(title)) {
-        try { showToastEvent({ t:Date.now(), title, value:String(ev?.value||""), status:"pending" }); } catch {}
-        return;
-      }
-      return _pushEvent(ev);
-    };
-  }
-
-  // 3b) clean rendering if old noisy events are already stored
-  if (!window.__patchedRenderEventRows && typeof window.renderEventRows === "function") {
-    window.__patchedRenderEventRows = true;
-    const _render = window.renderEventRows;
-
-    window.renderEventRows = function(){
-      const orig = eventsAll;
-      const filtered = (orig || []).filter(ev => {
-        const t = String(ev?.type || "");
-        const title = String(ev?.title || "");
-        if (t === "ui" || t === "debug" || t === "error") return false;
-        if (/timeframe locked|manual refresh|js error|promise error/i.test(title)) return false;
-        return true;
-      });
-
-      // render using filtered without touching storage
-      eventsAll = filtered;
-      try { _render(); } finally { eventsAll = orig; }
-    };
-  }
-
-  /* ====== 4) EVENT PAGE: add Reset Stake+Reward button (only current address) ====== */
-  function resetStakeRewardForCurrentWallet(){
-    if (!address) return;
-
-    // Stake reset (for this wallet)
-    stakeLabels = [];
-    stakeData = [];
-    stakeMoves = [];
-    stakeTypes = [];
-    stakeBaselineCaptured = false;
-    lastStakeRecordedRounded = null;
-    try { saveStakeSeriesLocalOnly(); } catch {}
-    try { drawStakeChart(); } catch {}
-
-    // Reward reset (for this wallet)
-    wdLabelsAll = [];
-    wdValuesAll = [];
-    wdTimesAll  = [];
-    wdLastRewardsSeen = null;
-    try { saveWdAllLocalOnly(); } catch {}
-    try {
-      rebuildWdView();
-      goRewardLive();
-    } catch {}
-
-    // keep everything strictly tied to this address
-    try { cloudRenderCounts(); cloudSchedulePush(); } catch {}
-
-    // subtle toast (not persisted as event)
-    try { showToastEvent({ t:Date.now(), title:"Reset applied", value:`Stake + Reward cleared for ${shortAddr(address)}`, status:"ok" }); } catch {}
-  }
-
-  function injectEventResetButton(){
-    ensureEventPage();
-    if (!eventPage) return;
-
-    // If already injected, stop
-    if (eventPage.querySelector("#evResetBtn")) return;
-
-    const headerRow = eventPage.querySelector("div[style*='justify-content:space-between']");
-    if (!headerRow) return;
-
-    // Insert button near "Close"
-    const closeBtn = eventPage.querySelector("#eventCloseBtn");
-    const wrapRight = document.createElement("div");
-    wrapRight.style.display = "flex";
-    wrapRight.style.alignItems = "center";
-    wrapRight.style.gap = "10px";
-
-    const resetBtn = document.createElement("button");
-    resetBtn.id = "evResetBtn";
-    resetBtn.type = "button";
-    resetBtn.textContent = "Reset Stake + Reward";
-    resetBtn.style.height = "40px";
-    resetBtn.style.padding = "0 14px";
-    resetBtn.style.borderRadius = "14px";
-    resetBtn.style.fontWeight = "950";
-    resetBtn.style.cursor = "pointer";
-
-    // theme-friendly
-    const isLight = (document.body.dataset.theme === "light");
-    resetBtn.style.color = isLight ? "rgba(15,23,42,.92)" : "rgba(249,250,251,.92)";
-    resetBtn.style.border = isLight ? "1px solid rgba(15,23,42,.14)" : "1px solid rgba(255,255,255,.14)";
-    resetBtn.style.background = isLight ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)";
-
-    resetBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+      if (!navigator.onLine) return;
       if (!address) return;
 
-      const ok = confirm(
-        `Reset Stake + Reward history for this wallet?\n\n${address}\n\nThis cannot be undone.`
-      );
-      if (!ok) return;
-      resetStakeRewardForCurrentWallet();
-      // update event table view too (clean)
-      try { renderEventRows(); } catch {}
-    }, { passive:false });
+      const base = "https://lcd.injective.network";
+      const d = await fetchJSON(`${base}/cosmos/staking/v1beta1/delegations/${address}`);
+      const delgs = d?.delegation_responses || [];
+      if (!delgs.length) { loadValidatorInfo(""); return; }
 
-    // Move closeBtn into right wrap
-    if (closeBtn) {
-      closeBtn.parentElement?.removeChild(closeBtn);
-      wrapRight.appendChild(resetBtn);
-      wrapRight.appendChild(closeBtn);
-      headerRow.appendChild(wrapRight);
-    } else {
-      headerRow.appendChild(resetBtn);
+      let best = "";
+      let bestAmt = 0;
+
+      for (const it of delgs){
+        const op = it?.delegation?.validator_address || "";
+        const amt = safe(it?.balance?.amount);
+        if (op && amt > bestAmt){ best = op; bestAmt = amt; }
+      }
+
+      if (best && best !== validatorAddr) loadValidatorInfo(best);
+    } catch(e){
+      console.warn("effective validator patch error", e);
     }
   }
 
-  /* ====== 5) Card controls: LOG/LIN + EXPAND under cards (non invasive) ====== */
-  function chartHasValidLogData(ch){
-    const data = ch?.data?.datasets?.[0]?.data || [];
-    const positives = data.filter(v => safe(v) > 0);
-    return positives.length > 0;
+  if (typeof window.loadAccount === "function" && !window.__patch_loadAccountWrapped){
+    window.__patch_loadAccountWrapped = true;
+    const _orig = window.loadAccount;
+    window.loadAccount = async function(isRefresh){
+      const r = await _orig.call(this, isRefresh);
+      patchLoadEffectiveValidator();
+      return r;
+    };
   }
 
-  function setChartScale(ch, toLog){
-    if (!ch?.options?.scales?.y) return false;
+  /* 4) Posiziona Validator card sotto “INJ Total owned” (se esiste), altrimenti sotto Net Worth */
+  function placeValidatorCard(){
+    try{
+      const vc = document.querySelector(".validator-card");
+      if (!vc) return;
 
-    if (toLog) {
-      if (!chartHasValidLogData(ch)) return false;
-      ch.options.scales.y.type = "logarithmic";
-      // keep ticks readable
-      if (!ch.options.scales.y.ticks) ch.options.scales.y.ticks = {};
-      // no special colors here; uses existing callbacks
-    } else {
-      ch.options.scales.y.type = "linear";
+      const wrap = document.querySelector(".cards-wrapper");
+      if (!wrap) return;
+
+      const idCandidates = ["injTotalOwnedCard","injTotalCard","totalOwnedCard","injOwnedCard"];
+      let anchor = null;
+
+      for (const id of idCandidates){
+        const el = document.getElementById(id);
+        if (el && el.classList && el.classList.contains("card")) { anchor = el; break; }
+      }
+
+      if (!anchor){
+        anchor = qa(".cards-wrapper .card").find(c => /inj\s*total/i.test(c.textContent||"") && /owned/i.test(c.textContent||""));
+      }
+
+      if (!anchor) anchor = document.getElementById("netWorthCard");
+
+      if (anchor && anchor.parentElement === wrap) anchor.insertAdjacentElement("afterend", vc);
+      else wrap.insertAdjacentElement("afterbegin", vc);
+
+      // forza dot giallo
+      window.setValidatorDot?.();
+    } catch {}
+  }
+
+  /* 5) Sposta Expand + LIN/LOG in basso (tutte le card con canvas, tranne APR) */
+  function isAprCard(card){
+    if (!card) return false;
+    if (card.id === "aprCard" || card.classList.contains("apr-card")) return true;
+    const t = (card.textContent || "").toLowerCase();
+    return t.includes("apr") && !t.includes("price");
+  }
+
+  function ensureActionsBar(card){
+    let bar = card.querySelector(".card-actions");
+    if (!bar){
+      bar = document.createElement("div");
+      bar.className = "card-actions";
+      card.appendChild(bar);
     }
-    ch.update("none");
-    return true;
+    return bar;
   }
 
-  // Fullscreen toggle
-  let zoomBackdrop = null;
-  function ensureZoomBackdrop(){
-    if (zoomBackdrop) return zoomBackdrop;
-    zoomBackdrop = document.createElement("div");
-    zoomBackdrop.className = "card-zoom-backdrop";
-    zoomBackdrop.style.display = "none";
-    zoomBackdrop.addEventListener("click", () => exitZoom(), { passive:true });
-    document.body.appendChild(zoomBackdrop);
-    return zoomBackdrop;
-  }
+  function moveTopToolsDown(card){
+    if (!card || isAprCard(card)) return;
 
-  function exitZoom(){
-    document.body.classList.remove("card-zoom-lock");
-    const z = document.querySelector(".card.card-zoomed");
-    if (z) z.classList.remove("card-zoomed");
-    if (zoomBackdrop) zoomBackdrop.style.display = "none";
-    // resize charts
-    try { chart?.resize?.(); } catch {}
-    try { netWorthChart?.resize?.(); } catch {}
-    try { stakeChart?.resize?.(); } catch {}
-    try { rewardChart?.resize?.(); } catch {}
-  }
+    const bar = ensureActionsBar(card);
 
-  function toggleZoom(cardEl){
-    if (!cardEl) return;
-    ensureZoomBackdrop();
+    const tools = card.querySelector(":scope > .card-tools");
+    if (tools) bar.appendChild(tools);
 
-    const isZoomed = cardEl.classList.contains("card-zoomed");
-    if (isZoomed) {
-      exitZoom();
-      return;
+    const nwTop2 = card.querySelector(".networth-top2");
+    if (nwTop2) bar.appendChild(nwTop2);
+
+    const canvas = card.querySelector("canvas");
+    if (!canvas) return;
+
+    if (!bar.querySelector("[data-scale-toggle]")){
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "scale-toggle-btn";
+      btn.dataset.scaleToggle = canvas.id || "chart";
+      btn.textContent = "LIN";
+      bar.insertAdjacentElement("afterbegin", btn);
     }
-
-    // close any other zoomed card
-    const other = document.querySelector(".card.card-zoomed");
-    if (other) other.classList.remove("card-zoomed");
-
-    cardEl.classList.add("card-zoomed");
-    zoomBackdrop.style.display = "block";
-    document.body.classList.add("card-zoom-lock");
-
-    // force chart resize
-    setTimeout(() => {
-      try { chart?.resize?.(); } catch {}
-      try { netWorthChart?.resize?.(); } catch {}
-      try { stakeChart?.resize?.(); } catch {}
-      try { rewardChart?.resize?.(); } catch {}
-    }, 50);
   }
 
-  function bindCardActions(cardEl, getChart){
-    if (!cardEl) return;
+  function applyScale(chartObj, mode){
+    if (!chartObj) return;
+    const y = chartObj.options?.scales?.y;
+    if (!y) return;
 
-    // find actions container
-    let actions = cardEl.querySelector(".card-actions");
-    if (!actions && AUTO_INJECT_CARD_ACTIONS) {
-      actions = document.createElement("div");
-      actions.className = "card-actions";
-      actions.innerHTML = `
-        <button class="icon-btn" type="button" data-action="scale" aria-label="Switch scale log/linear">LIN</button>
-        <button class="icon-btn" type="button" data-action="expand" aria-label="Expand card">⛶</button>
-      `;
-      cardEl.appendChild(actions);
-    }
-    if (!actions) return;
-
-    const scaleBtn = actions.querySelector('[data-action="scale"]');
-    const expandBtn = actions.querySelector('[data-action="expand"]');
-
-    // init label
-    if (scaleBtn) scaleBtn.textContent = "LIN";
-
-    scaleBtn?.addEventListener("click", (e) => {
-      e.preventDefault();
-      const ch = getChart();
-      if (!ch) return;
-
-      const isLog = (ch.options?.scales?.y?.type === "logarithmic");
-      const ok = setChartScale(ch, !isLog);
-      if (!ok) {
-        try { showToastEvent({ t:Date.now(), title:"Log scale unavailable", value:"Need values > 0", status:"pending" }); } catch {}
+    if (mode === "log"){
+      const data = chartObj.data?.datasets?.[0]?.data || [];
+      const bad = data.some(v => !(Number.isFinite(+v) && +v > 0));
+      if (bad){
+        y.type = "linear";
+        chartObj.update("none");
         return;
       }
-      scaleBtn.textContent = (!isLog) ? "LOG" : "LIN";
-    }, { passive:false });
-
-    expandBtn?.addEventListener("click", (e) => {
-      e.preventDefault();
-      toggleZoom(cardEl);
-    }, { passive:false });
+      y.type = "logarithmic";
+    } else {
+      y.type = "linear";
+    }
+    chartObj.update("none");
   }
 
-  function setupControls(){
-    // Bind per chart card by finding closest .card from canvas IDs
-    const nwCanvas = document.getElementById("netWorthChart");
-    const stakeCanvas = document.getElementById("stakeChart");
-    const rewardCanvas = document.getElementById("rewardChart");
-    const priceCanvas = document.getElementById("priceChart");
-
-    const nwCard = nwCanvas?.closest?.(".card");
-    const stakeCardEl = stakeCanvas?.closest?.(".card");
-    const rewardCardEl = rewardCanvas?.closest?.(".card");
-    const priceCardEl = priceCanvas?.closest?.(".card");
-
-    bindCardActions(nwCard, () => netWorthChart);
-    bindCardActions(stakeCardEl, () => stakeChart);
-    bindCardActions(rewardCardEl, () => rewardChart);
-    bindCardActions(priceCardEl, () => chart);
+  function currentScaleMode(chartObj){
+    const t = chartObj?.options?.scales?.y?.type;
+    return (t === "logarithmic") ? "log" : "lin";
   }
 
-  /* ====== 6) Staked y-axis like Reward (numeric column right, not ugly) ====== */
-  function patchStakeAxisLikeReward(){
-    if (!stakeChart?.options?.scales?.y) return;
-    stakeChart.options.scales.y.position = "right";
-    stakeChart.options.scales.y.ticks = stakeChart.options.scales.y.ticks || {};
-    stakeChart.options.scales.y.ticks.mirror = true;
-    stakeChart.options.scales.y.ticks.padding = 6;
-    stakeChart.update("none");
+  function wireScaleButtons(){
+    qa(".card-actions .scale-toggle-btn").forEach(btn => {
+      if (btn.__wired) return;
+      btn.__wired = true;
+
+      btn.addEventListener("click", () => {
+        const targetId = btn.dataset.scaleToggle || "";
+
+        const pick = (id) => {
+          if (id === "netWorthChart") return netWorthChart;
+          if (id === "rewardChart")  return rewardChart;
+          if (id === "stakeChart")   return stakeChart;
+          if (id === "priceChart")   return chart;
+          return null;
+        };
+
+        const ch = pick(targetId);
+        const now = currentScaleMode(ch);
+        const next = (now === "lin") ? "log" : "lin";
+
+        try { localStorage.setItem(`inj_scale_${targetId}`, next); } catch {}
+        applyScale(ch, next);
+        btn.textContent = (next === "log") ? "LOG" : "LIN";
+      }, { passive:true });
+
+      const targetId = btn.dataset.scaleToggle || "";
+      let stored = "lin";
+      try { stored = localStorage.getItem(`inj_scale_${targetId}`) || "lin"; } catch {}
+      btn.textContent = (stored === "log") ? "LOG" : "LIN";
+
+      const ch = (targetId === "netWorthChart") ? netWorthChart
+               : (targetId === "rewardChart")  ? rewardChart
+               : (targetId === "stakeChart")   ? stakeChart
+               : (targetId === "priceChart")   ? chart : null;
+
+      applyScale(ch, stored);
+    });
   }
 
-  /* ====== RUN PATCH ====== */
+  /* 6) Menu Settings -> Advanced + Reset (per wallet) */
+  function injectAdvancedResetUI(){
+    if (!drawer) return;
+    const foot = drawer.querySelector(".drawer-foot") || drawer;
+    if (!foot) return;
+
+    if (!document.getElementById("advBlock")){
+      const block = document.createElement("div");
+      block.id = "advBlock";
+      block.style.marginTop = "10px";
+      block.innerHTML = `
+        <button id="advToggleBtn" type="button" class="nav-item" style="height:42px;">
+          <span>ADVANCED</span>
+          <span style="opacity:.75;">▾</span>
+        </button>
+
+        <div id="advPanel" style="display:none; margin-top:10px; padding:10px; border-radius:14px;
+          border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04);">
+          <div style="font-weight:950; margin-bottom:6px;">Reset current wallet data</div>
+          <div style="font-size:.78rem; opacity:.78; line-height:1.25; margin-bottom:10px;">
+            Cancella <b>Staked</b>, <b>Reward</b>, <b>Net Worth</b> ed <b>Events</b> per il wallet corrente (solo questo indirizzo).
+            Dopo il reset i punti verranno creati solo quando arrivano dati nuovi reali.
+          </div>
+          <button id="resetWalletBtn" type="button" class="mini-btn" style="width:100%; height:38px;">
+            Reset now
+          </button>
+        </div>
+      `;
+      foot.appendChild(block);
+
+      const tgl = document.getElementById("advToggleBtn");
+      const panel = document.getElementById("advPanel");
+      on(tgl, "click", (e)=>{ e.preventDefault(); panel.style.display = (panel.style.display==="none") ? "block" : "none"; }, { passive:false });
+
+      const resetBtn = document.getElementById("resetWalletBtn");
+      on(resetBtn, "click", async (e)=>{
+        e.preventDefault();
+        if (!address) return;
+
+        const ok = confirm(
+          "Reset del wallet corrente?\n\n" +
+          "• Cancella Staked / Reward / Net Worth / Events\n" +
+          "• Riparte da zero e registra nuovi punti solo su dati nuovi\n" +
+          "• Aggiorna Cloud per questo wallet"
+        );
+        if (!ok) return;
+
+        try{
+          try { clearStakeSeriesStorage(); } catch {}
+          try { localStorage.removeItem(wdStoreKey(address)); } catch {}
+          try { localStorage.removeItem(nwStoreKey(address)); } catch {}
+          try { localStorage.removeItem(evStoreKey(address)); } catch {}
+
+          stakeLabels = []; stakeData = []; stakeMoves = []; stakeTypes = [];
+          stakeBaselineCaptured = false; lastStakeRecordedRounded = null;
+
+          wdLabelsAll = []; wdValuesAll = []; wdTimesAll = [];
+          wdLabels = []; wdValues = []; wdTimes = [];
+          wdLastRewardsSeen = null;
+
+          nwTAll = []; nwUsdAll = []; nwInjAll = [];
+
+          eventsAll = [];
+          renderEventRows?.();
+
+          drawStakeChart?.();
+          rebuildWdView?.();
+          drawNW?.();
+
+          setValidatorLine?.("—");
+          window.setValidatorDot?.();
+
+          await cloudPushNow?.();
+
+          pushEvent?.({ type:"ui", title:"Reset applied", value:"History cleared for this wallet", status:"ok" });
+        } catch(err){
+          console.warn("reset error", err);
+          pushEvent?.({ type:"ui", title:"Reset error", value:"Could not reset all data", status:"fail" });
+        }
+      }, { passive:false });
+    }
+
+    // intercetta click su Settings: non mostra Coming Soon, apre Advanced
+    if (drawerNav && !drawerNav.__advIntercept){
+      drawerNav.__advIntercept = true;
+      drawerNav.addEventListener("click", (e)=>{
+        const btn = e.target?.closest(".nav-item");
+        if (!btn) return;
+        const page = btn.dataset.page || "";
+        if (page !== "settings") return;
+
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        const panel = document.getElementById("advPanel");
+        if (panel) panel.style.display = "block";
+      }, { capture:true });
+    }
+  }
+
+  /* 7) Dopo cambio address, riapplica layout */
+  if (typeof window.commitAddress === "function" && !window.__patch_commitWrapped){
+    window.__patch_commitWrapped = true;
+    const _orig = window.commitAddress;
+    window.commitAddress = async function(newAddr){
+      const r = await _orig.call(this, newAddr);
+      setTimeout(() => {
+        removeHeaderValidator();
+        placeValidatorCard();
+        qa(".cards-wrapper .card").forEach(moveTopToolsDown);
+        wireScaleButtons();
+      }, 0);
+      return r;
+    };
+  }
+
   function run(){
-    try { ensureValidatorCard(); setValidatorDot("loading"); } catch {}
-    try { setupControls(); } catch {}
-    try { injectEventResetButton(); } catch {}
-    try { patchStakeAxisLikeReward(); } catch {}
+    removeHeaderValidator();
+    placeValidatorCard();
+    qa(".cards-wrapper .card").forEach(moveTopToolsDown);
+    wireScaleButtons();
+    injectAdvancedResetUI();
+    window.setValidatorDot?.();
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", run, { passive:true });
+    document.addEventListener("DOMContentLoaded", () => setTimeout(run, 0), { once:true });
   } else {
-    run();
-  }
-
-  // keep event page button styled on theme change
-  const _applyTheme = window.applyTheme;
-  if (typeof _applyTheme === "function" && !window.__patchedApplyThemeForResetBtn) {
-    window.__patchedApplyThemeForResetBtn = true;
-    window.applyTheme = function(t){
-      _applyTheme(t);
-      try{
-        const btn = document.querySelector("#evResetBtn");
-        if (btn) {
-          const isLight = (document.body.dataset.theme === "light");
-          btn.style.color = isLight ? "rgba(15,23,42,.92)" : "rgba(249,250,251,.92)";
-          btn.style.border = isLight ? "1px solid rgba(15,23,42,.14)" : "1px solid rgba(255,255,255,.14)";
-          btn.style.background = isLight ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.06)";
-        }
-      } catch {}
-    };
+    setTimeout(run, 0);
   }
 })();
-
