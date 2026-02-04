@@ -1,6 +1,6 @@
 /* =========================================================
    Injective Portfolio • v2.0.2
-   app.js — FULL FILE (aligned to provided HTML)
+   app.js — FULL FILE (robust + bars restored + no-crash)
    ========================================================= */
 
 /* ================= CONFIG ================= */
@@ -41,7 +41,7 @@ const REFRESH_RED_MS = 220;
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.min(Math.max(n, a), b);
 const safe = (n) => (Number.isFinite(+n) ? +n : 0);
-const nowMs = () => Date.now();
+const hasInternet = () => navigator.onLine === true;
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtHHMM(ms) {
@@ -62,7 +62,7 @@ function labelToTs(lbl) {
 }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
 function setText(id, txt) { const el = $(id); if (el) el.textContent = txt; }
-function hasInternet() { return navigator.onLine === true; }
+
 function fmtSmart(v){
   v = safe(v);
   const av = Math.abs(v);
@@ -104,6 +104,7 @@ window.addEventListener("unhandledrejection", (e) => {
 /* ================= THEME / MODE ================= */
 const THEME_KEY = "inj_theme";
 const MODE_KEY  = "inj_mode"; // live | refresh
+
 let theme = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
 
@@ -138,9 +139,6 @@ function tryRegisterZoom(){
 }
 
 /* ================= CONNECTION UI ================= */
-const statusDot  = $("statusDot");
-const statusText = $("statusText");
-
 let wsTradeOnline = false;
 let wsKlineOnline = false;
 let accountOnline = false;
@@ -156,6 +154,8 @@ function liveReady(){
 }
 
 function refreshConnUI() {
+  const statusDot  = $("statusDot");
+  const statusText = $("statusText");
   if (!statusDot || !statusText) return;
 
   if (!hasInternet()) {
@@ -185,7 +185,6 @@ function setUIReady(force=false){
   const root = $("appRoot");
   if (!root) return;
   if (root.classList.contains("ready")) return;
-  if (!force) { /* keep simple */ }
   root.classList.remove("loading");
   root.classList.add("ready");
 }
@@ -201,41 +200,6 @@ function scrollSpeed() {
 function tick(cur, tgt) {
   if (!Number.isFinite(tgt)) return cur;
   return cur + (tgt - cur) * scrollSpeed();
-}
-
-/* ================= COLORED DIGITS ================= */
-function colorNumber(el, n, o, d) {
-  if (!el) return;
-  n = safe(n); o = safe(o);
-  const ns = n.toFixed(d), os = o.toFixed(d);
-  if (ns === os) { el.textContent = ns; return; }
-  el.innerHTML = [...ns].map((c, i) => {
-    const col = c !== os[i]
-      ? (n > o ? "#22c55e" : "#ef4444")
-      : (document.body.dataset.theme === "light" ? "#0f172a" : "#f9fafb");
-    return `<span style="color:${col}">${c}</span>`;
-  }).join("");
-}
-function colorMoney(el, n, o, decimals = 2){
-  if (!el) return;
-  n = safe(n); o = safe(o);
-  const ns = n.toFixed(decimals);
-  const os = o.toFixed(decimals);
-  if (ns === os) { el.textContent = `$${ns}`; return; }
-
-  const baseCol = (document.body.dataset.theme === "light") ? "#0f172a" : "#f9fafb";
-  const upCol = "#22c55e";
-  const dnCol = "#ef4444";
-  const dir = (n > o) ? "up" : "down";
-
-  const out = [`<span style="color:${baseCol}">$</span>`];
-  for (let i = 0; i < ns.length; i++){
-    const c = ns[i];
-    const oc = os[i];
-    const col = (c !== oc) ? (dir === "up" ? upCol : dnCol) : baseCol;
-    out.push(`<span style="color:${col}">${c}</span>`);
-  }
-  el.innerHTML = out.join("");
 }
 
 /* ================= PERF ================= */
@@ -256,7 +220,7 @@ function updatePerf(arrowId, pctId, v) {
   pct.textContent = Math.abs(v).toFixed(2) + "%";
 }
 
-/* ================= BAR RENDER ================= */
+/* ================= BAR RENDER (open-centered) ================= */
 function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   if (!bar || !line) return;
 
@@ -290,38 +254,22 @@ function renderBar(bar, line, val, open, low, high, gradUp, gradDown) {
   }
 }
 
-/* ================= FLASH EXTREMES ================= */
-const lastExtremes = { d:{low:null,high:null}, w:{low:null,high:null}, m:{low:null,high:null} };
-function flash(el) {
-  if (!el) return;
-  el.classList.remove("flash-yellow");
-  void el.offsetWidth;
-  el.classList.add("flash-yellow");
-}
-
 /* ================= ADDRESS / SEARCH + COPY ================= */
-const searchWrap = $("searchWrap");
-const searchBtn = $("searchBtn");
-const addressInput = $("addressInput");
-const addressDisplay = $("addressDisplay");
-const copyAddressBtn = $("copyAddressBtn");
-const menuBtn = $("menuBtn");
-
 let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = "";
 
 function setAddressDisplay(addr) {
+  const addressDisplay = $("addressDisplay");
   if (!addressDisplay) return;
   if (!addr) { addressDisplay.innerHTML = ""; return; }
   addressDisplay.innerHTML = `<span class="tag"><strong>Wallet:</strong> ${shortAddr(addr)}</span>`;
 }
-setAddressDisplay(address);
 
 async function doCopyAddress(){
   if (!address) return;
+  const copyAddressBtn = $("copyAddressBtn");
   try{
     await navigator.clipboard.writeText(address);
-    // mini feedback: swap icon briefly if present
     if (copyAddressBtn){
       const prev = copyAddressBtn.textContent;
       copyAddressBtn.textContent = "✓";
@@ -329,107 +277,41 @@ async function doCopyAddress(){
     }
   } catch {}
 }
-copyAddressBtn?.addEventListener("click", (e)=>{ e.preventDefault(); doCopyAddress(); }, {passive:false});
 
 function openSearch() {
+  const searchWrap = $("searchWrap");
+  const addressInput = $("addressInput");
   if (!searchWrap) return;
   searchWrap.classList.add("open");
   document.body.classList.add("search-open");
   setTimeout(() => addressInput?.focus(), 20);
 }
 function closeSearch() {
+  const searchWrap = $("searchWrap");
+  const addressInput = $("addressInput");
   if (!searchWrap) return;
   searchWrap.classList.remove("open");
   document.body.classList.remove("search-open");
   addressInput?.blur();
 }
 
-if (addressInput) addressInput.value = "";
-
-searchBtn?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  e?.stopPropagation?.();
-  if (!searchWrap.classList.contains("open")) openSearch();
-  else addressInput?.focus();
-}, { passive: false });
-
-addressInput?.addEventListener("focus", () => openSearch(), { passive: true });
-addressInput?.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
-
-addressInput?.addEventListener("keydown", async (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    const v = pendingAddress;
-    await commitAddress(v);
-    addressInput.value = "";
-    pendingAddress = "";
-    closeSearch();
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    addressInput.value = "";
-    pendingAddress = "";
-    closeSearch();
-  }
-});
-
-document.addEventListener("click", (e) => {
-  if (!searchWrap) return;
-  if (searchWrap.contains(e.target)) return;
-  closeSearch();
-}, { passive: true });
-
 /* ================= DRAWER MENU ================= */
-const backdrop = $("backdrop");
-const drawer = $("drawer");
-const drawerNav = $("drawerNav");
-const themeToggle = $("themeToggle");
-const liveToggle = $("liveToggle");
-const liveIcon = $("liveIcon");
-const modeHint = $("modeHint");
-
 let isDrawerOpen = false;
-
 function openDrawer(){
   isDrawerOpen = true;
   document.body.classList.add("drawer-open");
-  drawer?.setAttribute("aria-hidden", "false");
-  backdrop?.setAttribute("aria-hidden", "false");
+  $("drawer")?.setAttribute("aria-hidden", "false");
+  $("backdrop")?.setAttribute("aria-hidden", "false");
 }
 function closeDrawer(){
   isDrawerOpen = false;
   document.body.classList.remove("drawer-open");
-  drawer?.setAttribute("aria-hidden", "true");
-  backdrop?.setAttribute("aria-hidden", "true");
+  $("drawer")?.setAttribute("aria-hidden", "true");
+  $("backdrop")?.setAttribute("aria-hidden", "true");
 }
 function toggleDrawer(){ isDrawerOpen ? closeDrawer() : openDrawer(); }
 
-menuBtn?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  e?.stopPropagation?.();
-  toggleDrawer();
-}, { passive: false });
-
-backdrop?.addEventListener("click", () => closeDrawer(), { passive:true });
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    closeDrawer();
-    closeComingSoon();
-    exitFullscreenCard();
-  }
-});
-
-themeToggle?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  applyTheme(theme === "dark" ? "light" : "dark");
-}, { passive:false });
-
 /* ================= COMING SOON overlay ================= */
-const comingSoon = $("comingSoon");
-const comingTitle = $("comingTitle");
-const comingSub = $("comingSub");
-const comingClose = $("comingClose");
-
 function pageLabel(key){
   if (key === "home") return "HOME";
   if (key === "market") return "MARKET";
@@ -438,82 +320,52 @@ function pageLabel(key){
   return "PAGE";
 }
 function openComingSoon(pageKey){
+  const comingSoon = $("comingSoon");
   if (!comingSoon) return;
+  const comingTitle = $("comingTitle");
+  const comingSub = $("comingSub");
   if (comingTitle) comingTitle.textContent = `COMING SOON 🚀`;
   if (comingSub) comingSub.textContent = `${pageLabel(pageKey)} is coming soon.`;
   comingSoon.classList.add("show");
   comingSoon.setAttribute("aria-hidden", "false");
 }
 function closeComingSoon(){
+  const comingSoon = $("comingSoon");
   if (!comingSoon) return;
   comingSoon.classList.remove("show");
   comingSoon.setAttribute("aria-hidden", "true");
 }
-comingClose?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  e?.stopPropagation?.();
-  closeComingSoon();
-}, { passive:false });
-comingSoon?.addEventListener("click", (e) => {
-  if (e.target === comingSoon) closeComingSoon();
-}, { passive:true });
 
-/* ================= PAGES (Dashboard / Events / Tools / Settings) ================= */
-const pageDashboard = $("pageDashboard");
-const pageEvents = $("pageEvents");
-const pageTools = $("pageTools");
-const pageSettings = $("pageSettings");
-const pageHome = $("pageHome");
-const pageMarket = $("pageMarket");
-
+/* ================= PAGES ================= */
 function hideAllPages(){
-  [pageDashboard,pageEvents,pageTools,pageSettings,pageHome,pageMarket].forEach(p => p?.classList.remove("active"));
-  [pageDashboard,pageEvents,pageTools,pageSettings,pageHome,pageMarket].forEach(p => p?.setAttribute("aria-hidden","true"));
+  const list = ["pageDashboard","pageEvents","pageTools","pageSettings","pageHome","pageMarket"];
+  list.forEach(id => $(id)?.classList.remove("active"));
+  list.forEach(id => $(id)?.setAttribute("aria-hidden","true"));
 }
 function showPage(key){
   hideAllPages();
   closeComingSoon();
 
   const map = {
-    dashboard: pageDashboard,
-    event: pageEvents,
-    events: pageEvents,
-    tools: pageTools,
-    settings: pageSettings,
-    home: pageHome,
-    market: pageMarket
+    dashboard: $("pageDashboard"),
+    event: $("pageEvents"),
+    events: $("pageEvents"),
+    tools: $("pageTools"),
+    settings: $("pageSettings"),
+    home: $("pageHome"),
+    market: $("pageMarket")
   };
-  const p = map[key] || pageDashboard;
+  const p = map[key] || $("pageDashboard");
   p?.classList.add("active");
   p?.setAttribute("aria-hidden","false");
 
-  // page-specific
-  if (p === pageEvents) renderEvents(true);
-  if (p === pageSettings) syncSettingsUI();
+  if (p?.id === "pageEvents") renderEvents(true);
+  if (p?.id === "pageSettings") syncSettingsUI();
 }
-
 function setActivePage(pageKey){
-  const items = drawerNav?.querySelectorAll(".nav-item") || [];
+  const items = $("drawerNav")?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
 }
-
-drawerNav?.addEventListener("click", (e) => {
-  const btn = e.target?.closest(".nav-item");
-  if (!btn) return;
-  const page = btn.dataset.page || "dashboard";
-  setActivePage(page);
-  closeDrawer();
-
-  if (page === "dashboard") showPage("dashboard");
-  else if (page === "event" || page === "events") showPage("events");
-  else if (page === "tools") showPage("tools");
-  else if (page === "settings") showPage("settings");
-  else {
-    // keep dashboard under overlay
-    showPage("dashboard");
-    openComingSoon(page);
-  }
-}, { passive:true });
 
 /* ================= FULLSCREEN CARD ================= */
 let expandedCard = null;
@@ -532,7 +384,6 @@ function buildExpandedBackdrop(){
   document.body.appendChild(bd);
   expandedBackdrop = bd;
 }
-
 function hideNonChartContent(card){
   const hidden = [];
   const keepSet = new Set();
@@ -560,13 +411,11 @@ function hideNonChartContent(card){
 
   expandedHiddenMap.set(card, hidden);
 }
-
 function restoreNonChartContent(card){
   const hidden = expandedHiddenMap.get(card) || [];
   hidden.forEach(([el, disp]) => { el.style.display = disp || ""; });
   expandedHiddenMap.delete(card);
 }
-
 function resizeAllCharts(){
   try { priceChart?.resize?.(); } catch {}
   try { stakeChart?.resize?.(); } catch {}
@@ -574,7 +423,6 @@ function resizeAllCharts(){
   try { netWorthChart?.resize?.(); } catch {}
   try { aprChart?.resize?.(); } catch {}
 }
-
 function enterFullscreenCard(card){
   if (!card) return;
   if (expandedCard) exitFullscreenCard();
@@ -598,7 +446,6 @@ function exitFullscreenCard(){
   expandedCard = null;
   setTimeout(resizeAllCharts, 180);
 }
-
 function bindExpandButtons(){
   document.querySelectorAll(".card-expand").forEach(btn => {
     btn.addEventListener("click", (e) => {
@@ -619,6 +466,13 @@ let eventsUnread = 0;
 function evStoreKey(addr){
   const a = (addr || "").trim();
   return a ? `inj_events_v${EV_LOCAL_VER}_${a}` : null;
+}
+function renderEventBadge(){
+  const badge = $("eventBadge");
+  if (!badge) return;
+  const n = Math.max(0, Math.floor(eventsUnread));
+  badge.hidden = n <= 0;
+  badge.textContent = String(n);
 }
 function loadEvents(){
   const key = evStoreKey(address);
@@ -686,7 +540,7 @@ function pushEvent(ev){
     title: ev.title || "Event",
     detail: ev.detail || "",
     dir: ev.dir || null,
-    status: ev.status || "ok" // ok|pending|err
+    status: ev.status || "ok"
   };
 
   eventsAll.unshift(obj);
@@ -709,14 +563,6 @@ function pushEvent(ev){
   }
 }
 
-function renderEventBadge(){
-  const badge = $("eventBadge");
-  if (!badge) return;
-  const n = Math.max(0, Math.floor(eventsUnread));
-  badge.hidden = n <= 0;
-  badge.textContent = String(n);
-}
-
 let eventsPageIndex = 0;
 const EVENTS_PER_PAGE = 18;
 
@@ -724,12 +570,12 @@ function getFilteredEvents(){
   const cat = ($("eventsCategory")?.value || "all").toLowerCase();
   if (cat === "all") return eventsAll;
 
-  // simple mapping
   return eventsAll.filter(ev => {
     const k = (ev.kind || "").toLowerCase();
-    if (cat === "rewards") return k.includes("reward") || ev.title.toLowerCase().includes("reward");
-    if (cat === "apr") return k.includes("apr") || ev.title.toLowerCase().includes("apr");
-    if (cat === "price") return k.includes("price") || ev.title.toLowerCase().includes("price");
+    const ttl = (ev.title || "").toLowerCase();
+    if (cat === "rewards") return k.includes("reward") || ttl.includes("reward");
+    if (cat === "apr") return k.includes("apr") || ttl.includes("apr");
+    if (cat === "price") return k.includes("price") || ttl.includes("price");
     if (cat === "exchange") return k.includes("exchange");
     if (cat === "system") return k.includes("system") || k.includes("info");
     return true;
@@ -748,7 +594,6 @@ function renderEvents(markRead){
   }
 
   const list = getFilteredEvents();
-
   if (empty) empty.style.display = list.length ? "none" : "block";
   tbody.innerHTML = "";
 
@@ -776,7 +621,6 @@ function renderEvents(markRead){
     tbody.appendChild(tr);
   }
 
-  // pager
   if (pagesEl){
     pagesEl.textContent = `${eventsPageIndex + 1} / ${totalPages}`;
   }
@@ -784,31 +628,6 @@ function renderEvents(markRead){
   $("eventsPrev")?.toggleAttribute("disabled", eventsPageIndex <= 0);
   $("eventsNext")?.toggleAttribute("disabled", eventsPageIndex >= totalPages - 1);
 }
-
-$("eventsClearBtn")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  eventsAll = [];
-  eventsUnread = 0;
-  eventsPageIndex = 0;
-  saveEvents();
-  renderEvents(true);
-}, { passive:false });
-
-$("eventsPrev")?.addEventListener("click", () => { eventsPageIndex--; renderEvents(false); }, { passive:true });
-$("eventsNext")?.addEventListener("click", () => { eventsPageIndex++; renderEvents(false); }, { passive:true });
-
-$("eventsFilterBtn")?.addEventListener("click", () => {
-  const box = $("eventsFilters");
-  if (!box) return;
-  const hidden = box.getAttribute("aria-hidden") === "true";
-  box.setAttribute("aria-hidden", hidden ? "false" : "true");
-  box.style.display = hidden ? "block" : "none";
-}, { passive:true });
-
-$("eventsCategory")?.addEventListener("change", () => {
-  eventsPageIndex = 0;
-  renderEvents(false);
-}, { passive:true });
 
 /* ================= MODE SWITCH + TIMERS ================= */
 let accountPollTimer = null;
@@ -826,10 +645,10 @@ function stopAllTimers(){
 }
 function startAllTimers(){
   stopAllTimers();
-  accountPollTimer = setInterval(loadAccount, ACCOUNT_POLL_MS);
-  restSyncTimer = setInterval(loadCandleSnapshot, REST_SYNC_MS);
-  chartSyncTimer = setInterval(loadPriceChartSelected, CHART_SYNC_MS);
-  ensureChartTimer = setInterval(ensurePriceChartBootstrapped, 1500);
+  accountPollTimer = setInterval(() => loadAccount(false), ACCOUNT_POLL_MS);
+  restSyncTimer = setInterval(() => loadCandleSnapshot(false), REST_SYNC_MS);
+  chartSyncTimer = setInterval(() => loadPriceChartSelected(false), CHART_SYNC_MS);
+  ensureChartTimer = setInterval(() => ensurePriceChartBootstrapped(), 1500);
   cloudPullTimer = setInterval(() => { if (address) cloudPull(); }, CLOUD_PULL_INTERVAL_MS);
 }
 
@@ -861,6 +680,8 @@ function setMode(isLive){
   liveMode = !!isLive;
   localStorage.setItem(MODE_KEY, liveMode ? "live" : "refresh");
 
+  const liveIcon = $("liveIcon");
+  const modeHint = $("modeHint");
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
@@ -888,20 +709,15 @@ function setMode(isLive){
 
     startTradeWS();
     startKlineWS();
-    loadCandleSnapshot();
-    loadPriceChartSelected();
-    if (address) loadAccount();
+    loadCandleSnapshot(true);
+    loadPriceChartSelected(true);
+    if (address) loadAccount(true);
     startAllTimers();
     refreshConnUI();
   }
 
   syncSettingsUI();
 }
-
-liveToggle?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  setMode(!liveMode);
-}, { passive:false });
 
 /* ================= PULL TO REFRESH (REFRESH mode only, mobile) ================= */
 let ptr = { startY: 0, pulling: false, shown: false };
@@ -992,7 +808,7 @@ function initPullToRefresh(){
 
 /* ================= STATE ================= */
 let targetPrice = 0;
-let displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0, apr: 0 };
+let displayed = { price: 0, available: 0, stake: 0, rewards: 0, apr: 0 };
 
 let availableInj = 0, stakeInj = 0, rewardsInj = 0, apr = 0;
 
@@ -1049,8 +865,6 @@ function startTradeWS() {
     if (tfReady.d) { candle.d.high = Math.max(candle.d.high, p); candle.d.low = Math.min(candle.d.low, p); }
     if (tfReady.w) { candle.w.high = Math.max(candle.w.high, p); candle.w.low = Math.min(candle.w.low, p); }
     if (tfReady.m) { candle.m.high = Math.max(candle.m.high, p); candle.m.low = Math.min(candle.m.low, p); }
-
-    // live update for price chart when tf=1d (1m stream)
   };
 }
 
@@ -1222,7 +1036,6 @@ async function loadAccount(isRefresh=false) {
 
   apr = safe(i.inflation) * 100;
 
-  // validator (first delegation)
   const valAddr = del?.[0]?.delegation?.validator_address || "";
   if (valAddr && valAddr !== validator.addr) {
     validator.addr = valAddr;
@@ -1234,17 +1047,11 @@ async function loadAccount(isRefresh=false) {
     setValidatorUI("ready");
   }
 
-  // series updates
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
 
-  // net worth point
   recordNetWorthPoint();
-
-  // APR series
   recordAprPoint(apr);
-
-  // estimates
   updateRewardEstimates();
 
   setUIReady(true);
@@ -1319,8 +1126,6 @@ const priceVerticalLinePlugin = {
 const priceLastDotPlugin = {
   id: "priceLastDotPlugin",
   afterDatasetsDraw(ch){
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
     const meta = ch.getDatasetMeta(0);
     const pts = meta?.data || [];
     if (!pts.length) return;
@@ -1441,13 +1246,14 @@ function initPriceChart() {
         cubicInterpolationMode: "monotone",
         spanGaps: true,
         borderWidth: 2,
-        clip: { left: 0, top: 0, right: 22, bottom: 0 }
+        clip: { left: 0, top: 0, right: 18, bottom: 0 }
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      normalized: true,
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
@@ -1518,23 +1324,20 @@ function binanceIntervalForTf(tf){
   if (tf === "1y") return "4h";
   return "1d"; // all
 }
-
 function rangeStartForTf(tf){
   const now = Date.now();
   if (tf === "1d") return now - 1 * 24 * 60 * 60 * 1000;
   if (tf === "1w") return now - 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return now - 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return now - 365 * 24 * 60 * 60 * 1000;
-  if (tf === "all") return now - 2000 * 24 * 60 * 60 * 1000; // ~5.5y (enough)
+  if (tf === "all") return now - 2000 * 24 * 60 * 60 * 1000;
   return now - 24 * 60 * 60 * 1000;
 }
-
 async function fetchKlinesRange(tf){
   const interval = binanceIntervalForTf(tf);
   const startTime = rangeStartForTf(tf);
   const endTime = Date.now();
 
-  // Binance max 1000 per request
   const out = [];
   let cursor = startTime;
 
@@ -1554,7 +1357,6 @@ async function fetchKlinesRange(tf){
 
   return out;
 }
-
 function setPriceTfButtons(){
   const wrap = $("priceTfSwitch");
   if (!wrap) return;
@@ -1562,7 +1364,6 @@ function setPriceTfButtons(){
     b.classList.toggle("active", (b.dataset.tf === priceTf));
   });
 }
-
 async function loadPriceChartSelected(isRefresh=false){
   if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
@@ -1579,10 +1380,8 @@ async function loadPriceChartSelected(isRefresh=false){
   priceChart.data.labels = labels;
   priceChart.data.datasets[0].data = data;
 
-  // keep last open time for 1m live update
   priceLastOpenTime = safe(kl[kl.length - 1][0]) || 0;
 
-  // seed targetPrice
   const lastClose = safe(kl[kl.length - 1][4]);
   if (!targetPrice && lastClose) targetPrice = lastClose;
 
@@ -1593,15 +1392,12 @@ async function loadPriceChartSelected(isRefresh=false){
   setPriceTfButtons();
   setUIReady(true);
 }
-
 async function ensurePriceChartBootstrapped(){
   if (!liveMode) return;
   if (priceChartBoot) return;
-  await loadPriceChartSelected();
+  await loadPriceChartSelected(true);
 }
-
 function updatePriceChartFrom1mKline(k){
-  // Only update live chart when tf=1d and interval is 1m
   if (!liveMode) return;
   if (!priceChart || !priceChartBoot) return;
   if (priceTf !== "1d") return;
@@ -1623,40 +1419,11 @@ function updatePriceChartFrom1mKline(k){
   priceChart.data.labels.push(fmtHHMM(openTime));
   priceChart.data.datasets[0].data.push(close);
 
-  // cap to reasonable size for 1d
   while (priceChart.data.labels.length > 1600) priceChart.data.labels.shift();
   while (priceChart.data.datasets[0].data.length > 1600) priceChart.data.datasets[0].data.shift();
 
   priceChart.update("none");
 }
-
-/* ================= PRICE CHART UI CONTROLS ================= */
-$("priceTfSwitch")?.addEventListener("click", async (e) => {
-  const btn = e.target?.closest(".tf-btn");
-  if (!btn) return;
-  const tf = btn.dataset.tf || "1d";
-  if (!["1d","1w","1m","1y","all"].includes(tf)) return;
-  priceTf = tf;
-  priceChartBoot = false;
-  await loadPriceChartSelected(true);
-}, { passive:true });
-
-$("priceScaleToggle")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  priceScale = (priceScale === "log") ? "linear" : "log";
-  const b = $("priceScaleToggle");
-  if (b) b.textContent = (priceScale === "log") ? "LOG" : "LIN";
-  applyPriceChartScale();
-}, { passive:false });
-
-$("price5mBtn")?.addEventListener("click", async (e) => {
-  e.preventDefault();
-  // "5m" shortcut: use 1w chart with 15m would not be 5m; so we load 1d but later you can refine
-  priceTf = "1d";
-  priceChartBoot = false;
-  await loadPriceChartSelected(true);
-  pushEvent({ kind:"system", title:"Price Chart", detail:"Loaded 1D (closest live mode).", status:"ok" });
-}, { passive:false });
 
 /* ================= STAKE SERIES (persist) ================= */
 let stakeChart = null;
@@ -1719,7 +1486,6 @@ function loadStakeSeriesLocal() {
     return false;
   }
 }
-
 function stakeViewByTf(){
   const now = Date.now();
   const ms = stakeTf === "1d" ? 86400000 : stakeTf === "1w" ? 7*86400000 : stakeTf === "1m" ? 30*86400000 : 1e18;
@@ -1727,24 +1493,19 @@ function stakeViewByTf(){
 
   const labels = [];
   const data = [];
-  const moves = [];
   const types = [];
   for (let i=0;i<stakeData.length;i++){
     const t = labelToTs(stakeLabels[i]);
     if (!t || t < minT) continue;
     labels.push(stakeLabels[i]);
     data.push(safe(stakeData[i]));
-    moves.push(safe(stakeMoves[i]));
     types.push(stakeTypes[i] || "Stake update");
   }
-  return { labels, data, moves, types };
+  return { labels, data, types };
 }
-
 const stakeLastDotPlugin = {
   id: "stakeLastDotPlugin",
   afterDatasetsDraw(ch){
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
     const meta = ch.getDatasetMeta(0);
     const pts = meta?.data || [];
     if (!pts.length) return;
@@ -1762,7 +1523,6 @@ const stakeLastDotPlugin = {
     ctx.restore();
   }
 };
-
 function initStakeChart() {
   const canvas = $("stakeChart");
   if (!canvas || !window.Chart) return;
@@ -1783,7 +1543,7 @@ function initStakeChart() {
         spanGaps: true,
         pointRadius: 0,
         borderWidth: 2,
-        clip: { left: 0, top: 0, right: 22, bottom: 0 }
+        clip: { left: 0, top: 0, right: 18, bottom: 0 }
       }]
     },
     options: {
@@ -1797,14 +1557,14 @@ function initStakeChart() {
           displayColors: false,
           callbacks: {
             title: (items) => {
-              const lbl = view.labels[items?.[0]?.dataIndex ?? 0] || "";
+              const lbl = stakeChart?.data?.labels?.[items?.[0]?.dataIndex ?? 0] || "";
               const ts = labelToTs(lbl);
               return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : String(lbl);
             },
             label: (item) => {
               const i = item.dataIndex;
-              const v = safe(view.data[i]);
-              const t = view.types?.[i] || "Stake update";
+              const v = safe(stakeChart?.data?.datasets?.[0]?.data?.[i]);
+              const t = stakeTypes?.[i] || "Stake update";
               return `${t} • ${v.toFixed(6)} INJ`;
             }
           }
@@ -1813,16 +1573,7 @@ function initStakeChart() {
       },
       scales: {
         x: {
-          ticks: {
-            color: axisTickColor(),
-            callback: (val, idx) => {
-              const ts = labelToTs(stakeChart?.data?.labels?.[idx]);
-              return ts ? fmtHHMM(ts) : "";
-            },
-            maxRotation: 0,
-            autoSkip: true,
-            maxTicksLimit: 6
-          },
+          ticks: { color: axisTickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
           grid: { color: axisGridColor() }
         },
         y: {
@@ -1837,22 +1588,18 @@ function initStakeChart() {
 
   applyStakeRangeToChart();
 }
-
 function drawStakeChart() {
   if (!stakeChart) initStakeChart();
   if (!stakeChart) return;
 
   const view = stakeViewByTf();
-
   stakeChart.data.labels = view.labels;
   stakeChart.data.datasets[0].data = view.data;
-
   stakeChart.options.scales.y.type = (stakeScale === "log") ? "logarithmic" : "linear";
 
   applyStakeRangeToChart();
   stakeChart.update("none");
 }
-
 function maybeAddStakePoint(currentStake) {
   const s = safe(currentStake);
   if (!Number.isFinite(s)) return;
@@ -1942,7 +1689,6 @@ function loadWdAllLocal() {
     return false;
   }
 }
-
 function rewardViewByTf(){
   const now = Date.now();
   const ms = rewardTf === "1d" ? 86400000 : rewardTf === "1w" ? 7*86400000 : rewardTf === "1m" ? 30*86400000 : 1e18;
@@ -1966,12 +1712,9 @@ function rewardViewByTf(){
 }
 
 let rewardChart = null;
-
 const rewardLastDotPlugin = {
   id: "rewardLastDotPlugin",
   afterDatasetsDraw(ch){
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
     const meta = ch.getDatasetMeta(0);
     const pts = meta?.data || [];
     if (!pts.length) return;
@@ -1989,7 +1732,6 @@ const rewardLastDotPlugin = {
     ctx.restore();
   }
 };
-
 function initRewardChart() {
   const canvas = $("rewardChart");
   if (!canvas || !window.Chart) return;
@@ -2010,7 +1752,7 @@ function initRewardChart() {
         spanGaps: true,
         pointRadius: 0,
         borderWidth: 2,
-        clip: { left: 0, top: 0, right: 22, bottom: 0 }
+        clip: { left: 0, top: 0, right: 18, bottom: 0 }
       }]
     },
     options: {
@@ -2025,8 +1767,8 @@ function initRewardChart() {
           callbacks: {
             title: (items) => {
               const i = items?.[0]?.dataIndex ?? 0;
-              const ts = view.times[i] || labelToTs(view.labels[i]);
-              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : (view.labels[i] || "");
+              const ts = rewardViewByTf().times[i] || labelToTs(rewardViewByTf().labels[i]);
+              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : "";
             },
             label: (item) => `Withdrawn • +${safe(item.raw).toFixed(6)} INJ`
           }
@@ -2048,32 +1790,26 @@ function initRewardChart() {
 
   applyRewardRangeToChart();
 }
-
 function drawRewardChart(){
   if (!rewardChart) initRewardChart();
   if (!rewardChart) return;
 
   const view = rewardViewByTf();
-
   rewardChart.data.labels = view.labels;
   rewardChart.data.datasets[0].data = view.values;
-
   rewardChart.options.scales.y.type = (rewardScale === "log") ? "logarithmic" : "linear";
 
   applyRewardRangeToChart();
   rewardChart.update("none");
-
   syncRewardTimelineUI(true);
 }
-
 function rebuildWdView(){
   drawRewardChart();
 }
-
 function syncRewardTimelineUI(forceToEnd=false) {
   const slider = $("rewardTimeline");
   const meta = $("rewardTimelineMeta");
-  if (!slider || !meta) return;
+  if (!slider || !meta || !rewardChart) return;
 
   const view = rewardViewByTf();
   const n = view.values.length;
@@ -2081,11 +1817,9 @@ function syncRewardTimelineUI(forceToEnd=false) {
   if (!n) {
     slider.min = 0; slider.max = 0; slider.value = 0;
     meta.textContent = "—";
-    if (rewardChart) {
-      rewardChart.options.scales.x.min = undefined;
-      rewardChart.options.scales.x.max = undefined;
-      rewardChart.update("none");
-    }
+    rewardChart.options.scales.x.min = undefined;
+    rewardChart.options.scales.x.max = undefined;
+    rewardChart.update("none");
     return;
   }
 
@@ -2098,11 +1832,9 @@ function syncRewardTimelineUI(forceToEnd=false) {
   const minIdx = Math.max(0, idx - win + 1);
   const maxIdx = idx;
 
-  if (rewardChart) {
-    rewardChart.options.scales.x.min = minIdx;
-    rewardChart.options.scales.x.max = maxIdx;
-    rewardChart.update("none");
-  }
+  rewardChart.options.scales.x.min = minIdx;
+  rewardChart.options.scales.x.max = maxIdx;
+  rewardChart.update("none");
 
   const fromTs = view.times[minIdx] || labelToTs(view.labels[minIdx]);
   const toTs   = view.times[maxIdx] || labelToTs(view.labels[maxIdx]);
@@ -2110,15 +1842,6 @@ function syncRewardTimelineUI(forceToEnd=false) {
   const to   = toTs ? fmtHHMM(toTs) : (view.labels[maxIdx] || "");
   meta.textContent = n <= 1 ? `${to}` : `${from} → ${to}`;
 }
-
-$("rewardTimeline")?.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
-
-$("rewardFilter")?.addEventListener("change", () => {
-  wdMinFilter = safe($("rewardFilter")?.value || 0);
-  rebuildWdView();
-  syncRewardTimelineUI(true);
-}, { passive:true });
-
 function maybeRecordRewardWithdrawal(newRewards) {
   const r = safe(newRewards);
   if (wdLastRewardsSeen == null) { wdLastRewardsSeen = r; return; }
@@ -2149,8 +1872,8 @@ function maybeRecordRewardWithdrawal(newRewards) {
 }
 
 /* ================= NET WORTH (persist + chart) ================= */
-let nwTf = "live";        // live | 1d | 1w | 1m | 1y | all
-let nwScale = "linear";   // linear | log
+let nwTf = "live";
+let nwScale = "linear";
 let nwTAll = [];
 let nwUsdAll = [];
 let nwInjAll = [];
@@ -2207,16 +1930,14 @@ function loadNWLocal(){
     return false;
   }
 }
-
 function nwWindowMs(tf){
   if (tf === "live") return NW_LIVE_WINDOW_MS;
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
   if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000;
-  return 24 * 60 * 60 * 1000; // 1d
+  return 24 * 60 * 60 * 1000;
 }
-
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
@@ -2247,7 +1968,6 @@ function nwBuildView(tf){
 
   return { labels, data, times };
 }
-
 const nwVerticalLinePlugin = {
   id: "nwVerticalLinePlugin",
   afterDraw(ch){
@@ -2266,13 +1986,9 @@ const nwVerticalLinePlugin = {
     ctx.restore();
   }
 };
-
 const nwLastDotPlugin = {
   id: "nwLastDotPlugin",
   afterDatasetsDraw(ch) {
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
-
     const meta = ch.getDatasetMeta(0);
     const pts = meta?.data || [];
     if (!pts.length) return;
@@ -2303,7 +2019,6 @@ const nwLastDotPlugin = {
     ctx.restore();
   }
 };
-
 function initNWChart(){
   const canvas = $("netWorthChart");
   if (!canvas || !window.Chart) return;
@@ -2324,7 +2039,7 @@ function initNWChart(){
         cubicInterpolationMode: "monotone",
         pointRadius: 0,
         pointHitRadius: 18,
-        clip: { left: 0, top: 0, right: 22, bottom: 0 },
+        clip: { left: 0, top: 0, right: 18, bottom: 0 },
         spanGaps: true,
       }]
     },
@@ -2337,12 +2052,7 @@ function initNWChart(){
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
-        ...(ZOOM_OK ? {
-          zoom: {
-            pan: { enabled: true, mode: "x", threshold: 2 },
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }
-          }
-        } : {})
+        ...(ZOOM_OK ? { zoom: { pan: { enabled: true, mode: "x", threshold: 2 }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" } } } : {})
       },
       interaction: { mode: "index", intersect: false },
       scales: {
@@ -2382,7 +2092,6 @@ function initNWChart(){
 
   attachNWInteractions();
 }
-
 function drawNW(){
   if (!netWorthChart) initNWChart();
   if (!netWorthChart) return;
@@ -2391,11 +2100,9 @@ function drawNW(){
 
   netWorthChart.data.labels = view.labels;
   netWorthChart.data.datasets[0].data = view.data;
-
   netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
   netWorthChart.update("none");
 
-  // pnl
   const pnlEl = $("netWorthPnl");
   if (view.data.length >= 2){
     const first = safe(view.data[0]);
@@ -2420,16 +2127,11 @@ function drawNW(){
 
   updateNWTFButtons();
 }
-
 function updateNWTFButtons(){
   const wrap = $("nwTfSwitch");
   if (!wrap) return;
-  wrap.querySelectorAll(".tf-btn").forEach(b => {
-    b.classList.toggle("active", (b.dataset.tf === nwTf));
-  });
+  wrap.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", (b.dataset.tf === nwTf)));
 }
-
-/* hover interactions */
 function nwGetIndexFromEvent(evt){
   if (!netWorthChart) return null;
   const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
@@ -2467,7 +2169,6 @@ function attachNWInteractions(){
     nwShowHoverValue(idx);
     netWorthChart.update("none");
   };
-
   const onLeave = () => {
     nwHoverActive = false;
     nwHoverIndex = null;
@@ -2476,34 +2177,11 @@ function attachNWInteractions(){
 
   canvas.addEventListener("mousemove", onMove, { passive: true });
   canvas.addEventListener("mouseleave", onLeave, { passive: true });
-
   canvas.addEventListener("touchstart", (e) => onMove(e), { passive: true });
   canvas.addEventListener("touchmove", (e) => onMove(e), { passive: true });
   canvas.addEventListener("touchend", onLeave, { passive: true });
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
-
-/* Net worth UI handlers (HTML aligned) */
-$("nwTfSwitch")?.addEventListener("click", (e) => {
-  const btn = e.target?.closest(".tf-btn");
-  if (!btn) return;
-  const tf = btn.dataset.tf || "live";
-  if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
-  nwTf = tf;
-  saveNWLocal();
-  drawNW();
-}, { passive:true });
-
-$("nwScaleToggle")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  nwScale = (nwScale === "log") ? "linear" : "log";
-  const b = $("nwScaleToggle");
-  if (b) b.textContent = (nwScale === "log") ? "LOG" : "LIN";
-  saveNWLocal();
-  drawNW();
-}, { passive:false });
-
-/* record points */
 function recordNetWorthPoint(){
   if (!address) return;
   const px = safe(targetPrice);
@@ -2552,13 +2230,11 @@ function saveAprLocal(){
     localStorage.setItem(APR_LOCAL_KEY, JSON.stringify({ t: Date.now(), labels: aprLabels, data: aprData }));
   } catch {}
 }
-
 function recordAprPoint(v){
   v = safe(v);
   if (!Number.isFinite(v)) return;
   const ts = Date.now();
 
-  // density: 30s
   const lastTs = aprLabels.length ? labelToTs(aprLabels[aprLabels.length - 1]) : 0;
   if (lastTs && (ts - lastTs) < 30_000) return;
 
@@ -2571,12 +2247,9 @@ function recordAprPoint(v){
   saveAprLocal();
   drawAprChart();
 }
-
 const aprLastDotPlugin = {
   id: "aprLastDotPlugin",
   afterDatasetsDraw(ch){
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
     const meta = ch.getDatasetMeta(0);
     const pts = meta?.data || [];
     if (!pts.length) return;
@@ -2594,7 +2267,6 @@ const aprLastDotPlugin = {
     ctx.restore();
   }
 };
-
 function initAprChart(){
   const canvas = $("aprChart");
   if (!canvas || !window.Chart) return;
@@ -2612,7 +2284,7 @@ function initAprChart(){
         cubicInterpolationMode: "monotone",
         pointRadius: 0,
         borderWidth: 2,
-        clip: { left: 0, top: 0, right: 22, bottom: 0 }
+        clip: { left: 0, top: 0, right: 18, bottom: 0 }
       }]
     },
     options: {
@@ -2632,7 +2304,6 @@ function initAprChart(){
     plugins: [aprLastDotPlugin]
   });
 }
-
 function drawAprChart(){
   if (!aprChart) initAprChart();
   if (!aprChart) return;
@@ -2642,15 +2313,7 @@ function drawAprChart(){
   aprChart.update("none");
 }
 
-$("aprScaleToggle")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  aprScale = (aprScale === "log") ? "linear" : "log";
-  const b = $("aprScaleToggle");
-  if (b) b.textContent = (aprScale === "log") ? "LOG" : "LIN";
-  drawAprChart();
-}, { passive:false });
-
-/* ================= RANGE MODALS (Stake / Reward) ================= */
+/* ================= RANGE (Stake / Reward) ================= */
 const RANGE_KEY_STAKE = "inj_range_stake_max";
 const RANGE_KEY_REWARD = "inj_range_reward_max";
 let stakeRangeMax = safe(localStorage.getItem(RANGE_KEY_STAKE)) || STAKE_TARGET_DEFAULT_MAX;
@@ -2667,97 +2330,13 @@ function applyRewardRangeToChart(){
   rewardChart.options.scales.y.max = rewardRangeMax > 0 ? rewardRangeMax : undefined;
 }
 
-function openModal(id){
-  const m = $(id);
-  if (!m) return;
-  m.setAttribute("aria-hidden","false");
-  m.style.display = "block";
-}
-function closeModal(id){
-  const m = $(id);
-  if (!m) return;
-  m.setAttribute("aria-hidden","true");
-  m.style.display = "none";
-}
-
-$("stakeRangeBtn")?.addEventListener("click", () => {
-  $("stakeRangeValue") && ($("stakeRangeValue").value = String(stakeRangeMax || ""));
-  openModal("stakeRangeModal");
-}, { passive:true });
-$("stakeRangeCancel")?.addEventListener("click", () => closeModal("stakeRangeModal"), { passive:true });
-$("stakeRangeApply")?.addEventListener("click", () => {
-  const v = safe($("stakeRangeValue")?.value);
-  if (v > 0) {
-    stakeRangeMax = v;
-    localStorage.setItem(RANGE_KEY_STAKE, String(v));
-    setText("stakeMax", String(v));
-    drawStakeChart();
-  }
-  closeModal("stakeRangeModal");
-}, { passive:true });
-
-$("rewardRangeBtn")?.addEventListener("click", () => {
-  $("rewardRangeValue") && ($("rewardRangeValue").value = String(rewardRangeMax || ""));
-  openModal("rewardRangeModal");
-}, { passive:true });
-$("rewardRangeCancel")?.addEventListener("click", () => closeModal("rewardRangeModal"), { passive:true });
-$("rewardRangeApply")?.addEventListener("click", () => {
-  const v = safe($("rewardRangeValue")?.value);
-  if (v > 0) {
-    rewardRangeMax = v;
-    localStorage.setItem(RANGE_KEY_REWARD, String(v));
-    setText("rewardMax", String(v));
-    drawRewardChart();
-  }
-  closeModal("rewardRangeModal");
-}, { passive:true });
-
-/* Scale toggles for stake/reward */
-$("stakeScaleToggle")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  stakeScale = (stakeScale === "log") ? "linear" : "log";
-  const b = $("stakeScaleToggle");
-  if (b) b.textContent = (stakeScale === "log") ? "LOG" : "LIN";
-  drawStakeChart();
-}, { passive:false });
-
-$("rewardScaleToggle")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  rewardScale = (rewardScale === "log") ? "linear" : "log";
-  const b = $("rewardScaleToggle");
-  if (b) b.textContent = (rewardScale === "log") ? "LOG" : "LIN";
-  drawRewardChart();
-}, { passive:false });
-
-/* TF switches for stake/reward */
-$("stakeTfSwitch")?.addEventListener("click", (e) => {
-  const btn = e.target?.closest(".tf-btn");
-  if (!btn) return;
-  const tf = btn.dataset.tf || "all";
-  if (!["all","1d","1w","1m"].includes(tf)) return;
-  stakeTf = tf;
-  $("stakeTfSwitch")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
-  drawStakeChart();
-}, { passive:true });
-
-$("rewardTfSwitch")?.addEventListener("click", (e) => {
-  const btn = e.target?.closest(".tf-btn");
-  if (!btn) return;
-  const tf = btn.dataset.tf || "all";
-  if (!["all","1d","1w","1m"].includes(tf)) return;
-  rewardTf = tf;
-  $("rewardTfSwitch")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
-  drawRewardChart();
-}, { passive:true });
-
-/* ================= REWARD BAR ESTIMATES ================= */
+/* ================= REWARD ESTIMATES ================= */
 function updateRewardEstimates(){
   const dayEl = $("rewardEstDay");
   const weekEl = $("rewardEstWeek");
   const monthEl = $("rewardEstMonth");
   if (!dayEl || !weekEl || !monthEl) return;
 
-  // simple estimate: APR% * staked / 365
   const st = safe(stakeInj);
   const a = safe(apr) / 100;
   if (!st || !a){
@@ -2784,11 +2363,6 @@ let cloudLastSync = 0;
 let cloudDirty = false;
 let cloudPushTimer = null;
 
-/* HTML IDs aligned */
-const cloudMenuDot = $("cloudMenuDot");
-const cloudMenuStatus = $("cloudMenuStatus");
-const cloudMenuLast = $("cloudMenuLast");
-
 function cloudLoadMeta(){
   try{
     const raw = localStorage.getItem(CLOUD_KEY);
@@ -2807,6 +2381,7 @@ function cloudRenderMeta(){
   const hist = $("cloudHistory");
   if (hist) hist.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
 
+  const cloudMenuLast = $("cloudMenuLast");
   if (cloudMenuLast){
     cloudMenuLast.textContent = cloudLastSync ? new Date(cloudLastSync).toLocaleString() : "—";
   }
@@ -2835,7 +2410,8 @@ function cloudSetState(state){
     st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
   }
 
-  // menu status
+  const cloudMenuDot = $("cloudMenuDot");
+  const cloudMenuStatus = $("cloudMenuStatus");
   if (cloudMenuDot){
     cloudMenuDot.classList.remove("ok","saving","err");
     if (state === "saving") cloudMenuDot.classList.add("saving");
@@ -2850,7 +2426,6 @@ function cloudSetState(state){
 
   cloudRenderMeta();
 }
-
 function cloudMarkDirty(){
   if (!address) return;
   cloudDirty = true;
@@ -2871,41 +2446,33 @@ function buildCloudPayload(){
     apr: { labels: aprLabels, data: aprData }
   };
 }
-
 function mergeStakeByLabel(payloadStake){
   if (!payloadStake) return;
   const pl = Array.isArray(payloadStake.labels) ? payloadStake.labels : [];
   const pd = Array.isArray(payloadStake.data) ? payloadStake.data : [];
-  const pm = Array.isArray(payloadStake.moves) ? payloadStake.moves : [];
   const pt = Array.isArray(payloadStake.types) ? payloadStake.types : [];
 
   const map = new Map();
   for (let i=0;i<stakeLabels.length;i++){
     const k = String(stakeLabels[i]);
-    map.set(k, { d: safe(stakeData[i]), m: safe(stakeMoves[i]), t: String(stakeTypes[i] || "Stake update") });
+    map.set(k, { d: safe(stakeData[i]), t: String(stakeTypes[i] || "Stake update") });
   }
   for (let i=0;i<pl.length;i++){
     const k = String(pl[i]);
-    if (!map.has(k)) {
-      map.set(k, { d: safe(pd[i]), m: safe(pm[i]), t: String(pt[i] || "Stake update") });
-    }
+    if (!map.has(k)) map.set(k, { d: safe(pd[i]), t: String(pt[i] || "Stake update") });
   }
 
   const keys = [...map.keys()].sort((a,b)=>labelToTs(a)-labelToTs(b));
   stakeLabels = keys;
   stakeData = keys.map(k => map.get(k).d);
-  stakeMoves = keys.map(k => map.get(k).m);
   stakeTypes = keys.map(k => map.get(k).t);
 
   stakeLabels = clampArray(stakeLabels, SERIES_MAX_POINTS);
   stakeData   = clampArray(stakeData,   SERIES_MAX_POINTS);
-  stakeMoves  = clampArray(stakeMoves,  SERIES_MAX_POINTS);
-  stakeTypes  = clampArray(stakeTypes,  SERIES_MAX_POINTS);
 
   stakeBaselineCaptured = stakeData.length > 0;
   lastStakeRecordedRounded = stakeData.length ? Number(safe(stakeData[stakeData.length - 1]).toFixed(6)) : null;
 }
-
 function mergeWd(payloadWd){
   if (!payloadWd) return;
   const pl = Array.isArray(payloadWd.labels) ? payloadWd.labels : [];
@@ -2929,7 +2496,6 @@ function mergeWd(payloadWd){
   wdValuesAll = clampArray(times.map(t => map.get(t).v), SERIES_MAX_POINTS);
   wdLabelsAll = clampArray(times.map(t => map.get(t).l), SERIES_MAX_POINTS);
 }
-
 function mergeUniqueByTs(baseTimes, baseVals, addTimes, addVals){
   const map = new Map();
   for (let i=0;i<baseTimes.length;i++){
@@ -2946,7 +2512,6 @@ function mergeUniqueByTs(baseTimes, baseVals, addTimes, addVals){
   const vals = times.map(t => map.get(t));
   return { times, vals };
 }
-
 function mergeNW(payloadNw){
   if (!payloadNw) return;
   const t = Array.isArray(payloadNw.times) ? payloadNw.times : [];
@@ -2962,7 +2527,6 @@ function mergeNW(payloadNw){
 
   clampNWArrays();
 }
-
 function mergeApr(payloadApr){
   if (!payloadApr) return;
   const pl = Array.isArray(payloadApr.labels) ? payloadApr.labels : [];
@@ -2984,7 +2548,6 @@ function mergeApr(payloadApr){
   aprData = clampArray(times.map(t => map.get(t)), 1800);
   saveAprLocal();
 }
-
 async function cloudPull(){
   if (!address) return;
   if (!hasInternet()) { cloudSetState("synced"); return; }
@@ -3016,7 +2579,6 @@ async function cloudPull(){
     cloudSetState("error");
   }
 }
-
 async function cloudPush(){
   if (!address) return;
   if (!hasInternet()) return;
@@ -3044,13 +2606,13 @@ async function cloudPush(){
   cloudSetState("synced");
 }
 
-/* ================= NET WORTH UI rows ================= */
+/* ================= MINI ROWS ================= */
 function updateNetWorthMiniRows(){
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
 }
 
-/* ================= IMPORTANT PRICE EVENTS (24h thresholds) ================= */
+/* ================= IMPORTANT PRICE EVENTS ================= */
 let lastPriceStepUp = 0;
 let lastPriceStepDown = 0;
 function maybePriceEvent(pct24h){
@@ -3104,59 +2666,11 @@ function refreshChartsTheme(){
   } catch {}
 }
 
-/* ================= SETTINGS PAGE ================= */
+/* ================= SETTINGS + TOOLS ================= */
 function syncSettingsUI(){
   setText("settingsModeNow", liveMode ? "LIVE" : "REFRESH");
   setText("settingsCloudNow", hasInternet() ? "Online" : "Offline cache");
 }
-
-$("settingsTabs")?.addEventListener("click", (e) => {
-  const btn = e.target?.closest(".tf-btn");
-  if (!btn) return;
-  const tab = btn.dataset.tab;
-  if (!tab) return;
-
-  $("settingsTabs")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b === btn));
-  document.querySelectorAll(".settings-panel").forEach(p => {
-    p.classList.toggle("active", p.dataset.tab === tab);
-  });
-}, { passive:true });
-
-$("resetCancelBtn")?.addEventListener("click", () => {
-  $("resetStakeChk") && ($("resetStakeChk").checked = false);
-  $("resetRewardChk") && ($("resetRewardChk").checked = false);
-  $("resetAprChk") && ($("resetAprChk").checked = false);
-  setText("resetNote","Seleziona cosa vuoi resettare e premi “Applica Reset”.");
-}, { passive:true });
-
-$("resetApplyBtn")?.addEventListener("click", () => {
-  const rs = !!$("resetStakeChk")?.checked;
-  const rr = !!$("resetRewardChk")?.checked;
-  const ra = !!$("resetAprChk")?.checked;
-
-  if (rs && address){
-    localStorage.removeItem(stakeStoreKey(address));
-    stakeLabels=[]; stakeData=[]; stakeMoves=[]; stakeTypes=[];
-    stakeBaselineCaptured=false; lastStakeRecordedRounded=null;
-    drawStakeChart();
-  }
-  if (rr && address){
-    localStorage.removeItem(wdStoreKey(address));
-    wdLabelsAll=[]; wdValuesAll=[]; wdTimesAll=[];
-    wdLastRewardsSeen=null;
-    rebuildWdView();
-  }
-  if (ra){
-    localStorage.removeItem(APR_LOCAL_KEY);
-    aprLabels=[]; aprData=[];
-    drawAprChart();
-  }
-
-  setText("resetNote","Reset applicato ✅");
-  pushEvent({ kind:"system", title:"Reset", detail:"Selected resets applied.", status:"ok" });
-}, { passive:true });
-
-/* ================= TOOLS PAGE (simple converter) ================= */
 function updateTools(){
   const eur = safe($("convEur")?.value);
   const px = safe(displayed.price);
@@ -3167,7 +2681,6 @@ function updateTools(){
     setText("convFx","—");
     return;
   }
-  // FX not fetched here (optional); keep as placeholder
   const fx = 1.0;
   setText("convFx", "—");
   const usd = eur * fx;
@@ -3176,7 +2689,97 @@ function updateTools(){
   setText("convInj", inj.toFixed(6));
   setText("convInjPrice", `$${px.toFixed(2)}`);
 }
-$("convEur")?.addEventListener("input", updateTools, { passive:true });
+
+/* ================= BARS RESTORE (PRICE + STAKE + REWARD) ================= */
+const GRAD_UP = "linear-gradient(90deg, rgba(34,197,94,.70), rgba(16,185,129,.55))";
+const GRAD_DN = "linear-gradient(90deg, rgba(239,68,68,.70), rgba(245,158,11,.55))";
+
+function renderProgress(fillId, lineId, pct){
+  const fill = $(fillId);
+  const line = $(lineId);
+  if (!fill || !line) return;
+  const p = clamp(pct, 0, 100);
+  fill.style.left = "0%";
+  fill.style.width = `${p}%`;
+  line.style.left = `${p}%`;
+}
+
+function renderAllBars(){
+  // Price bars (open-centered)
+  renderBar($("priceBar"), $("priceLine"), displayed.price, candle.d.open, candle.d.low, candle.d.high, GRAD_UP, GRAD_DN);
+  renderBar($("weekBar"), $("weekLine"), displayed.price, candle.w.open, candle.w.low, candle.w.high, GRAD_UP, GRAD_DN);
+  renderBar($("monthBar"), $("monthLine"), displayed.price, candle.m.open, candle.m.low, candle.m.high, GRAD_UP, GRAD_DN);
+
+  setText("priceMin", candle.d.low ? candle.d.low.toFixed(3) : "--");
+  setText("priceOpen", candle.d.open ? candle.d.open.toFixed(3) : "--");
+  setText("priceMax", candle.d.high ? candle.d.high.toFixed(3) : "--");
+
+  setText("weekMin", candle.w.low ? candle.w.low.toFixed(3) : "--");
+  setText("weekOpen", candle.w.open ? candle.w.open.toFixed(3) : "--");
+  setText("weekMax", candle.w.high ? candle.w.high.toFixed(3) : "--");
+
+  setText("monthMin", candle.m.low ? candle.m.low.toFixed(3) : "--");
+  setText("monthOpen", candle.m.open ? candle.m.open.toFixed(3) : "--");
+  setText("monthMax", candle.m.high ? candle.m.high.toFixed(3) : "--");
+
+  const p24 = pctChange(displayed.price, candle.d.open);
+  const pw  = pctChange(displayed.price, candle.w.open);
+  const pm  = pctChange(displayed.price, candle.m.open);
+
+  updatePerf("arrow24h", "pct24h", p24);
+  updatePerf("arrowWeek", "pctWeek", pw);
+  updatePerf("arrowMonth", "pctMonth", pm);
+
+  maybePriceEvent(p24);
+
+  // Stake/Reward progress vs user max
+  const sMax = Math.max(1e-9, safe(stakeRangeMax) || STAKE_TARGET_DEFAULT_MAX);
+  const rMax = Math.max(1e-9, safe(rewardRangeMax) || REWARD_TARGET_DEFAULT_MAX);
+
+  const sPct = (safe(displayed.stake) / sMax) * 100;
+  const rPct = (safe(displayed.rewards) / rMax) * 100;
+
+  renderProgress("stakeBar", "stakeLine", sPct);
+  renderProgress("rewardBar", "rewardLine", rPct);
+
+  const sp = $("stakePercent"); if (sp) sp.textContent = `${Math.round(clamp(sPct, 0, 999))}%`;
+  const rp = $("rewardPercent"); if (rp) rp.textContent = `${Math.round(clamp(rPct, 0, 999))}%`;
+
+  setText("stakeMin", "0");
+  setText("stakeMax", String(sMax));
+  setText("rewardMin", "0");
+  setText("rewardMax", String(rMax));
+}
+
+/* ================= MAIN UI RENDER ================= */
+function renderNumbers(){
+  displayed.price = tick(displayed.price, targetPrice || displayed.price);
+  displayed.available = tick(displayed.available, availableInj);
+  displayed.stake = tick(displayed.stake, stakeInj);
+  displayed.rewards = tick(displayed.rewards, rewardsInj);
+  displayed.apr = tick(displayed.apr, apr);
+
+  setText("price", displayed.price ? displayed.price.toFixed(4) : "0.0000");
+  setText("available", displayed.available.toFixed(6));
+  setText("stake", displayed.stake.toFixed(4));
+  setText("rewards", displayed.rewards.toFixed(7));
+  setText("apr", `${displayed.apr.toFixed(2)}%`);
+
+  const px = safe(displayed.price);
+  setText("availableUsd", px ? `≈ $${(displayed.available * px).toFixed(2)}` : "≈ $0.00");
+  setText("stakeUsd", px ? `≈ $${(displayed.stake * px).toFixed(2)}` : "≈ $0.00");
+  setText("rewardsUsd", px ? `≈ $${(displayed.rewards * px).toFixed(2)}` : "≈ $0.00");
+
+  const totalInj = safe(displayed.available) + safe(displayed.stake) + safe(displayed.rewards);
+  const nwUsd = totalInj * px;
+  const nwEl = $("netWorthUsd");
+  if (nwEl) nwEl.textContent = `$${(Number.isFinite(nwUsd) ? nwUsd : 0).toFixed(2)}`;
+
+  updateNetWorthMiniRows();
+  setText("updated", `Last update: ${fmtHHMMSS(Date.now())}`);
+
+  updateTools();
+}
 
 /* ================= ADDRESS COMMIT ================= */
 async function commitAddress(newAddr) {
@@ -3191,461 +2794,239 @@ async function commitAddress(newAddr) {
 
   // reset runtime
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
-
-     targetPrice = 0;
-  displayed = { price: 0, available: 0, stake: 0, rewards: 0, netWorthUsd: 0, apr: 0 };
-
-  // reset chart boot flags
-  priceChartBoot = false;
-  pinnedIndex = null;
-  hoverIndex = null;
-  hoverActive = false;
-
-  // reset account status for LIVE readiness
   accountOnline = false;
-  modeLoading = true;
-  refreshConnUI();
 
-  // reload local persistent series for this address
+  // reload per-wallet persisted series
   loadEvents();
   loadStakeSeriesLocal();
   loadWdAllLocal();
   loadNWLocal();
-  loadAprLocal();
 
-  // draw charts from persisted data (if any)
-  drawStakeChart();
-  rebuildWdView();
-  drawNW();
-  drawAprChart();
-
-  // reflect saved scale labels (buttons)
-  const bNW = $("nwScaleToggle"); if (bNW) bNW.textContent = (nwScale === "log") ? "LOG" : "LIN";
-  const bStake = $("stakeScaleToggle"); if (bStake) bStake.textContent = (stakeScale === "log") ? "LOG" : "LIN";
-  const bRw = $("rewardScaleToggle"); if (bRw) bRw.textContent = (rewardScale === "log") ? "LOG" : "LIN";
-  const bApr = $("aprScaleToggle"); if (bApr) bApr.textContent = (aprScale === "log") ? "LOG" : "LIN";
-  const bPrice = $("priceScaleToggle"); if (bPrice) bPrice.textContent = (priceScale === "log") ? "LOG" : "LIN";
-
-  // sync TF buttons
-  updateNWTFButtons();
-  setPriceTfButtons();
-
-  // range labels
-  setText("stakeMax", String(stakeRangeMax || STAKE_TARGET_DEFAULT_MAX));
-  setText("rewardMax", String(rewardRangeMax || REWARD_TARGET_DEFAULT_MAX));
-
-  // kick: pull cloud + load fresh snapshots
+  // cloud pull
   cloudSetState("saving");
-  cloudPull(); // merge cloud into local if exists
+  if (hasInternet()) await cloudPull();
 
-  // load immediate data
-  try {
-    await loadCandleSnapshot(true);
+  // refresh mode reload once OR live mode immediate pull
+  if (!liveMode) await refreshLoadAllOnce();
+  else await loadAccount(true);
+
+  pushEvent({ kind:"system", title:"Wallet set", detail:`${shortAddr(address)}`, status:"ok" });
+}
+
+/* ================= BIND UI EVENTS (NO CRASH) ================= */
+function bindUI(){
+  // header buttons
+  $("copyAddressBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); doCopyAddress(); }, {passive:false});
+
+  const searchBtn = $("searchBtn");
+  const addressInput = $("addressInput");
+  const searchWrap = $("searchWrap");
+
+  searchBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!searchWrap?.classList.contains("open")) openSearch();
+    else addressInput?.focus();
+  }, { passive: false });
+
+  addressInput?.addEventListener("focus", () => openSearch(), { passive: true });
+  addressInput?.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
+  addressInput?.addEventListener("keydown", async (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const v = pendingAddress;
+      await commitAddress(v);
+      addressInput.value = "";
+      pendingAddress = "";
+      closeSearch();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      addressInput.value = "";
+      pendingAddress = "";
+      closeSearch();
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!searchWrap) return;
+    if (searchWrap.contains(e.target)) return;
+    closeSearch();
+  }, { passive: true });
+
+  // drawer open/close
+  $("menuBtn")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleDrawer(); }, { passive:false });
+  $("backdrop")?.addEventListener("click", () => closeDrawer(), { passive:true });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeDrawer();
+      closeComingSoon();
+      exitFullscreenCard();
+      closeSearch();
+    }
+  });
+
+  // theme toggle
+  $("themeToggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    applyTheme(theme === "dark" ? "light" : "dark");
+  }, { passive:false });
+
+  // live toggle
+  $("liveToggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    setMode(!liveMode);
+  }, { passive:false });
+
+  // drawer nav
+  $("drawerNav")?.addEventListener("click", (e) => {
+    const btn = e.target?.closest(".nav-item");
+    if (!btn) return;
+    const page = btn.dataset.page || "dashboard";
+    setActivePage(page);
+    closeDrawer();
+
+    if (page === "dashboard") showPage("dashboard");
+    else if (page === "event" || page === "events") showPage("events");
+    else if (page === "tools") showPage("tools");
+    else if (page === "settings") showPage("settings");
+    else {
+      showPage("dashboard");
+      openComingSoon(page);
+    }
+  }, { passive:true });
+
+  // events buttons
+  $("eventsClearBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    eventsAll = [];
+    eventsUnread = 0;
+    eventsPageIndex = 0;
+    saveEvents();
+    renderEvents(true);
+  }, { passive:false });
+  $("eventsPrev")?.addEventListener("click", () => { eventsPageIndex--; renderEvents(false); }, { passive:true });
+  $("eventsNext")?.addEventListener("click", () => { eventsPageIndex++; renderEvents(false); }, { passive:true });
+  $("eventsFilterBtn")?.addEventListener("click", () => {
+    const box = $("eventsFilters");
+    if (!box) return;
+    const hidden = box.getAttribute("aria-hidden") === "true";
+    box.setAttribute("aria-hidden", hidden ? "false" : "true");
+    box.style.display = hidden ? "block" : "none";
+  }, { passive:true });
+  $("eventsCategory")?.addEventListener("change", () => { eventsPageIndex = 0; renderEvents(false); }, { passive:true });
+
+  // chart TF + scale
+  $("priceTfSwitch")?.addEventListener("click", async (e) => {
+    const btn = e.target?.closest(".tf-btn");
+    if (!btn) return;
+    const tf = btn.dataset.tf || "1d";
+    if (!["1d","1w","1m","1y","all"].includes(tf)) return;
+    priceTf = tf;
+    priceChartBoot = false;
     await loadPriceChartSelected(true);
-    await loadAccount(true);
-  } catch {}
+  }, { passive:true });
 
-  // after first commit, mark UI ready
-  modeLoading = false;
-  refreshConnUI();
-  setUIReady(true);
+  $("priceScaleToggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    priceScale = (priceScale === "log") ? "linear" : "log";
+    const b = $("priceScaleToggle");
+    if (b) b.textContent = (priceScale === "log") ? "LOG" : "LIN";
+    applyPriceChartScale();
+  }, { passive:false });
+
+  $("stakeScaleToggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    stakeScale = (stakeScale === "log") ? "linear" : "log";
+    const b = $("stakeScaleToggle");
+    if (b) b.textContent = (stakeScale === "log") ? "LOG" : "LIN";
+    drawStakeChart();
+  }, { passive:false });
+
+  $("rewardScaleToggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    rewardScale = (rewardScale === "log") ? "linear" : "log";
+    const b = $("rewardScaleToggle");
+    if (b) b.textContent = (rewardScale === "log") ? "LOG" : "LIN";
+    drawRewardChart();
+  }, { passive:false });
+
+  $("stakeTfSwitch")?.addEventListener("click", (e) => {
+    const btn = e.target?.closest(".tf-btn");
+    if (!btn) return;
+    const tf = btn.dataset.tf || "all";
+    if (!["all","1d","1w","1m"].includes(tf)) return;
+    stakeTf = tf;
+    $("stakeTfSwitch")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
+    drawStakeChart();
+  }, { passive:true });
+
+  $("rewardTfSwitch")?.addEventListener("click", (e) => {
+    const btn = e.target?.closest(".tf-btn");
+    if (!btn) return;
+    const tf = btn.dataset.tf || "all";
+    if (!["all","1d","1w","1m"].includes(tf)) return;
+    rewardTf = tf;
+    $("rewardTfSwitch")?.querySelectorAll(".tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
+    drawRewardChart();
+  }, { passive:true });
+
+  $("nwTfSwitch")?.addEventListener("click", (e) => {
+    const btn = e.target?.closest(".tf-btn");
+    if (!btn) return;
+    const tf = btn.dataset.tf || "live";
+    if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
+    nwTf = tf;
+    saveNWLocal();
+    drawNW();
+  }, { passive:true });
+
+  $("nwScaleToggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    nwScale = (nwScale === "log") ? "linear" : "log";
+    const b = $("nwScaleToggle");
+    if (b) b.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    saveNWLocal();
+    drawNW();
+  }, { passive:false });
+
+  $("aprScaleToggle")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    aprScale = (aprScale === "log") ? "linear" : "log";
+    const b = $("aprScaleToggle");
+    if (b) b.textContent = (aprScale === "log") ? "LOG" : "LIN";
+    drawAprChart();
+  }, { passive:false });
+
+  $("rewardTimeline")?.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
+  $("rewardFilter")?.addEventListener("change", () => { wdMinFilter = safe($("rewardFilter")?.value || 0); rebuildWdView(); syncRewardTimelineUI(true); }, { passive:true });
+
+  // tools
+  $("convEur")?.addEventListener("input", updateTools, { passive:true });
 }
 
-/* ================= STAKED/REWARD BAR + RANGE CONTROL ================= */
-/* NOTE: HTML attuale ha ancora i bottoni range in alto.
-   Qui rendiamo la barra coerente col range impostato e aggiorniamo percentuali. */
-
-function renderStakeProgressBar(){
-  const bar = $("stakeBar");
-  const line = $("stakeLine");
-  const pctEl = $("stakePercent");
-  const minEl = $("stakeMin");
-  const maxEl = $("stakeMax");
-
-  const v = safe(stakeInj);
-  const max = Math.max(0.000001, safe(stakeRangeMax) || STAKE_TARGET_DEFAULT_MAX);
-  const pct = clamp((v / max) * 100, 0, 100);
-
-  if (minEl) minEl.textContent = "0";
-  if (maxEl) maxEl.textContent = String(max);
-
-  if (bar) {
-    bar.style.left = "0%";
-    bar.style.width = pct + "%";
-  }
-  if (line) line.style.left = pct + "%";
-  if (pctEl) pctEl.textContent = Math.round(pct) + "%";
-}
-
-function renderRewardProgressBar(){
-  const bar = $("rewardBar");
-  const line = $("rewardLine");
-  const pctEl = $("rewardPercent");
-  const minEl = $("rewardMin");
-  const maxEl = $("rewardMax");
-
-  const v = safe(rewardsInj);
-  const max = Math.max(0.00000001, safe(rewardRangeMax) || REWARD_TARGET_DEFAULT_MAX);
-  const pct = clamp((v / max) * 100, 0, 100);
-
-  if (minEl) minEl.textContent = "0";
-  if (maxEl) maxEl.textContent = String(max);
-
-  if (bar) {
-    bar.style.left = "0%";
-    bar.style.width = pct + "%";
-  }
-  if (line) line.style.left = pct + "%";
-  if (pctEl) pctEl.textContent = Math.round(pct) + "%";
-}
-
-/* ================= PRICE BARS (1D / 1W / 1M) ================= */
-function renderPriceBars(){
-  const p = safe(displayed.price || targetPrice);
-  if (!p) return;
-
-  // 1D
-  if (tfReady.d) {
-    const open = safe(candle.d.open), low = safe(candle.d.low), high = safe(candle.d.high);
-    renderBar($("priceBar"), $("priceLine"), p, open, low, high,
-      "linear-gradient(90deg, rgba(34,197,94,.10), rgba(34,197,94,.55))",
-      "linear-gradient(90deg, rgba(239,68,68,.55), rgba(239,68,68,.10))"
-    );
-
-    setText("priceMin", low ? low.toFixed(2) : "--");
-    setText("priceOpen", open ? open.toFixed(2) : "--");
-    setText("priceMax", high ? high.toFixed(2) : "--");
-
-    const pct = pctChange(p, open);
-    updatePerf("arrow24h", "pct24h", pct);
-
-    // event thresholds
-    maybePriceEvent(pct);
-
-    // flash extremes
-    if (lastExtremes.d.low != null && low && low < lastExtremes.d.low) flash($("priceMin"));
-    if (lastExtremes.d.high != null && high && high > lastExtremes.d.high) flash($("priceMax"));
-    lastExtremes.d.low = low || lastExtremes.d.low;
-    lastExtremes.d.high = high || lastExtremes.d.high;
-  }
-
-  // 1W
-  if (tfReady.w) {
-    const open = safe(candle.w.open), low = safe(candle.w.low), high = safe(candle.w.high);
-    renderBar($("weekBar"), $("weekLine"), p, open, low, high,
-      "linear-gradient(90deg, rgba(34,197,94,.10), rgba(34,197,94,.55))",
-      "linear-gradient(90deg, rgba(239,68,68,.55), rgba(239,68,68,.10))"
-    );
-
-    setText("weekMin", low ? low.toFixed(2) : "--");
-    setText("weekOpen", open ? open.toFixed(2) : "--");
-    setText("weekMax", high ? high.toFixed(2) : "--");
-
-    updatePerf("arrowWeek", "pctWeek", pctChange(p, open));
-
-    if (lastExtremes.w.low != null && low && low < lastExtremes.w.low) flash($("weekMin"));
-    if (lastExtremes.w.high != null && high && high > lastExtremes.w.high) flash($("weekMax"));
-    lastExtremes.w.low = low || lastExtremes.w.low;
-    lastExtremes.w.high = high || lastExtremes.w.high;
-  }
-
-  // 1M
-  if (tfReady.m) {
-    const open = safe(candle.m.open), low = safe(candle.m.low), high = safe(candle.m.high);
-    renderBar($("monthBar"), $("monthLine"), p, open, low, high,
-      "linear-gradient(90deg, rgba(34,197,94,.10), rgba(34,197,94,.55))",
-      "linear-gradient(90deg, rgba(239,68,68,.55), rgba(239,68,68,.10))"
-    );
-
-    setText("monthMin", low ? low.toFixed(2) : "--");
-    setText("monthOpen", open ? open.toFixed(2) : "--");
-    setText("monthMax", high ? high.toFixed(2) : "--");
-
-    updatePerf("arrowMonth", "pctMonth", pctChange(p, open));
-
-    if (lastExtremes.m.low != null && low && low < lastExtremes.m.low) flash($("monthMin"));
-    if (lastExtremes.m.high != null && high && high > lastExtremes.m.high) flash($("monthMax"));
-    lastExtremes.m.low = low || lastExtremes.m.low;
-    lastExtremes.m.high = high || lastExtremes.m.high;
-  }
-}
-
-/* ================= MAIN UI LOOP (smooth numbers + repaint) ================= */
-function uiTick(){
-  // connection UI always
-  refreshConnUI();
-
-  // smooth target price
-  if (targetPrice) displayed.price = tick(displayed.price || targetPrice, targetPrice);
-
-  // smooth account numbers
-  displayed.available = tick(displayed.available, availableInj);
-  displayed.stake = tick(displayed.stake, stakeInj);
-  displayed.rewards = tick(displayed.rewards, rewardsInj);
-  displayed.apr = tick(displayed.apr, apr);
-
-  // compute net worth
-  const totalInj = safe(displayed.available) + safe(displayed.stake) + safe(displayed.rewards);
-  const nwUsd = totalInj * safe(displayed.price);
-  displayed.netWorthUsd = tick(displayed.netWorthUsd, nwUsd);
-
-  // UI numbers
-  colorNumber($("available"), displayed.available, availableInj, 6);
-  colorNumber($("stake"), displayed.stake, stakeInj, 4);
-  colorNumber($("rewards"), displayed.rewards, rewardsInj, 7);
-
-  const aprEl = $("apr");
-  if (aprEl) aprEl.textContent = `${safe(displayed.apr).toFixed(2)}%`;
-
-  // price UI
-  colorNumber($("price"), displayed.price, targetPrice, 4);
-
-  // USD rows
-  setText("availableUsd", `≈ $${(safe(displayed.available) * safe(displayed.price)).toFixed(2)}`);
-  setText("stakeUsd", `≈ $${(safe(displayed.stake) * safe(displayed.price)).toFixed(2)}`);
-  setText("rewardsUsd", `≈ $${(safe(displayed.rewards) * safe(displayed.price)).toFixed(4)}`);
-
-  // Net worth
-  colorMoney($("netWorthUsd"), displayed.netWorthUsd, nwUsd, 2);
-  updateNetWorthMiniRows();
-
-  // bars
-  renderStakeProgressBar();
-  renderRewardProgressBar();
-  renderPriceBars();
-
-  // tools panel
-  updateTools();
-
-  // last update
-  setText("updated", `Last update: ${fmtHHMMSS(Date.now())}`);
-}
-
-/* ================= BOOTSTRAP ================= */
-function boot(){
-  // theme
-  applyTheme(theme);
-
-  // zoom plugin
-  ZOOM_OK = tryRegisterZoom();
-
-  // bind expand buttons
-  bindExpandButtons();
-
-  // pull-to-refresh
-  initPullToRefresh();
-
-  // cloud meta
-  cloudLoadMeta();
-  cloudRenderMeta();
-  cloudSetState("synced");
-
-  // init charts
-  initPriceChart();
-  initStakeChart();
-  initRewardChart();
-  initNWChart();
-  initAprChart();
-
-  // load local series for stored address
-  loadAprLocal();
-  loadEvents();
-
-  // default mode icon
-  if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
-  if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-
-  // start mode
-  setMode(liveMode);
-
-  // if we have saved address, show it and load
-  if (address) {
-    setAddressDisplay(address);
-    commitAddress(address);
-  } else {
-    // still show UI
-    setUIReady(true);
-    refreshConnUI();
-  }
-
-  // UI tick loop
-  setInterval(uiTick, 250);
-}
-
-document.addEventListener("DOMContentLoaded", boot, { once:true });
-
-/* ================= SAFETY: ONLINE/OFFLINE EVENTS ================= */
-window.addEventListener("online", () => {
-  refreshConnUI();
-  cloudSetState("synced");
-  if (address) cloudPull();
-  if (liveMode) {
-    startTradeWS();
-    startKlineWS();
-  }
-}, { passive:true });
-
-window.addEventListener("offline", () => {
-  refreshConnUI();
-  cloudSetState("synced");
-}, { passive:true });
-
-/* ================= UI RENDER LOOP + BARS (RESTORE) ================= */
-
-// gradients per renderBar (price 1D/1W/1M)
-const GRAD_UP = "linear-gradient(90deg, rgba(34,197,94,.70), rgba(16,185,129,.55))";
-const GRAD_DN = "linear-gradient(90deg, rgba(239,68,68,.70), rgba(245,158,11,.55))";
-
-function setPctText(elId, pct){
-  const el = $(elId);
-  if (!el) return;
-  el.textContent = `${Math.round(clamp(pct, 0, 999))}%`;
-}
-
-/* Stake/Reward progress bar (0 -> range max) */
-function renderProgressBar(fillId, lineId, pct){
-  const fill = $(fillId);
-  const line = $(lineId);
-  if (!fill || !line) return;
-
-  const p = clamp(pct, 0, 100);
-  fill.style.left = "0%";
-  fill.style.width = `${p}%`;
-  line.style.left = `${p}%`;
-}
-
-/* Price bars (open-centered) */
-function renderPriceBars(){
-  // 1D
-  renderBar(
-    $("priceBar"), $("priceLine"),
-    displayed.price,
-    candle.d.open, candle.d.low, candle.d.high,
-    GRAD_UP, GRAD_DN
-  );
-
-  // 1W
-  renderBar(
-    $("weekBar"), $("weekLine"),
-    displayed.price,
-    candle.w.open, candle.w.low, candle.w.high,
-    GRAD_UP, GRAD_DN
-  );
-
-  // 1M
-  renderBar(
-    $("monthBar"), $("monthLine"),
-    displayed.price,
-    candle.m.open, candle.m.low, candle.m.high,
-    GRAD_UP, GRAD_DN
-  );
-
-  // labels min/open/max
-  setText("priceMin", candle.d.low ? candle.d.low.toFixed(3) : "--");
-  setText("priceOpen", candle.d.open ? candle.d.open.toFixed(3) : "--");
-  setText("priceMax", candle.d.high ? candle.d.high.toFixed(3) : "--");
-
-  setText("weekMin", candle.w.low ? candle.w.low.toFixed(3) : "--");
-  setText("weekOpen", candle.w.open ? candle.w.open.toFixed(3) : "--");
-  setText("weekMax", candle.w.high ? candle.w.high.toFixed(3) : "--");
-
-  setText("monthMin", candle.m.low ? candle.m.low.toFixed(3) : "--");
-  setText("monthOpen", candle.m.open ? candle.m.open.toFixed(3) : "--");
-  setText("monthMax", candle.m.high ? candle.m.high.toFixed(3) : "--");
-
-  // perf % (24h / week / month)
-  const p24 = pctChange(displayed.price, candle.d.open);
-  const pw  = pctChange(displayed.price, candle.w.open);
-  const pm  = pctChange(displayed.price, candle.m.open);
-
-  updatePerf("arrow24h", "pct24h", p24);
-  updatePerf("arrowWeek", "pctWeek", pw);
-  updatePerf("arrowMonth", "pctMonth", pm);
-
-  maybePriceEvent(p24);
-}
-
-function renderStakeRewardBars(){
-  // Stake (progress verso stakeRangeMax)
-  const sMax = Math.max(1e-9, safe(stakeRangeMax) || STAKE_TARGET_DEFAULT_MAX);
-  const sVal = safe(displayed.stake);
-  const sPct = (sVal / sMax) * 100;
-
-  renderProgressBar("stakeBar", "stakeLine", sPct);
-  setPctText("stakePercent", sPct);
-  setText("stakeMin", "0");
-  setText("stakeMax", String(sMax));
-
-  // Rewards (progress verso rewardRangeMax)
-  const rMax = Math.max(1e-9, safe(rewardRangeMax) || REWARD_TARGET_DEFAULT_MAX);
-  const rVal = safe(displayed.rewards);
-  const rPct = (rVal / rMax) * 100;
-
-  renderProgressBar("rewardBar", "rewardLine", rPct);
-  setPctText("rewardPercent", rPct);
-  setText("rewardMin", "0");
-  setText("rewardMax", String(rMax));
-}
-
-function renderTopValues(){
-  // Smooth numbers (tick)
-  displayed.price    = tick(displayed.price, targetPrice || displayed.price);
-  displayed.available= tick(displayed.available, availableInj);
-  displayed.stake    = tick(displayed.stake, stakeInj);
-  displayed.rewards  = tick(displayed.rewards, rewardsInj);
-  displayed.apr      = tick(displayed.apr, apr);
-
-  // price
-  setText("price", displayed.price ? displayed.price.toFixed(4) : "0.0000");
-  setText("updated", `Last update: ${fmtHHMMSS(Date.now())}`);
-
-  // amounts
-  setText("available", displayed.available.toFixed(6));
-  setText("stake", displayed.stake.toFixed(4));
-  setText("rewards", displayed.rewards.toFixed(7));
-  setText("apr", `${displayed.apr.toFixed(2)}%`);
-
-  // USD conversions
-  const px = safe(displayed.price);
-  setText("availableUsd", px ? `≈ $${(displayed.available * px).toFixed(2)}` : "≈ $0.00");
-  setText("stakeUsd",     px ? `≈ $${(displayed.stake * px).toFixed(2)}` : "≈ $0.00");
-  setText("rewardsUsd",   px ? `≈ $${(displayed.rewards * px).toFixed(2)}` : "≈ $0.00");
-
-  // Net worth top number (live value)
-  const totalInj = safe(displayed.available) + safe(displayed.stake) + safe(displayed.rewards);
-  const nwUsd = totalInj * px;
-  const nwEl = $("netWorthUsd");
-  if (nwEl) nwEl.textContent = `$${(Number.isFinite(nwUsd) ? nwUsd : 0).toFixed(2)}`;
-
-  updateNetWorthMiniRows();
-
-  // tools page (converter)
-  updateTools();
-}
-
+/* ================= BOOT LOOP ================= */
 let uiRaf = 0;
 function uiLoop(){
-  renderTopValues();
-  renderPriceBars();
-  renderStakeRewardBars();
+  renderNumbers();
+  renderAllBars();
   refreshConnUI();
-
   uiRaf = requestAnimationFrame(uiLoop);
 }
 
-/* ================= APP BOOT (REQUIRED) ================= */
-function boot(){
+/* ================= FINAL BOOT ================= */
+async function boot(){
+  // theme + zoom
   applyTheme(theme);
   ZOOM_OK = tryRegisterZoom();
 
-  bindExpandButtons();
-  initPullToRefresh();
-
+  // initial UI
+  setAddressDisplay(address);
+  loadAprLocal();
   cloudLoadMeta();
   cloudRenderMeta();
   cloudSetState("synced");
 
-  loadAprLocal();
   if (address){
     loadStakeSeriesLocal();
     loadWdAllLocal();
@@ -3655,21 +3036,40 @@ function boot(){
     loadEvents();
   }
 
-  // charts init (safe)
+  // init charts
   initPriceChart();
   initStakeChart();
   initRewardChart();
   initNWChart();
   initAprChart();
 
+  // bind UI + expand + ptr
+  bindUI();
+  bindExpandButtons();
+  initPullToRefresh();
+
+  // show dashboard by default
+  showPage("dashboard");
+  setActivePage("dashboard");
+
   // start mode
   setMode(liveMode);
+
+  // first loads
+  await loadCandleSnapshot(true);
+  await loadPriceChartSelected(true);
+  if (address) await loadAccount(true);
+
+  // timers (LIVE only needs, but safe to start and internal checks skip)
+  startAllTimers();
 
   // cloud pull once
   if (address) cloudPull();
 
-  // start UI loop
+  // start render loop
   if (!uiRaf) uiLoop();
 }
 
-boot();
+document.addEventListener("DOMContentLoaded", () => {
+  boot().catch((e)=>{ console.error(e); setStatusError("Boot error"); });
+});
