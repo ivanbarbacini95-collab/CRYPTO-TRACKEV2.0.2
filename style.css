@@ -1451,3 +1451,475 @@ body.card-expanded{
   - Reduced expand button size and placed it safely inside cards
   - Added fullscreen card style (JS toggles .fullscreen + body.card-expanded)
 */
+
+/* ============ PATCH MIGLIORIE RESPONSIVE ============ */
+
+/* 1. RESPONSIVE DESIGN */
+@media (max-width: 768px) {
+  .container { padding: 8px; }
+  .cards-wrapper { grid-template-columns: 1fr; gap: 12px; }
+  .header-grid { flex-direction: column; gap: 12px; }
+  .header-center { order: -1; text-align: center; }
+  .search-wrap { width: 100%; max-width: 100%; }
+  .networth-tf .tf-switch { flex-wrap: wrap; gap: 4px; }
+  .networth-tf .tf-btn { padding: 6px 8px; font-size: 12px; }
+  .networth-foot { grid-template-columns: 1fr; }
+}
+
+@media (min-width: 769px) and (max-width: 1200px) {
+  .cards-wrapper { grid-template-columns: repeat(2, 1fr); }
+  .networth-card { grid-column: span 2; }
+}
+
+/* 2. CARD NET WORTH IMPROVEMENTS */
+.networth-top2 {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.nw-scale-btn, .nw-live-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.nw-scale-btn.active, .nw-live-btn.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+/* 3. GRAFICO CON SCROLL E Y-AXIS */
+.chart-scrollable {
+  overflow-x: auto;
+  position: relative;
+  height: 200px;
+}
+
+.y-axis {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-card);
+  z-index: 2;
+}
+
+/* 4. TOOLTIP PER PALLINI GRAFICO */
+.chart-tooltip {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 1000;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+}
+
+/* 5. PALLINO LAMPEGGIANTE */
+.blinking-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  animation: blink 1s infinite;
+  z-index: 10;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.dot-green { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3); }
+.dot-yellow { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3); }
+
+/* 6. CARD IMPROVEMENTS */
+.networth-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.nw-mini {
+  background: rgba(52, 152, 219, 0.05);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.validator-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.validator-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f59e0b;
+  animation: blink 2s infinite;
+}
+
+/* 7. REWARD & STAKED CHART IMPROVEMENTS */
+.scale-controls {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-input);
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.scale-btn {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.scale-btn.active {
+  background: var(--primary-color);
+  color: white;
+}
+
+/* 8. RANGE CONFIGURATION */
+.range-modal {
+  display: none;
+  position: absolute;
+  top: 40px;
+  right: 0;
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  min-width: 200px;
+}
+
+.range-modal.show { display: block; }
+
+.range-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.range-input-group input {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+/* 9. TIMEFRAME CONTROLS ABOVE CHART */
+.timeframe-controls-above {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  justify-content: center;
+}
+
+.tf-btn-above {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.tf-btn-above.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+/* 10. COPY ADDRESS BUTTON */
+.copy-btn {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.copy-btn:hover { background: rgba(52, 152, 219, 0.1); }
+.copy-btn.copied { color: #22c55e; }
+
+/* 11. EVENT BADGE */
+.event-badge {
+  background: #ef4444;
+  color: white;
+  border-radius: 10px;
+  padding: 2px 6px;
+  font-size: 11px;
+  margin-left: 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* 12. TOOLS PAGES */
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.converter-input-group {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.converter-input-group input {
+  flex: 1;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+}
+
+/* 13. SETTINGS PAGE */
+.settings-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+
+.tab-btn {
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab-btn.active {
+  border-bottom-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+/* 14. AUTO-SCALING IMPROVEMENTS */
+.chart-container {
+  position: relative;
+  height: 200px;
+  width: 100%;
+}
+
+.chart-container.fullscreen {
+  height: calc(100vh - 100px);
+}
+
+/* 15. CARD EXPAND BUTTON POSITION */
+.card-expand {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+}
+
+/* 16. REFRESH ANIMATION */
+.refresh-animation {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 17. REWARD ESTIMATES */
+.reward-estimates {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border-color);
+}
+
+.estimate-item {
+  text-align: center;
+  flex: 1;
+}
+
+/* 18. FILTER BUTTONS */
+.reward-filters {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.filter-btn.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+/* 19. LOADING ANIMATION */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* 20. EVENT FILTERS */
+.event-filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.filter-select {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  min-width: 150px;
+}
+
+/* 21. PAGINATION */
+.pagination {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.page-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.page-btn.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+/* 22. MENU IMPROVEMENTS */
+.toggle-label {
+  font-size: 12px;
+  margin-left: 6px;
+  opacity: 0.8;
+}
+
+/* 23. AUTOSCROLL FOR POINTS */
+.chart-points-container {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 10px;
+}
+
+/* 24. DANGER BUTTONS */
+.danger-btn {
+  background: #ef4444;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.danger-btn:hover {
+  background: #dc2626;
+}
+
+/* 25. WARNING MESSAGES */
+.warning-message {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 12px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+
+/* 26. SUCCESS MESSAGES */
+.success-message {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 6px;
+  padding: 12px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+
+/* 27. SCROLLBAR STYLING */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-input);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2980b9;
+}
