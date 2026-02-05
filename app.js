@@ -1,6 +1,10 @@
 /* =========================================================
    Injective Portfolio • v2.0.2
-   app.js — FULL FILE (no cuts)
+   app.js — FULL FILE (compatible with provided HTML)
+   Fixes:
+   - IDs aligned with HTML (cloudMenuDot/cloudMenuStatus/... , eventsTbody, nwScaleToggle, nwLiveToggle, etc.)
+   - Net Worth chart updates throttled (prevents freeze)
+   - Safer UI guards + less heavy redraw loop
    ========================================================= */
 
 /* ================= CONFIG ================= */
@@ -17,16 +21,16 @@ const STAKE_TARGET_MAX = 1000;
 const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
 /* persistence versions */
-const STAKE_LOCAL_VER = 3; // bumped: labels store timestamps for cross-device merge
+const STAKE_LOCAL_VER = 3;
 const REWARD_WD_LOCAL_VER = 2;
-const NW_LOCAL_VER = 2;    // bumped: allow live window state + scale
+const NW_LOCAL_VER = 2;
 const EV_LOCAL_VER = 1;
 
 /* net worth limits */
 const NW_MAX_POINTS = 4800;
 
 /* Net Worth live window */
-const NW_LIVE_WINDOW_MS = 2 * 60 * 1000; // ✅ 2 minutes (as requested)
+const NW_LIVE_WINDOW_MS = 2 * 60 * 1000;
 
 /* cloud */
 const CLOUD_API = "/api/point";
@@ -35,6 +39,10 @@ const CLOUD_PULL_INTERVAL_MS = 45_000;
 
 /* refresh mode staging */
 const REFRESH_RED_MS = 220;
+
+/* chart throttling (prevents CPU freeze) */
+const NW_DRAW_MIN_MS = 350;   // ~3 fps
+const NW_POINT_MIN_MS = 5500; // avoid point spam
 
 /* ================= HELPERS ================= */
 const $ = (id) => document.getElementById(id);
@@ -52,7 +60,7 @@ function fmtHHMMSS(ms) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
-/* storage-label (timestamp) helpers */
+/* storage-label helpers */
 function tsLabel(ms = Date.now()) { return String(Math.floor(ms)); }
 function labelToTs(lbl) {
   if (lbl == null) return 0;
@@ -125,6 +133,7 @@ let ZOOM_OK = false;
 function tryRegisterZoom(){
   try{
     if (!window.Chart) return false;
+    // chartjs-plugin-zoom (cdn) typically registers as window.ChartZoom
     const plug = window.ChartZoom || window["chartjs-plugin-zoom"];
     if (plug) Chart.register(plug);
     const has = !!(Chart?.registry?.plugins?.get && Chart.registry.plugins.get("zoom"));
@@ -179,6 +188,8 @@ function refreshConnUI() {
 }
 
 /* ================= UI READY FAILSAFE ================= */
+const tfReady = { d: false, w: false, m: false };
+
 function setUIReady(force=false){
   const root = $("appRoot");
   if (!root) return;
@@ -226,7 +237,6 @@ function colorNumber(el, n, o, d) {
   }).join("");
 }
 
-/* money with digit coloring */
 function colorMoney(el, n, o, decimals = 2){
   if (!el) return;
   n = safe(n); o = safe(o);
@@ -340,7 +350,7 @@ function closeSearch() {
   addressInput?.blur();
 }
 
-if (addressInput) addressInput.value = ""; // ✅ start empty (we show wallet in display)
+if (addressInput) addressInput.value = "";
 
 if (searchBtn) {
   searchBtn.addEventListener("click", (e) => {
@@ -353,7 +363,6 @@ if (searchBtn) {
 
 if (addressInput) {
   addressInput.addEventListener("focus", () => openSearch(), { passive: true });
-
   addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
 
   addressInput.addEventListener("keydown", async (e) => {
@@ -361,7 +370,6 @@ if (addressInput) {
       e.preventDefault();
       const v = pendingAddress;
       await commitAddress(v);
-      // ✅ keep wallet displayed, but clear input for next search
       addressInput.value = "";
       pendingAddress = "";
       closeSearch();
@@ -374,7 +382,6 @@ if (addressInput) {
   });
 }
 
-/* close search only if clicking outside */
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
@@ -390,10 +397,10 @@ const liveToggle = $("liveToggle");
 const liveIcon = $("liveIcon");
 const modeHint = $("modeHint");
 
-/* cloud status in menu */
-const cloudDotMenu = $("cloudDotMenu");
-const cloudTextMenu = $("cloudTextMenu");
-const cloudPtsMenu = $("cloudPtsMenu");
+/* cloud status in menu (IDs from provided HTML) */
+const cloudDotMenu  = $("cloudMenuDot");
+const cloudTextMenu = $("cloudMenuStatus");
+const cloudLastMenu = $("cloudMenuLast");
 
 let isDrawerOpen = false;
 
@@ -432,7 +439,7 @@ themeToggle?.addEventListener("click", (e) => {
   applyTheme(theme === "dark" ? "light" : "dark");
 }, { passive:false });
 
-/* ================= COMING SOON overlay (FIX CLOSE) ================= */
+/* ================= COMING SOON overlay ================= */
 const comingSoon = $("comingSoon");
 const comingTitle = $("comingTitle");
 const comingSub = $("comingSub");
@@ -458,7 +465,6 @@ function closeComingSoon(){
   comingSoon.setAttribute("aria-hidden", "true");
 }
 
-/* ✅ close always works: stop propagation, and also close if click outside card */
 comingClose?.addEventListener("click", (e) => {
   e?.preventDefault?.();
   e?.stopPropagation?.();
@@ -474,15 +480,12 @@ const pageDashboard = $("pageDashboard");
 const pageEvents = $("pageEvents");
 
 function showPage(key){
-  // hide all
   pageDashboard?.classList.remove("active");
   pageEvents?.classList.remove("active");
-
-  if (key === "events") pageEvents?.classList.add("active");
+  if (key === "event" || key === "events") pageEvents?.classList.add("active");
   else pageDashboard?.classList.add("active");
 }
 
-/* nav active */
 function setActivePage(pageKey){
   const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
@@ -503,7 +506,7 @@ drawerNav?.addEventListener("click", (e) => {
     showPage("events");
     renderEvents();
   } else {
-    showPage("dashboard"); // keep dashboard under overlay
+    showPage("dashboard");
     openComingSoon(page);
   }
 }, { passive:true });
@@ -528,7 +531,6 @@ function buildExpandedBackdrop(){
 
 function hideNonChartContent(card){
   const hidden = [];
-  // keep: card-tools + any element that contains a canvas
   const keepSet = new Set();
   const tools = card.querySelector(".card-tools");
   if (tools) keepSet.add(tools);
@@ -540,16 +542,13 @@ function hideNonChartContent(card){
     while (p && p !== card) { keepSet.add(p); p = p.parentElement; }
   });
 
-  // hide direct children not in keep chain
   [...card.children].forEach(ch => {
     if (keepSet.has(ch)) return;
-    // if any kept ancestor contains this, don't hide it
     let ok = false;
     for (const k of keepSet) {
       if (k && k !== ch && k.contains && k.contains(ch)) { ok = true; break; }
     }
     if (ok) return;
-
     hidden.push([ch, ch.style.display]);
     ch.style.display = "none";
   });
@@ -575,7 +574,6 @@ function enterFullscreenCard(card){
   card.classList.add("fullscreen");
   hideNonChartContent(card);
 
-  // ensure charts resize properly
   setTimeout(() => {
     try { chart?.resize?.(); } catch {}
     try { stakeChart?.resize?.(); } catch {}
@@ -614,7 +612,7 @@ function bindExpandButtons(){
   });
 }
 
-/* ================= EVENTS SYSTEM ================= */
+/* ================= EVENTS SYSTEM (local + optional cloud) ================= */
 let eventsAll = [];
 
 function evStoreKey(addr){
@@ -679,8 +677,8 @@ function pushEvent(ev){
     title: ev.title || "Event",
     detail: ev.detail || "",
     amount: ev.amount ?? null,
-    dir: ev.dir || null, // up|down|null
-    status: ev.status || "pending" // pending|ok|err
+    dir: ev.dir || null,
+    status: ev.status || "pending"
   };
   eventsAll.unshift(obj);
   eventsAll = eventsAll.slice(0, 1200);
@@ -688,7 +686,6 @@ function pushEvent(ev){
   renderEvents();
   showToast(obj);
 
-  // simulate “pending → ok” for tx-like events
   if (obj.status === "pending" && obj.kind !== "price") {
     setTimeout(() => {
       const idx = eventsAll.findIndex(x => x.id === obj.id);
@@ -696,13 +693,16 @@ function pushEvent(ev){
         eventsAll[idx].status = hasInternet() ? "ok" : "err";
         saveEvents();
         renderEvents();
+        cloudMarkDirty();
       }
     }, 1500);
+  } else {
+    cloudMarkDirty();
   }
 }
 
 function renderEvents(){
-  const body = $("eventsTableBody");
+  const body = $("eventsTbody");
   const empty = $("eventsEmpty");
   if (!body) return;
 
@@ -714,21 +714,18 @@ function renderEvents(){
 
   for (const ev of list){
     const tr = document.createElement("tr");
-
     const dt = new Date(ev.ts || Date.now());
     const when = `${dt.toLocaleDateString()} ${fmtHHMMSS(ev.ts || Date.now())}`;
-
-    const pillDotClass = (ev.status === "ok") ? "ev-dot ok" : (ev.status === "err") ? "ev-dot err" : "ev-dot";
-    const arrow = ev.dir === "up" ? `<span class="ev-arrow up">▲</span>` : ev.dir === "down" ? `<span class="ev-arrow down">▼</span>` : "";
     const kind = (ev.kind || "info").toUpperCase();
+    const status = (ev.status || "pending").toUpperCase();
+    const arrow = ev.dir === "up" ? "▲" : ev.dir === "down" ? "▼" : "";
 
+    // HTML columns: Event | Date | Details | Status
     tr.innerHTML = `
-      <td>
-        <span class="ev-pill"><span class="${pillDotClass}"></span>${kind}</span>
-      </td>
-      <td>${ev.title || "Event"}</td>
+      <td><span class="ev-pill">${kind}</span></td>
       <td style="white-space:nowrap">${when}</td>
-      <td>${arrow} ${ev.detail || ""}</td>
+      <td>${arrow ? `<span class="ev-arrow ${ev.dir}">${arrow}</span>` : ""} ${ev.title || ""} ${ev.detail ? `• ${ev.detail}` : ""}</td>
+      <td>${status}</td>
     `;
     body.appendChild(tr);
   }
@@ -739,6 +736,7 @@ $("eventsClearBtn")?.addEventListener("click", (e) => {
   eventsAll = [];
   saveEvents();
   renderEvents();
+  cloudMarkDirty();
 }, { passive:false });
 
 /* ================= MODE SWITCH + PULL TO REFRESH ================= */
@@ -832,7 +830,7 @@ liveToggle?.addEventListener("click", (e) => {
   setMode(!liveMode);
 }, { passive:false });
 
-/* ✅ Pull-to-refresh only in REFRESH mode */
+/* Pull-to-refresh only in REFRESH mode */
 let ptr = { startY: 0, pulling: false, shown: false };
 let ptrEl = null;
 
@@ -872,7 +870,7 @@ function initPullToRefresh(){
   let touchId = null;
 
   window.addEventListener("touchstart", (e) => {
-    if (liveMode) return;                // ✅ only in refresh mode
+    if (liveMode) return;
     if (!hasInternet()) return;
     if (document.body.classList.contains("drawer-open")) return;
     if (document.body.classList.contains("card-expanded")) return;
@@ -932,7 +930,6 @@ const candle = {
   w: { t: 0, open: 0, high: 0, low: 0 },
   m: { t: 0, open: 0, high: 0, low: 0 },
 };
-const tfReady = { d: false, w: false, m: false };
 
 /* ================= WS (price + klines) ================= */
 let wsTrade = null;
@@ -1040,7 +1037,7 @@ function startKlineWS() {
   wsKline.onclose = () => { wsKlineOnline = false; refreshConnUI(); scheduleKlineRetry(); };
   wsKline.onerror = () => { wsKlineOnline = false; refreshConnUI(); try { wsKline.close(); } catch {} scheduleKlineRetry(); };
 
-  wsKline.onmessage = async (e) => {
+  wsKline.onmessage = (e) => {
     let payload;
     try { payload = JSON.parse(e.data); } catch { return; }
     const data = payload?.data;
@@ -1067,15 +1064,11 @@ let validatorLoading = false;
 
 function setValidatorUI(state){
   const nameEl = $("validatorName");
-  const addrEl = $("validatorAddr");
   const dotEl  = $("validatorDot");
 
   if (nameEl) nameEl.textContent = validator.moniker || "Validator";
-  if (addrEl) addrEl.textContent = validator.addr ? shortAddr(validator.addr) : "—";
-
   if (!dotEl) return;
 
-  // ✅ request: dot yellow blinking at far right; also color based on state
   dotEl.classList.remove("ok","err");
   dotEl.style.background = "#f59e0b";
 
@@ -1125,7 +1118,6 @@ async function fetchValidatorInfo(valAddr){
   validator.addr = valAddr;
   validator.moniker = moniker;
 
-  // cosmos status values: BOND_STATUS_BONDED / etc
   if (jailed) validator.status = "jailed";
   else if (st.includes("bonded")) validator.status = "bonded";
   else if (st.includes("unbond")) validator.status = "unbonded";
@@ -1174,7 +1166,7 @@ async function loadAccount(isRefresh=false) {
 
   apr = safe(i.inflation) * 100;
 
-  // ✅ validator (first delegation)
+  // validator (first delegation)
   const valAddr = del?.[0]?.delegation?.validator_address || "";
   if (valAddr && valAddr !== validator.addr) {
     validator.addr = valAddr;
@@ -1186,17 +1178,15 @@ async function loadAccount(isRefresh=false) {
     setValidatorUI("ready");
   }
 
-  // series updates
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
 
-  // net worth point
-  recordNetWorthPoint();
+  recordNetWorthPointThrottled();
 
   setUIReady(true);
 }
 
-/* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
+/* ================= BINANCE REST: snapshot 1D/1W/1M ================= */
 async function loadCandleSnapshot(isRefresh=false) {
   if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
@@ -1687,7 +1677,6 @@ function maybeAddStakePoint(currentStake) {
   saveStakeSeriesLocal();
   drawStakeChart();
 
-  // ✅ event
   pushEvent({
     kind: "tx",
     title: delta > 0 ? "Stake increased" : "Stake decreased",
@@ -1696,7 +1685,7 @@ function maybeAddStakePoint(currentStake) {
   });
 }
 
-/* ================= REWARD WITHDRAWALS (persist + cloud) ================= */
+/* ================= REWARD WITHDRAWALS ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
@@ -1977,7 +1966,7 @@ function maybeRecordRewardWithdrawal(newRewards) {
 }
 
 /* ================= NET WORTH (persist + chart) ================= */
-let nwTf = "1d";         // 1d | 1w | 1m | 1y | all | live
+let nwTf = "live";       // live | 1d | 1w | 1m | 1y | all
 let nwScale = "linear";  // linear | log
 let nwTAll = [];
 let nwUsdAll = [];
@@ -1986,6 +1975,9 @@ let nwInjAll = [];
 let netWorthChart = null;
 let nwHoverActive = false;
 let nwHoverIndex = null;
+
+let lastNWDrawAt = 0;
+let lastNWPointAt = 0;
 
 function nwStoreKey(addr){
   const a = (addr || "").trim();
@@ -2033,9 +2025,10 @@ function loadNWLocal(){
     nwTAll = Array.isArray(obj.tAll) ? obj.tAll.map(Number) : [];
     nwUsdAll = Array.isArray(obj.usdAll) ? obj.usdAll.map(Number) : [];
     nwInjAll = Array.isArray(obj.injAll) ? obj.injAll.map(Number) : [];
-    nwTf = typeof obj.tf === "string" ? obj.tf : "1d";
+    nwTf = typeof obj.tf === "string" ? obj.tf : "live";
     nwScale = (obj.scale === "log") ? "log" : "linear";
 
+    if (!["live","1d","1w","1m","1y","all"].includes(nwTf)) nwTf = "live";
     clampNWArrays();
     return true;
   } catch {
@@ -2048,7 +2041,7 @@ function nwWindowMs(tf){
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
-  if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000; // big
+  if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
 }
 
@@ -2059,7 +2052,6 @@ function nwHasSpan(tf){
   return span >= nwWindowMs(tf) * 0.8;
 }
 
-/* build view: always left->right, no scroll except live window */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
@@ -2074,12 +2066,11 @@ function nwBuildView(tf){
     const u = safe(nwUsdAll[i]);
     if (t >= minT && Number.isFinite(u) && u > 0) {
       times.push(t);
-      labels.push(tsLabel(t)); // store label as ts
+      labels.push(tsLabel(t));
       data.push(u);
     }
   }
 
-  // live: keep only last window (and this will "scroll" by filtering)
   if (tf === "live") {
     const liveMin = now - NW_LIVE_WINDOW_MS;
     const outL = [], outD = [], outT = [];
@@ -2107,7 +2098,6 @@ function nwApplySignStyling(sign){
     ds.borderColor = "#3b82f6";
     ds.backgroundColor = "rgba(59,130,246,.12)";
   }
-  netWorthChart.update("none");
 }
 
 const nwVerticalLinePlugin = {
@@ -2132,9 +2122,6 @@ const nwVerticalLinePlugin = {
 const nwLastDotPlugin = {
   id: "nwLastDotPlugin",
   afterDatasetsDraw(ch) {
-    const ds = ch.data.datasets?.[0];
-    if (!ds) return;
-
     const meta = ch.getDatasetMeta(0);
     const pts = meta?.data || [];
     if (!pts.length) return;
@@ -2196,7 +2183,6 @@ function initNWChart(){
       animation: false,
       normalized: true,
       layout: { padding: { left: 8, right: 34, top: 8, bottom: 12 } },
-
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
@@ -2207,9 +2193,7 @@ function initNWChart(){
           }
         } : {})
       },
-
       interaction: { mode: "index", intersect: false },
-
       scales: {
         x: {
           display: true,
@@ -2248,7 +2232,11 @@ function initNWChart(){
   attachNWInteractions();
 }
 
-function drawNW(){
+function drawNWThrottled(force=false){
+  const now = Date.now();
+  if (!force && (now - lastNWDrawAt) < NW_DRAW_MIN_MS) return;
+  lastNWDrawAt = now;
+
   if (!netWorthChart) initNWChart();
   if (!netWorthChart) return;
 
@@ -2256,11 +2244,7 @@ function drawNW(){
 
   netWorthChart.data.labels = view.labels;
   netWorthChart.data.datasets[0].data = view.data;
-
-  // update y scale type
   netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
-
-  netWorthChart.update("none");
 
   // pnl
   const pnlEl = $("netWorthPnl");
@@ -2287,6 +2271,7 @@ function drawNW(){
     }
   }
 
+  netWorthChart.update("none");
   updateNWTFButtons();
 }
 
@@ -2296,7 +2281,6 @@ function updateNWTFButtons(){
   const btns = wrap.querySelectorAll(".tf-btn");
   btns.forEach(b => {
     const tf = b.dataset.tf || "";
-    // live always available
     const enabled = (tf === "live") ? true
       : (tf === "1d") ? true
       : (tf === "1w") ? nwHasSpan("1w")
@@ -2312,7 +2296,6 @@ function updateNWTFButtons(){
   });
 }
 
-/* hover interactions */
 function nwGetIndexFromEvent(evt){
   if (!netWorthChart) return null;
   const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
@@ -2330,9 +2313,8 @@ function nwShowHoverValue(idx){
   if (!v) return;
 
   const el = $("netWorthUsd");
-  if (el){
-    el.textContent = `$${v.toFixed(2)}`;
-  }
+  if (el) el.textContent = `$${v.toFixed(2)}`;
+
   const pnlEl = $("netWorthPnl");
   if (pnlEl){
     pnlEl.classList.remove("good","bad","flat");
@@ -2357,7 +2339,8 @@ function attachNWInteractions(){
   const onLeave = () => {
     nwHoverActive = false;
     nwHoverIndex = null;
-    netWorthChart.update("none");
+    // after hover, refresh pnl view quickly
+    drawNWThrottled(true);
   };
 
   canvas.addEventListener("mousemove", onMove, { passive: true });
@@ -2369,47 +2352,59 @@ function attachNWInteractions(){
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
 
-function attachNWTFHandlers(){
+function attachNWHandlers(){
   const wrap = $("nwTfSwitch");
-  if (!wrap) return;
+  if (wrap){
+    wrap.addEventListener("click", (e) => {
+      const btn = e.target?.closest(".tf-btn");
+      if (!btn) return;
+      const tf = btn.dataset.tf || "1d";
+      if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
+      if (btn.disabled) return;
+      nwTf = tf;
+      saveNWLocal();
+      drawNWThrottled(true);
+    }, { passive:true });
+  }
 
-  wrap.addEventListener("click", (e) => {
-    const btn = e.target?.closest(".tf-btn");
-    if (!btn) return;
-    const tf = btn.dataset.tf || "1d";
-    if (!["live","1d","1w","1m","1y","all"].includes(tf)) return;
-    if (btn.disabled) return;
-
-    nwTf = tf;
-    saveNWLocal();
-    drawNW();
-  }, { passive:true });
-
-  // scale toggle
-  $("nwScaleBtn")?.addEventListener("click", (e) => {
+  // scale toggle (HTML: nwScaleToggle)
+  $("nwScaleToggle")?.addEventListener("click", (e) => {
     e.preventDefault();
     nwScale = (nwScale === "log") ? "linear" : "log";
-    const b = $("nwScaleBtn");
+    const b = $("nwScaleToggle");
     if (b) b.textContent = (nwScale === "log") ? "LOG" : "LIN";
     saveNWLocal();
-    drawNW();
+    drawNWThrottled(true);
   }, { passive:false });
 
-  // live toggle button
-  $("nwLiveBtn")?.addEventListener("click", (e) => {
+  // live toggle (HTML: nwLiveToggle)
+  $("nwLiveToggle")?.addEventListener("click", (e) => {
     e.preventDefault();
-    const b = $("nwLiveBtn");
-    const on = (nwTf === "live") ? false : true;
+    const on = (nwTf !== "live");
     nwTf = on ? "live" : "1d";
+    const b = $("nwLiveToggle");
     if (b) b.classList.toggle("active", on);
     saveNWLocal();
-    drawNW();
+    drawNWThrottled(true);
   }, { passive:false });
 }
 
-/* record points */
-function recordNetWorthPoint(){
+function updateNetWorthAssetRow(){
+  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
+  const px = safe(displayed.price);
+  const usd = totalInj * px;
+
+  setText("nwAssetQty", totalInj.toFixed(4));
+  setText("nwAssetPrice", `$${px.toFixed(2)}`);
+  setText("nwAssetUsd", `$${usd.toFixed(2)}`);
+  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+}
+
+function recordNetWorthPointThrottled(){
   if (!address) return;
+  const now = Date.now();
+  if (now - lastNWPointAt < NW_POINT_MIN_MS) return;
+
   const px = safe(targetPrice);
   if (!Number.isFinite(px) || px <= 0) return;
 
@@ -2417,25 +2412,42 @@ function recordNetWorthPoint(){
   const totalUsd = totalInj * px;
   if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
 
-  const now = Date.now();
   const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
   const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwUsdAll.length - 1]) : 0;
 
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
 
-  // density control
   if (lastT && dt < 5_000 && dUsd < 0.25) return;
 
+  lastNWPointAt = now;
   nwTAll.push(now);
   nwUsdAll.push(totalUsd);
   nwInjAll.push(totalInj);
   clampNWArrays();
   saveNWLocal();
-  drawNW();
+  drawNWThrottled(false);
 }
 
-/* ================= CLOUD SYNC (REAL) ================= */
+/* ================= IMPORTANT PRICE EVENTS ================= */
+let lastPriceStepUp = 0;
+let lastPriceStepDown = 0;
+function maybePriceEvent(pct24h){
+  const step = 5;
+  const upSteps = Math.floor(Math.max(0, pct24h) / step);
+  const dnSteps = Math.floor(Math.max(0, -pct24h) / step);
+
+  if (upSteps > lastPriceStepUp) {
+    lastPriceStepUp = upSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ +${(upSteps*step).toFixed(0)}% (24h)`, dir:"up", status:"ok" });
+  }
+  if (dnSteps > lastPriceStepDown) {
+    lastPriceStepDown = dnSteps;
+    pushEvent({ kind:"price", title:"Price move", detail:`INJ -${(dnSteps*step).toFixed(0)}% (24h)`, dir:"down", status:"ok" });
+  }
+}
+
+/* ================= CLOUD SYNC ================= */
 const CLOUD_VER = 2;
 const CLOUD_KEY = `inj_cloudmeta_v${CLOUD_VER}`;
 let cloudPts = 0;
@@ -2461,23 +2473,21 @@ function cloudSaveMeta(){
 function cloudSetState(state){
   const root = $("appRoot");
   const st = $("cloudStatus");
-  if (!root || !st) return;
+  if (root) root.classList.remove("cloud-synced","cloud-saving","cloud-error");
 
-  root.classList.remove("cloud-synced","cloud-saving","cloud-error");
-
-  // footer text
-  if (state === "saving"){
-    root.classList.add("cloud-saving");
-    st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
-  } else if (state === "error"){
-    root.classList.add("cloud-error");
-    st.textContent = "Cloud: Error";
-  } else {
-    root.classList.add("cloud-synced");
-    st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
+  if (st) {
+    if (state === "saving"){
+      root && root.classList.add("cloud-saving");
+      st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
+    } else if (state === "error"){
+      root && root.classList.add("cloud-error");
+      st.textContent = "Cloud: Error";
+    } else {
+      root && root.classList.add("cloud-synced");
+      st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
+    }
   }
 
-  // menu text + dot
   if (cloudDotMenu) {
     cloudDotMenu.classList.remove("ok","saving","err");
     if (state === "saving") cloudDotMenu.classList.add("saving");
@@ -2494,7 +2504,9 @@ function cloudSetState(state){
 function cloudRenderMeta(){
   const hist = $("cloudHistory");
   if (hist) hist.textContent = `· ${Math.max(0, Math.floor(cloudPts))} pts`;
-  if (cloudPtsMenu) cloudPtsMenu.textContent = `${Math.max(0, Math.floor(cloudPts))} pts`;
+  if (cloudLastMenu) {
+    cloudLastMenu.textContent = cloudLastSync ? new Date(cloudLastSync).toLocaleString() : "—";
+  }
 }
 
 function cloudBumpLocal(points = 1){
@@ -2522,12 +2534,12 @@ function buildCloudPayload(){
     t: Date.now(),
     stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
     wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll },
-    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll }
+    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll },
+    events: eventsAll
   };
 }
 
 function mergeUniqueByTs(baseTimes, baseVals, addTimes, addVals){
-  // assumes times arrays contain ms timestamps
   const map = new Map();
   for (let i=0;i<baseTimes.length;i++){
     const t = safe(baseTimes[i]);
@@ -2551,7 +2563,6 @@ function mergeStakeByLabel(payloadStake){
   const pm = Array.isArray(payloadStake.moves) ? payloadStake.moves : [];
   const pt = Array.isArray(payloadStake.types) ? payloadStake.types : [];
 
-  // merge by timestamp label (we store numeric-label)
   const map = new Map();
   for (let i=0;i<stakeLabels.length;i++){
     const k = String(stakeLabels[i]);
@@ -2570,7 +2581,6 @@ function mergeStakeByLabel(payloadStake){
   stakeMoves = keys.map(k => map.get(k).m);
   stakeTypes = keys.map(k => map.get(k).t);
 
-  // clamp
   stakeLabels = clampArray(stakeLabels, 2400);
   stakeData   = clampArray(stakeData,   2400);
   stakeMoves  = clampArray(stakeMoves,  2400);
@@ -2586,7 +2596,6 @@ function mergeWd(payloadWd){
   const pv = Array.isArray(payloadWd.values) ? payloadWd.values : [];
   const pt = Array.isArray(payloadWd.times) ? payloadWd.times : [];
 
-  // merge by times (preferred)
   const map = new Map();
   for (let i=0;i<wdTimesAll.length;i++){
     const t = safe(wdTimesAll[i]) || labelToTs(wdLabelsAll[i]);
@@ -2604,7 +2613,6 @@ function mergeWd(payloadWd){
   wdValuesAll = times.map(t => map.get(t).v);
   wdLabelsAll = times.map(t => map.get(t).l);
 
-  // clamp
   wdTimesAll  = clampArray(wdTimesAll, 2400);
   wdValuesAll = clampArray(wdValuesAll, 2400);
   wdLabelsAll = clampArray(wdLabelsAll, 2400);
@@ -2626,6 +2634,18 @@ function mergeNW(payloadNw){
   clampNWArrays();
 }
 
+function mergeEvents(payloadEvents){
+  if (!Array.isArray(payloadEvents)) return;
+  const map = new Map();
+  for (const ev of eventsAll) map.set(ev.id, ev);
+  for (const ev of payloadEvents) {
+    if (!ev?.id) continue;
+    if (!map.has(ev.id)) map.set(ev.id, ev);
+  }
+  eventsAll = Array.from(map.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 1200);
+  saveEvents();
+}
+
 async function cloudPull(){
   if (!address) return;
   if (!hasInternet()) { cloudSetState("synced"); return; }
@@ -2640,19 +2660,24 @@ async function cloudPull(){
     mergeStakeByLabel(data.stake);
     mergeWd(data.wd);
     mergeNW(data.nw);
+    mergeEvents(data.events);
 
-    // rebuild chart views
+    // rebuild
     saveStakeSeriesLocal();
     saveWdAllLocal();
     rebuildWdView();
     goRewardLive();
     saveNWLocal();
-    drawNW();
+
     drawStakeChart();
     drawRewardWdChart();
+    drawNWThrottled(true);
+
+    renderEvents();
 
     cloudLastSync = Date.now();
     cloudSaveMeta();
+    cloudRenderMeta();
     cloudSetState("synced");
   } catch {
     cloudSetState("error");
@@ -2683,38 +2708,8 @@ async function cloudPush(){
   cloudDirty = false;
   cloudLastSync = Date.now();
   cloudSaveMeta();
+  cloudRenderMeta();
   cloudSetState("synced");
-}
-
-/* ================= NET WORTH UI rows ================= */
-function updateNetWorthMiniRows(){
-  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
-  const px = safe(displayed.price);
-
-  setText("nwInjQty", totalInj.toFixed(4));
-  setText("nwInjPx", `$${px.toFixed(2)}`);
-
-  // also big total INJ label if present
-  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
-}
-
-/* ================= IMPORTANT PRICE EVENTS (24h thresholds) ================= */
-let lastPriceStepUp = 0;
-let lastPriceStepDown = 0;
-function maybePriceEvent(pct24h){
-  // fire at each 5% step
-  const step = 5;
-  const upSteps = Math.floor(Math.max(0, pct24h) / step);
-  const dnSteps = Math.floor(Math.max(0, -pct24h) / step);
-
-  if (upSteps > lastPriceStepUp) {
-    lastPriceStepUp = upSteps;
-    pushEvent({ kind:"price", title:"Price move", detail:`INJ +${(upSteps*step).toFixed(0)}% (24h)`, dir:"up", status:"ok" });
-  }
-  if (dnSteps > lastPriceStepDown) {
-    lastPriceStepDown = dnSteps;
-    pushEvent({ kind:"price", title:"Price move", detail:`INJ -${(dnSteps*step).toFixed(0)}% (24h)`, dir:"down", status:"ok" });
-  }
 }
 
 /* ================= CHART THEME REFRESH ================= */
@@ -2763,7 +2758,7 @@ async function commitAddress(newAddr) {
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0; displayed.apr = 0;
 
-  // load local series
+  // local series
   loadStakeSeriesLocal();
   drawStakeChart();
 
@@ -2774,18 +2769,17 @@ async function commitAddress(newAddr) {
   goRewardLive();
 
   loadNWLocal();
-  const scaleBtn = $("nwScaleBtn");
+  const scaleBtn = $("nwScaleToggle");
   if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
-  const liveBtn = $("nwLiveBtn");
+  const liveBtn = $("nwLiveToggle");
   if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
-  attachNWTFHandlers();
-  drawNW();
+  drawNWThrottled(true);
 
   // events
   loadEvents();
   renderEvents();
 
-  // cloud pull
+  // cloud merge
   cloudSetState("saving");
   await cloudPull();
 
@@ -2805,6 +2799,7 @@ window.addEventListener("online", () => {
   refreshConnUI();
   setValidatorUI("ready");
   cloudSetState("synced");
+  cloudRenderMeta();
   if (address) cloudPull();
   if (liveMode) {
     startTradeWS();
@@ -2829,52 +2824,42 @@ window.addEventListener("offline", () => {
 
 /* ================= BOOT ================= */
 (async function boot() {
-  // theme + zoom
   applyTheme(theme);
   ZOOM_OK = tryRegisterZoom();
 
-  // ui
   cloudLoadMeta();
   cloudRenderMeta();
   cloudSetState("synced");
   refreshConnUI();
-  setTimeout(() => setUIReady(true), 2600);
 
   attachRewardTimelineHandlers();
   attachRewardLiveHandler();
   attachRewardFilterHandler();
+  attachNWHandlers();
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
 
-  // bind expand
   bindExpandButtons();
-
-  // pull-to-refresh
   initPullToRefresh();
-
-  // address display
   setAddressDisplay(address);
 
-  // initial data for last saved address
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (address) {
-    // local loads first
     loadStakeSeriesLocal(); drawStakeChart();
     loadWdAllLocal(); rebuildWdView(); goRewardLive();
     loadNWLocal();
-    const scaleBtn = $("nwScaleBtn");
+
+    const scaleBtn = $("nwScaleToggle");
     if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
-    const liveBtn = $("nwLiveBtn");
+    const liveBtn = $("nwLiveToggle");
     if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
-    attachNWTFHandlers();
-    drawNW();
 
     loadEvents();
     renderEvents();
 
-    // cloud merge
+    drawNWThrottled(true);
     await cloudPull();
   }
 
@@ -2897,6 +2882,8 @@ window.addEventListener("offline", () => {
     refreshConnUI();
     await refreshLoadAllOnce();
   }
+
+  setTimeout(() => setUIReady(true), 1200);
 })();
 
 /* ================= LOOP ================= */
@@ -2915,10 +2902,9 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
-  // price event thresholds (24h)
   if (tfReady.d) maybePriceEvent(pD);
 
-  // Chart sign color
+  // chart sign
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
@@ -2935,7 +2921,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
-  // Values + flash extremes
+  // min/max/open + flash
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -3020,15 +3006,15 @@ function animate() {
   setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  // APR (animated like price)
+  // APR
   const oapr = displayed.apr;
   displayed.apr = tick(displayed.apr, apr);
   colorNumber($("apr"), displayed.apr, oapr, 2);
 
-  // Last update at bottom
+  // last update
   setText("updated", "Last update: " + nowLabel());
 
-  /* ================= NET WORTH UI ================= */
+  // NET WORTH UI (throttled chart)
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
@@ -3036,35 +3022,18 @@ function animate() {
     const onw = displayed.netWorthUsd;
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
-
-    // keep pnl & chart updated (live view filters window)
-    drawNW();
+    drawNWThrottled(false);
   }
 
-  updateNetWorthMiniRows();
+  updateNetWorthAssetRow();
 
-  // densità: registra spesso (solo live + address)
-  if (address && liveMode) recordNetWorthPoint();
+  if (address && liveMode) recordNetWorthPointThrottled();
 
-  // cloud push if dirty (debounced)
   if (cloudDirty && hasInternet()) scheduleCloudPush();
 
   refreshConnUI();
   setValidatorUI("ready");
 
-  // keep dot fluid
-  if (netWorthChart) netWorthChart.draw();
-
   requestAnimationFrame(animate);
 }
 animate();
-
-/* ================= WHAT WAS ADDED (this file) =================
-✅ FIX: Coming soon close works always (button + background + ESC)
-✅ Menu: Event opens dedicated Events page; other items open coming soon overlay
-✅ Validator card: single card, Injective validator fetched (if delegations exist), status dot yellow/green/red
-✅ Cloud Sync: real GET/POST to /api/point with Saving/Synced/Error reflected in menu + footer
-✅ Address search: wallet stays displayed, input clears after commit
-✅ Events: toast slide-down + persistence + events table rendering; stake/reward/price events added
-✅ Pull-to-refresh: enabled only in REFRESH mode (mobile), shows spinner and refreshes data
-=============================================================== */
