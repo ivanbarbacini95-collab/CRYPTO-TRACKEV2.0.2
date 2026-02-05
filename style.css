@@ -1451,3 +1451,73 @@ body.card-expanded{
   - Reduced expand button size and placed it safely inside cards
   - Added fullscreen card style (JS toggles .fullscreen + body.card-expanded)
 */
+
+/* ===== PATCH: titolo colorato e centrato (compatibile con HTML inviato) ===== */
+.header-grid{
+  display:grid;
+  grid-template-columns: 56px 1fr minmax(160px, 320px);
+  align-items:center;
+  gap: 10px;
+}
+
+.header-center{
+  text-align:center;
+  justify-self:center;
+  min-width: 0;
+}
+
+.brand-title{
+  margin: 0;
+  line-height: 1.05;
+  font-weight: 900;
+  letter-spacing: .2px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.brand-title .dot{
+  opacity:.9;
+  margin: 0 .25rem;
+  color: rgba(250,204,21,.95);
+  text-shadow: 0 0 18px rgba(250,204,21,.25);
+}
+
+.brand-title .title-full{
+  background: linear-gradient(90deg, rgba(250,204,21,.95), rgba(59,130,246,.95), rgba(34,197,94,.95));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 10px 40px rgba(0,0,0,.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 92vw;
+}
+
+.brand-title .title-compact{
+  display:none;
+  background: linear-gradient(90deg, rgba(250,204,21,.95), rgba(59,130,246,.95));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 10px 40px rgba(0,0,0,.35);
+}
+
+.subtitle{
+  margin-top: .2rem;
+  font-weight: 700;
+  opacity: .72;
+  font-size: .86rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 92vw;
+}
+
+@media (max-width: 420px){
+  .header-grid{ grid-template-columns: 48px 1fr 56px; }
+  .brand-title .title-full{ display:none; }
+  .brand-title .title-compact{ display:inline; }
+  .subtitle{ font-size:.78rem; }
+}
