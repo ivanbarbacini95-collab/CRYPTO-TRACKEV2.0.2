@@ -24,17 +24,10 @@
       <div class="drawer-toggles">
         <button class="toggle-btn" id="themeToggle" aria-label="Tema">
           <span id="themeIcon">🌙</span>
-          <span class="toggle-label" id="themeLabel">Theme</span>
         </button>
 
         <button class="toggle-btn" id="liveToggle" aria-label="Live o Refresh">
           <span id="liveIcon">📡</span>
-          <span class="toggle-label" id="liveLabel">Live</span>
-        </button>
-
-        <button class="toggle-btn" id="privacyToggle" aria-label="Privacy Mode">
-          <span id="privacyIcon">👁️</span>
-          <span class="toggle-label" id="privacyLabel">Show</span>
         </button>
       </div>
     </div>
@@ -43,14 +36,13 @@
       <button class="nav-item" data-page="home">HOME</button>
       <button class="nav-item" data-page="market">MARKET</button>
       <button class="nav-item active" data-page="dashboard">MY DASHBOARD</button>
-      <button class="nav-item" data-page="tools">TOOLS</button>
-      <button class="nav-item" data-page="events">EVENTS</button>
+      <button class="nav-item" data-page="event">EVENT</button>
 
       <div class="nav-spacer"></div>
 
       <button class="nav-item settings-item" data-page="settings">
         SETTINGS
-        <span class="nav-version">v2.1.0</span>
+        <span class="nav-version">v2.0.2</span>
       </button>
     </nav>
 
@@ -61,7 +53,7 @@
       <div class="drawer-meta">
         <div class="drawer-meta-row">
           <span class="drawer-meta-label">App</span>
-          <span class="drawer-meta-value">v2.1.0</span>
+          <span class="drawer-meta-value">v2.0.2</span>
         </div>
 
         <div class="drawer-meta-row">
@@ -80,7 +72,7 @@
     </div>
   </aside>
 
-  <!-- COMING SOON OVERLAY -->
+  <!-- COMING SOON OVERLAY (per Home/Market/Settings) -->
   <div class="coming-soon" id="comingSoon" aria-hidden="true">
     <div class="coming-card">
       <div class="coming-title" id="comingTitle">COMING SOON 🚀</div>
@@ -89,7 +81,7 @@
     </div>
   </div>
 
-  <!-- TOAST EVENTS -->
+  <!-- EVENT TOAST (compare dall’alto, dura ~2s) -->
   <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
 
   <!-- APP ROOT -->
@@ -120,12 +112,8 @@
       </div>
 
       <div class="header-meta-right">
-        <!-- Wallet + copy button -->
+        <!-- Wallet “in evidenza” a sinistra di status -->
         <div id="addressDisplay" class="address-display"></div>
-        
-        <button class="copy-address-btn" id="copyAddressBtn" aria-label="Copy address">
-          📋
-        </button>
 
         <div class="connection-status" id="connectionStatus">
           <span class="status-dot" id="statusDot"></span>
@@ -147,12 +135,19 @@
 
             <div class="networth-top">
               <div class="label networth-title">Net Worth</div>
+
+              <!-- expand icon (piccola, non invade) -->
               <button class="card-expand" id="nwExpand" type="button" aria-label="Expand Net Worth">⤢</button>
             </div>
 
-            <!-- scale toggle -->
+            <!-- scale toggle sotto (separato dall’expand) -->
             <div class="networth-top2">
               <button class="nw-scale-btn" id="nwScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
+
+              <!-- LIVE toggle dedicato al net worth -->
+              <button class="nw-live-btn" id="nwLiveToggle" type="button" aria-label="Net worth live toggle">
+                LIVE
+              </button>
             </div>
 
             <div class="networth-metrics">
@@ -173,10 +168,29 @@
                 <button class="tf-btn" data-tf="1y" type="button">1Y</button>
                 <button class="tf-btn" data-tf="all" type="button">ALL</button>
               </div>
+
+              <!-- mini asset row: logo Injective + qty/price/usd -->
+              <div class="networth-asset">
+                <img
+                  class="inj-logo"
+                  src="https://upload.wikimedia.org/wikipedia/commons/3/3d/Injective_l.png"
+                  alt="Injective"
+                  loading="lazy"
+                />
+                <span class="nw-asset-name">Injective</span>
+
+                <span class="nw-asset-qty" id="nwAssetQty">0.0000</span>
+                <span class="nw-asset-mid">INJ</span>
+                <span class="nw-asset-sep">·</span>
+                <span class="nw-asset-price" id="nwAssetPrice">$0.00</span>
+                <span class="nw-asset-sep">→</span>
+                <span class="nw-asset-usd" id="nwAssetUsd">$0.00</span>
+              </div>
             </div>
 
             <div class="networth-foot">
-              <!-- Total owned -->
+
+              <!-- box 1: Total owned -->
               <div class="nw-mini nw-mini-single">
                 <div class="nw-mini-left">
                   <img
@@ -186,8 +200,8 @@
                     loading="lazy"
                   />
                   <div class="nw-mini-meta">
-                    <div class="nw-mini-title">INJ Total Owned</div>
-                    <div class="nw-mini-sub">Staked + Available + Rewards</div>
+                    <div class="nw-mini-title">INJ</div>
+                    <div class="nw-mini-sub">Total owned (staked + available + rewards)</div>
                   </div>
                 </div>
                 <div class="nw-mini-right">
@@ -195,7 +209,7 @@
                 </div>
               </div>
 
-              <!-- Validator -->
+              <!-- box 2: Validator (solo UI, i dati arrivano dal JS) -->
               <div class="nw-mini nw-mini-validator" id="validatorCard">
                 <div class="nw-mini-left">
                   <img
@@ -214,6 +228,7 @@
                   <span class="validator-dot" id="validatorDot" aria-hidden="true"></span>
                 </div>
               </div>
+
             </div>
           </div>
 
@@ -230,15 +245,6 @@
             <div class="value-row"><span id="stake">0.0000</span></div>
             <div class="sub-row" id="stakeUsd">≈ $0.00</div>
 
-            <!-- Scale toggle -->
-            <div class="stake-scale-row">
-              <button class="stake-scale-btn" id="stakeScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
-              <div class="range-control">
-                <button class="range-config-btn" id="stakeRangeConfig" type="button" aria-label="Configure range">⚙️</button>
-                <span class="range-label">Range: 0-1000</span>
-              </div>
-            </div>
-
             <div class="stake-bar-container bar-container stake-container">
               <div id="stakeBar" class="bar-fill stake-fill"></div>
               <div id="stakeLine" class="bar-line"></div>
@@ -254,14 +260,6 @@
               <button class="card-expand" id="stakeExpand" type="button" aria-label="Expand Staked">⤢</button>
             </div>
 
-            <!-- Timeframe -->
-            <div class="stake-timeframe">
-              <button class="tf-btn active" data-tf="live" type="button">LIVE</button>
-              <button class="tf-btn" data-tf="1d" type="button">1D</button>
-              <button class="tf-btn" data-tf="1w" type="button">1W</button>
-              <button class="tf-btn" data-tf="1m" type="button">1M</button>
-            </div>
-
             <div class="stake-chart-wrap">
               <canvas id="stakeChart"></canvas>
             </div>
@@ -272,15 +270,6 @@
             <div class="label">Rewards</div>
             <div class="value-row"><span id="rewards">0.0000000</span></div>
             <div class="sub-row" id="rewardsUsd">≈ $0.00</div>
-
-            <!-- Scale toggle -->
-            <div class="reward-scale-row">
-              <button class="reward-scale-btn" id="rewardScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
-              <div class="range-control">
-                <button class="range-config-btn" id="rewardRangeConfig" type="button" aria-label="Configure range">⚙️</button>
-                <span class="range-label">Range: 0-0.1</span>
-              </div>
-            </div>
 
             <div class="reward-bar-container bar-container reward-container">
               <div id="rewardBar" class="bar-fill reward-fill"></div>
@@ -297,44 +286,21 @@
               <button class="card-expand" id="rewardExpand" type="button" aria-label="Expand Rewards">⤢</button>
             </div>
 
-            <!-- Timeframe -->
-            <div class="reward-timeframe">
-              <button class="tf-btn active" data-tf="live" type="button">LIVE</button>
-              <button class="tf-btn" data-tf="1d" type="button">1D</button>
-              <button class="tf-btn" data-tf="1w" type="button">1W</button>
-              <button class="tf-btn" data-tf="1m" type="button">1M</button>
-            </div>
-
             <div class="reward-chart-wrap">
               <canvas id="rewardChart"></canvas>
             </div>
 
-            <!-- Reward estimates -->
-            <div class="reward-estimates">
-              <div class="estimate-item">
-                <span class="estimate-label">Daily</span>
-                <span class="estimate-value" id="dailyEstimate">0.0000</span>
-              </div>
-              <div class="estimate-item">
-                <span class="estimate-label">Weekly</span>
-                <span class="estimate-value" id="weeklyEstimate">0.0000</span>
-              </div>
-              <div class="estimate-item">
-                <span class="estimate-label">Monthly</span>
-                <span class="estimate-value" id="monthlyEstimate">0.0000</span>
-              </div>
-            </div>
-
-            <!-- Filter -->
             <div class="reward-tools">
+              <button id="rewardLiveBtn" class="mini-btn" type="button">LIVE</button>
+
               <div class="mini-select-wrap">
-                <span class="mini-select-label">Filter</span>
+                <span class="mini-select-label">Filtro</span>
                 <select id="rewardFilter" class="mini-select">
-                  <option value="0">All</option>
+                  <option value="0">Tutti</option>
+                  <option value="0.00001">≥ 0.00001</option>
                   <option value="0.00005">≥ 0.00005</option>
                   <option value="0.0001">≥ 0.0001</option>
                   <option value="0.0002">≥ 0.0002</option>
-                  <option value="0.0005">≥ 0.0005</option>
                 </select>
               </div>
             </div>
@@ -345,24 +311,18 @@
             </div>
           </div>
 
-          <!-- 5) 1D PRICE CHART -->
-          <div class="card chart-card">
-            <div class="label">INJ Price Chart</div>
+          <!-- 5) APR (card separata) -->
+          <div class="card">
+            <div class="label">APR</div>
+            <div class="value-row"><span id="apr">0%</span></div>
+          </div>
 
-            <div class="chart-tools">
-              <button class="chart-scale-btn" id="priceScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
-              <div class="chart-timeframe">
-                <button class="tf-btn active" data-tf="live" type="button">LIVE</button>
-                <button class="tf-btn" data-tf="5m" type="button">5M</button>
-                <button class="tf-btn" data-tf="1d" type="button">1D</button>
-                <button class="tf-btn" data-tf="1w" type="button">1W</button>
-                <button class="tf-btn" data-tf="1m" type="button">1M</button>
-                <button class="tf-btn" data-tf="1y" type="button">1Y</button>
-              </div>
-            </div>
+          <!-- 6) 1D PRICE CHART -->
+          <div class="card chart-card">
+            <div class="label">1D Price Chart</div>
 
             <div class="card-tools">
-              <button class="card-expand" id="priceChartExpand" type="button" aria-label="Expand Price Chart">⤢</button>
+              <button class="card-expand" id="priceChartExpand" type="button" aria-label="Expand 1D Price Chart">⤢</button>
             </div>
 
             <div class="chart-overlay" id="chartOverlay">
@@ -372,7 +332,7 @@
             <canvas id="priceChart"></canvas>
           </div>
 
-          <!-- 6) INJ PRICE -->
+          <!-- 7) INJ PRICE -->
           <div class="card price-card">
             <div class="label">INJ Price</div>
             <div class="value-row"><span id="price">0.0000</span></div>
@@ -382,7 +342,7 @@
               <span class="pct" id="pct24h">0.00%</span>
             </div>
             <div class="price-bar-container bar-container">
-              <div class="bar-timeframe-label">1D</div>
+              <span class="bar-label">1D</span>
               <div id="priceBar" class="bar-fill"></div>
               <div class="open-marker" aria-hidden="true"></div>
               <div id="priceLine" class="bar-line"></div>
@@ -398,7 +358,7 @@
               <span class="pct" id="pctWeek">0.00%</span>
             </div>
             <div class="week-bar-container bar-container">
-              <div class="bar-timeframe-label">1W</div>
+              <span class="bar-label">1W</span>
               <div id="weekBar" class="bar-fill"></div>
               <div class="open-marker" aria-hidden="true"></div>
               <div id="weekLine" class="bar-line"></div>
@@ -414,7 +374,7 @@
               <span class="pct" id="pctMonth">0.00%</span>
             </div>
             <div class="month-bar-container bar-container">
-              <div class="bar-timeframe-label">1M</div>
+              <span class="bar-label">1M</span>
               <div id="monthBar" class="bar-fill"></div>
               <div class="open-marker" aria-hidden="true"></div>
               <div id="monthLine" class="bar-line"></div>
@@ -426,174 +386,18 @@
             </div>
           </div>
 
-          <!-- 7) APR CARD (con grafico) -->
-          <div class="card apr-card">
-            <div class="label">APR</div>
-            <div class="value-row"><span id="apr">0%</span></div>
-            
-            <!-- Tools per il grafico -->
-            <div class="apr-tools">
-              <button class="apr-scale-btn" id="aprScaleToggle" type="button" aria-label="Scale toggle">LIN</button>
-              <button class="apr-timeframe-btn active" data-tf="live" type="button">LIVE</button>
-              <button class="apr-timeframe-btn" data-tf="1d" type="button">1D</button>
-              <button class="apr-timeframe-btn" data-tf="1w" type="button">1W</button>
-              <button class="apr-timeframe-btn" data-tf="1m" type="button">1M</button>
-            </div>
-            
-            <!-- Container del grafico -->
-            <div class="apr-chart-wrap">
-              <canvas id="aprChart"></canvas>
-            </div>
-            
-            <!-- Expand button -->
-            <div class="card-tools">
-              <button class="card-expand" id="aprExpand" type="button" aria-label="Expand APR Chart">⤢</button>
-            </div>
-          </div>
-
         </div>
       </section>
 
-      <!-- ========== TOOLS PAGE ========== -->
-      <section class="page page-tools" id="pageTools" data-page="tools" aria-hidden="true">
-        <div class="tools-head">
-          <h2>Tools</h2>
-          <div class="tools-sub">Utility tools for Injective</div>
-        </div>
-
-        <div class="cards-wrapper tools-grid">
-          <!-- Injective Converter -->
-          <div class="card converter-card">
-            <div class="label">Injective Converter</div>
-            
-            <div class="converter-inputs">
-              <div class="converter-row">
-                <label class="converter-label">Amount</label>
-                <input type="number" id="convertAmount" class="converter-input" value="100" min="0" step="any">
-                <select id="convertCurrency" class="converter-select">
-                  <option value="EUR">EUR</option>
-                  <option value="USD">USD</option>
-                </select>
-              </div>
-              
-              <div class="converter-row">
-                <label class="converter-label">Exchange Rate</label>
-                <input type="number" id="exchangeRate" class="converter-input" value="1.08" min="0" step="0.01">
-                <span class="converter-hint">EUR/USD</span>
-              </div>
-              
-              <div class="converter-row">
-                <button class="converter-btn" id="convertBtn">Convert</button>
-              </div>
-            </div>
-            
-            <div class="converter-results">
-              <div class="result-item">
-                <span class="result-label">In EUR:</span>
-                <span class="result-value" id="resultEur">€100.00</span>
-              </div>
-              <div class="result-item">
-                <span class="result-label">In USD:</span>
-                <span class="result-value" id="resultUsd">$108.00</span>
-              </div>
-              <div class="result-item highlight">
-                <span class="result-label">INJ you get:</span>
-                <span class="result-value" id="resultInj">0.0000 INJ</span>
-              </div>
-            </div>
-            
-            <div class="converter-footer">
-              <span class="converter-note">Using current INJ price: $<span id="currentInjPrice">0.00</span></span>
-            </div>
-          </div>
-
-          <!-- Market Cap Comparator -->
-          <div class="card marketcap-card">
-            <div class="label">Market Cap Comparator</div>
-            
-            <div class="marketcap-controls">
-              <div class="marketcap-row">
-                <label class="marketcap-label">Compare INJ with</label>
-                <select id="compareCurrency" class="marketcap-select">
-                  <option value="BTC">Bitcoin (BTC)</option>
-                  <option value="ETH">Ethereum (ETH)</option>
-                  <option value="SOL">Solana (SOL)</option>
-                  <option value="ATOM">Cosmos (ATOM)</option>
-                  <option value="DOT">Polkadot (DOT)</option>
-                </select>
-              </div>
-              
-              <div class="marketcap-row">
-                <label class="marketcap-label">Format</label>
-                <div class="format-buttons">
-                  <button class="format-btn active" data-format="thousands">K</button>
-                  <button class="format-btn" data-format="millions">M</button>
-                  <button class="format-btn" data-format="billions">B</button>
-                  <button class="format-btn" data-format="trillions">T</button>
-                </div>
-              </div>
-              
-              <div class="marketcap-row">
-                <button class="marketcap-btn" id="compareBtn">Compare</button>
-              </div>
-            </div>
-            
-            <div class="marketcap-results">
-              <div class="comparison-item">
-                <div class="comparison-coin">
-                  <span class="coin-name">INJ</span>
-                  <span class="coin-cap" id="injCap">$0.00</span>
-                </div>
-                <div class="comparison-bar">
-                  <div class="comparison-fill inj-fill" id="injBar"></div>
-                </div>
-              </div>
-              
-              <div class="comparison-item">
-                <div class="comparison-coin">
-                  <span class="coin-name" id="compareCoinName">BTC</span>
-                  <span class="coin-cap" id="compareCap">$0.00</span>
-                </div>
-                <div class="comparison-bar">
-                  <div class="comparison-fill compare-fill" id="compareBar"></div>
-                </div>
-              </div>
-              
-              <div class="comparison-ratio">
-                <span class="ratio-label">Ratio:</span>
-                <span class="ratio-value" id="capRatio">0.00%</span>
-              </div>
-            </div>
-            
-            <div class="marketcap-footer">
-              <span class="marketcap-note">Data updates every 5 minutes</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ========== EVENTS PAGE ========== -->
-      <section class="page page-events" id="pageEvents" data-page="events" aria-hidden="true">
+      <!-- ========== EVENTS PAGE (dedicata) ========== -->
+      <section class="page page-events" id="pageEvents" data-page="event" aria-hidden="true">
         <div class="events-head">
           <div class="events-title">
-            <h2>Events</h2>
+            <h2>Event</h2>
             <div class="events-sub">On-chain actions + key price moves (24h)</div>
           </div>
 
-          <div class="events-controls">
-            <select id="eventsFilter" class="events-filter">
-              <option value="all">All Events</option>
-              <option value="tx">Transactions</option>
-              <option value="price">Price Moves</option>
-              <option value="apr">APR Changes</option>
-              <option value="reward">Rewards</option>
-              <option value="exchange">Exchange Flows</option>
-            </select>
-            
-            <div class="events-badge" id="eventsBadge" style="display: none;">0</div>
-            
-            <button class="events-clear" id="eventsClearBtn" type="button">Clear All</button>
-          </div>
+          <button class="events-clear" id="eventsClearBtn" type="button">Clear</button>
         </div>
 
         <div class="events-card">
@@ -601,9 +405,8 @@
             <table class="events-table" aria-label="Event table">
               <thead>
                 <tr>
-                  <th>Type</th>
                   <th>Event</th>
-                  <th>Date & Time</th>
+                  <th>Date</th>
                   <th>Details</th>
                   <th>Status</th>
                 </tr>
@@ -614,100 +417,22 @@
             </table>
           </div>
 
-          <div class="events-pagination" id="eventsPagination">
-            <button class="page-btn" id="prevPage" disabled>← Previous</button>
-            <span class="page-info" id="pageInfo">Page 1 of 1</span>
-            <button class="page-btn" id="nextPage" disabled>Next →</button>
-          </div>
-
           <div class="events-empty" id="eventsEmpty">
             No events yet. They will appear here automatically.
           </div>
         </div>
       </section>
 
-      <!-- ========== SETTINGS PAGE ========== -->
-      <section class="page page-settings" id="pageSettings" data-page="settings" aria-hidden="true">
-        <div class="settings-head">
-          <h2>Settings</h2>
-          <div class="settings-sub">Configure your dashboard preferences</div>
-        </div>
-        
-        <div class="settings-card">
-          <!-- General Settings -->
-          <div class="settings-section">
-            <h3 class="settings-section-title">General</h3>
-            <div class="settings-option">
-              <label class="settings-label">Default Mode</label>
-              <div class="settings-control">
-                <select id="defaultMode" class="settings-select">
-                  <option value="live">Live (Realtime)</option>
-                  <option value="refresh">Refresh (Manual)</option>
-                </select>
-              </div>
-            </div>
-            
-            <div class="settings-option">
-              <label class="settings-label">Default Theme</label>
-              <div class="settings-control">
-                <select id="defaultTheme" class="settings-select">
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Advanced Settings -->
-          <div class="settings-section">
-            <h3 class="settings-section-title">Advanced</h3>
-            
-            <!-- Reset Data -->
-            <div class="settings-option warning">
-              <label class="settings-label">Reset Chart Data</label>
-              <div class="settings-control">
-                <select id="resetSelect" class="settings-select">
-                  <option value="">Select data to reset...</option>
-                  <option value="stake">Staking Chart</option>
-                  <option value="rewards">Rewards Chart</option>
-                  <option value="networth">Net Worth Chart</option>
-                  <option value="apr">APR Chart</option>
-                  <option value="all">All Charts</option>
-                </select>
-              </div>
-              <div class="settings-hint">
-                This will delete all historical chart data for the selected category.
-              </div>
-              
-              <div class="reset-confirm" id="resetConfirm" style="display: none;">
-                <div class="reset-warning">
-                  ⚠️ This action cannot be undone. All selected chart data will be permanently deleted.
-                </div>
-                <div class="reset-actions">
-                  <button class="reset-btn cancel" id="resetCancel">Cancel</button>
-                  <button class="reset-btn confirm" id="resetExecute">Confirm Reset</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Actions -->
-          <div class="settings-actions">
-            <button class="settings-save" id="settingsSave">Save Settings</button>
-          </div>
-        </div>
-      </section>
-
     </main>
 
-    <!-- LAST UPDATE -->
+    <!-- LAST UPDATE in fondo pagina -->
     <div id="updated" class="last-update">Last update: --:--</div>
 
     <!-- Footer pro -->
     <div class="pro-footer" id="proFooter">
       <span class="pro-pill">INJ Portfolio</span>
       <span class="pro-dot">•</span>
-      <span class="pro-meta">v2.1.0</span>
+      <span class="pro-meta">v2.0.2</span>
       <span class="pro-dot">•</span>
       <span class="pro-meta" id="cloudStatus">Cloud: —</span>
       <span class="pro-meta cloud-points" id="cloudHistory">· 0 pts</span>
@@ -715,32 +440,16 @@
 
   </div>
 
-  <!-- Range Configuration Modal -->
-  <div class="range-modal" id="rangeModal" aria-hidden="true">
-    <div class="range-modal-content">
-      <div class="range-modal-header">
-        <h3>Configure Range</h3>
-        <button class="range-modal-close" id="rangeModalClose">×</button>
-      </div>
-      <div class="range-modal-body">
-        <div class="range-input-group">
-          <label for="rangeMin">Minimum:</label>
-          <input type="number" id="rangeMin" step="any" placeholder="0">
-        </div>
-        <div class="range-input-group">
-          <label for="rangeMax">Maximum:</label>
-          <input type="number" id="rangeMax" step="any" placeholder="1000">
-        </div>
-        <div class="range-hint">
-          This range will be saved and applied to the chart.
-        </div>
-      </div>
-      <div class="range-modal-footer">
-        <button class="range-btn cancel" id="rangeCancel">Cancel</button>
-        <button class="range-btn apply" id="rangeApply">Apply</button>
-      </div>
-    </div>
-  </div>
-
+  <!--
+    ✅ HTML changes (v2.0.2):
+    - Added dedicated Events page (pageEvents + events table + clear button)
+    - Added toastHost for “event arrived” slide-down notifications
+    - Added Cloud Sync status area inside drawer menu (cloudMenuDot/cloudMenuStatus/cloudMenuLast)
+    - Fixed Coming Soon overlay structure (comingClose always present)
+    - Restored centered title layout
+    - Replaced purple dot with Injective high-res logo (Wikimedia PNG)
+    - Prepared expand buttons inside cards (⤢) without overlapping metrics
+    - Last update moved to bottom of the app
+  -->
 </body>
 </html>
