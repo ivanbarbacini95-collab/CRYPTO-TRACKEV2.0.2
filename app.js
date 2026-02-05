@@ -1,6 +1,6 @@
 /* =========================================================
-   Injective Portfolio • v2.1.0
-   app.js — ALL IMPROVEMENTS INCLUDED
+   Injective Portfolio • v2.0.2
+   app.js — FULL FILE (no cuts)
    ========================================================= */
 
 /* ================= CONFIG ================= */
@@ -14,18 +14,19 @@ const DAY_MINUTES = 24 * 60;
 const ONE_MIN_MS = 60_000;
 
 const STAKE_TARGET_MAX = 1000;
-const REWARD_WITHDRAW_THRESHOLD = 0.0002;
+const REWARD_WITHDRAW_THRESHOLD = 0.0002; // INJ
 
 /* persistence versions */
-const STAKE_LOCAL_VER = 4;
-const REWARD_WD_LOCAL_VER = 3;
-const NW_LOCAL_VER = 3;
-const EV_LOCAL_VER = 2;
-const APR_LOCAL_VER = 1;
+const STAKE_LOCAL_VER = 3; // bumped: labels store timestamps for cross-device merge
+const REWARD_WD_LOCAL_VER = 2;
+const NW_LOCAL_VER = 2;    // bumped: allow live window state + scale
+const EV_LOCAL_VER = 1;
 
 /* net worth limits */
 const NW_MAX_POINTS = 4800;
-const NW_LIVE_WINDOW_MS = 2 * 60 * 1000;
+
+/* Net Worth live window */
+const NW_LIVE_WINDOW_MS = 2 * 60 * 1000; // ✅ 2 minutes (as requested)
 
 /* cloud */
 const CLOUD_API = "/api/point";
@@ -51,6 +52,7 @@ function fmtHHMMSS(ms) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
+/* storage-label (timestamp) helpers */
 function tsLabel(ms = Date.now()) { return String(Math.floor(ms)); }
 function labelToTs(lbl) {
   if (lbl == null) return 0;
@@ -60,6 +62,7 @@ function labelToTs(lbl) {
   return Number.isFinite(t) ? t : 0;
 }
 
+/* UI labels */
 function nowLabel() { return new Date().toLocaleTimeString(); }
 function shortAddr(a) { return a && a.length > 18 ? (a.slice(0, 10) + "…" + a.slice(-6)) : (a || ""); }
 function setText(id, txt) { const el = $(id); if (el) el.textContent = txt; }
@@ -94,14 +97,12 @@ window.addEventListener("unhandledrejection", (e) => {
   console.error("Promise Error:", e?.reason || e);
 });
 
-/* ================= THEME / MODE / PRIVACY ================= */
+/* ================= THEME / MODE ================= */
 const THEME_KEY = "inj_theme";
-const MODE_KEY  = "inj_mode";
-const PRIVACY_KEY = "inj_privacy";
+const MODE_KEY  = "inj_mode"; // live | refresh
 
 let theme = localStorage.getItem(THEME_KEY) || "dark";
 let liveMode = (localStorage.getItem(MODE_KEY) || "live") === "live";
-let privacyMode = localStorage.getItem(PRIVACY_KEY) === "true";
 
 function axisGridColor() {
   return (document.body.dataset.theme === "light") ? "rgba(15,23,42,.14)" : "rgba(249,250,251,.10)";
@@ -119,21 +120,7 @@ function applyTheme(t){
   refreshChartsTheme();
 }
 
-function applyPrivacyMode(enable){
-  privacyMode = enable;
-  localStorage.setItem(PRIVACY_KEY, enable);
-  if (enable) {
-    document.body.classList.add("privacy-mode");
-    if ($("privacyIcon")) $("privacyIcon").textContent = "🙈";
-    if ($("privacyLabel")) $("privacyLabel").textContent = "Hide";
-  } else {
-    document.body.classList.remove("privacy-mode");
-    if ($("privacyIcon")) $("privacyIcon").textContent = "👁️";
-    if ($("privacyLabel")) $("privacyLabel").textContent = "Show";
-  }
-}
-
-/* ================= CHARTJS ZOOM REGISTER ================= */
+/* ================= CHARTJS ZOOM REGISTER (NO CRASH) ================= */
 let ZOOM_OK = false;
 function tryRegisterZoom(){
   try{
@@ -239,6 +226,7 @@ function colorNumber(el, n, o, d) {
   }).join("");
 }
 
+/* money with digit coloring */
 function colorMoney(el, n, o, decimals = 2){
   if (!el) return;
   n = safe(n); o = safe(o);
@@ -328,7 +316,6 @@ const searchBtn = $("searchBtn");
 const addressInput = $("addressInput");
 const addressDisplay = $("addressDisplay");
 const menuBtn = $("menuBtn");
-const copyAddressBtn = $("copyAddressBtn");
 
 let address = localStorage.getItem("inj_address") || "";
 let pendingAddress = address || "";
@@ -353,7 +340,7 @@ function closeSearch() {
   addressInput?.blur();
 }
 
-if (addressInput) addressInput.value = "";
+if (addressInput) addressInput.value = ""; // ✅ start empty (we show wallet in display)
 
 if (searchBtn) {
   searchBtn.addEventListener("click", (e) => {
@@ -366,12 +353,15 @@ if (searchBtn) {
 
 if (addressInput) {
   addressInput.addEventListener("focus", () => openSearch(), { passive: true });
+
   addressInput.addEventListener("input", (e) => { pendingAddress = e.target.value.trim(); }, { passive: true });
+
   addressInput.addEventListener("keydown", async (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       const v = pendingAddress;
       await commitAddress(v);
+      // ✅ keep wallet displayed, but clear input for next search
       addressInput.value = "";
       pendingAddress = "";
       closeSearch();
@@ -384,46 +374,12 @@ if (addressInput) {
   });
 }
 
+/* close search only if clicking outside */
 document.addEventListener("click", (e) => {
   if (!searchWrap) return;
   if (searchWrap.contains(e.target)) return;
   closeSearch();
 }, { passive: true });
-
-/* ================= COPY ADDRESS ================= */
-function setupCopyAddress() {
-  if (!copyAddressBtn) return;
-  
-  copyAddressBtn.addEventListener("click", async () => {
-    if (!address) return;
-    
-    try {
-      await navigator.clipboard.writeText(address);
-      
-      copyAddressBtn.classList.add("copied");
-      copyAddressBtn.textContent = "✓";
-      
-      const tempToast = document.createElement("div");
-      tempToast.className = "toast";
-      tempToast.innerHTML = `
-        <div class="toast-row">
-          <div class="toast-title">Address Copied</div>
-        </div>
-        <div class="toast-sub">${shortAddr(address)}</div>
-      `;
-      $("toastHost")?.appendChild(tempToast);
-      
-      setTimeout(() => {
-        copyAddressBtn.classList.remove("copied");
-        copyAddressBtn.textContent = "📋";
-        try { $("toastHost")?.removeChild(tempToast); } catch {}
-      }, 1500);
-      
-    } catch (err) {
-      console.warn("Copy failed:", err);
-    }
-  }, { passive: true });
-}
 
 /* ================= DRAWER MENU ================= */
 const backdrop = $("backdrop");
@@ -431,10 +387,10 @@ const drawer = $("drawer");
 const drawerNav = $("drawerNav");
 const themeToggle = $("themeToggle");
 const liveToggle = $("liveToggle");
-const privacyToggle = $("privacyToggle");
 const liveIcon = $("liveIcon");
 const modeHint = $("modeHint");
 
+/* cloud status in menu */
 const cloudDotMenu = $("cloudDotMenu");
 const cloudTextMenu = $("cloudTextMenu");
 const cloudPtsMenu = $("cloudPtsMenu");
@@ -468,7 +424,6 @@ document.addEventListener("keydown", (e) => {
     closeDrawer();
     closeComingSoon();
     exitFullscreenCard();
-    closeRangeModal();
   }
 });
 
@@ -477,12 +432,7 @@ themeToggle?.addEventListener("click", (e) => {
   applyTheme(theme === "dark" ? "light" : "dark");
 }, { passive:false });
 
-privacyToggle?.addEventListener("click", (e) => {
-  e?.preventDefault?.();
-  applyPrivacyMode(!privacyMode);
-}, { passive:false });
-
-/* ================= COMING SOON OVERLAY ================= */
+/* ================= COMING SOON overlay (FIX CLOSE) ================= */
 const comingSoon = $("comingSoon");
 const comingTitle = $("comingTitle");
 const comingSub = $("comingSub");
@@ -491,6 +441,7 @@ const comingClose = $("comingClose");
 function pageLabel(key){
   if (key === "home") return "HOME";
   if (key === "market") return "MARKET";
+  if (key === "settings") return "SETTINGS";
   return "PAGE";
 }
 
@@ -507,6 +458,7 @@ function closeComingSoon(){
   comingSoon.setAttribute("aria-hidden", "true");
 }
 
+/* ✅ close always works: stop propagation, and also close if click outside card */
 comingClose?.addEventListener("click", (e) => {
   e?.preventDefault?.();
   e?.stopPropagation?.();
@@ -517,24 +469,20 @@ comingSoon?.addEventListener("click", (e) => {
   if (e.target === comingSoon) closeComingSoon();
 }, { passive:true });
 
-/* ================= PAGES ================= */
+/* ================= PAGES (Dashboard / Events) ================= */
 const pageDashboard = $("pageDashboard");
-const pageTools = $("pageTools");
 const pageEvents = $("pageEvents");
-const pageSettings = $("pageSettings");
 
 function showPage(key){
+  // hide all
   pageDashboard?.classList.remove("active");
-  pageTools?.classList.remove("active");
   pageEvents?.classList.remove("active");
-  pageSettings?.classList.remove("active");
 
-  if (key === "dashboard") pageDashboard?.classList.add("active");
-  else if (key === "tools") pageTools?.classList.add("active");
-  else if (key === "events") pageEvents?.classList.add("active");
-  else if (key === "settings") pageSettings?.classList.add("active");
+  if (key === "events") pageEvents?.classList.add("active");
+  else pageDashboard?.classList.add("active");
 }
 
+/* nav active */
 function setActivePage(pageKey){
   const items = drawerNav?.querySelectorAll(".nav-item") || [];
   items.forEach(btn => btn.classList.toggle("active", btn.dataset.page === pageKey));
@@ -550,25 +498,17 @@ drawerNav?.addEventListener("click", (e) => {
   if (page === "dashboard") {
     closeComingSoon();
     showPage("dashboard");
-  } else if (page === "tools") {
-    closeComingSoon();
-    showPage("tools");
-    initToolsPage();
-  } else if (page === "events") {
+  } else if (page === "event" || page === "events") {
     closeComingSoon();
     showPage("events");
     renderEvents();
-  } else if (page === "settings") {
-    closeComingSoon();
-    showPage("settings");
-    initSettingsPage();
   } else {
-    showPage("dashboard");
+    showPage("dashboard"); // keep dashboard under overlay
     openComingSoon(page);
   }
 }, { passive:true });
 
-/* ================= FULLSCREEN CARD ================= */
+/* ================= FULLSCREEN CARD (expand icon) ================= */
 let expandedCard = null;
 let expandedBackdrop = null;
 const expandedHiddenMap = new Map();
@@ -588,6 +528,7 @@ function buildExpandedBackdrop(){
 
 function hideNonChartContent(card){
   const hidden = [];
+  // keep: card-tools + any element that contains a canvas
   const keepSet = new Set();
   const tools = card.querySelector(".card-tools");
   if (tools) keepSet.add(tools);
@@ -599,8 +540,10 @@ function hideNonChartContent(card){
     while (p && p !== card) { keepSet.add(p); p = p.parentElement; }
   });
 
+  // hide direct children not in keep chain
   [...card.children].forEach(ch => {
     if (keepSet.has(ch)) return;
+    // if any kept ancestor contains this, don't hide it
     let ok = false;
     for (const k of keepSet) {
       if (k && k !== ch && k.contains && k.contains(ch)) { ok = true; break; }
@@ -632,12 +575,12 @@ function enterFullscreenCard(card){
   card.classList.add("fullscreen");
   hideNonChartContent(card);
 
+  // ensure charts resize properly
   setTimeout(() => {
     try { chart?.resize?.(); } catch {}
     try { stakeChart?.resize?.(); } catch {}
     try { rewardChart?.resize?.(); } catch {}
     try { netWorthChart?.resize?.(); } catch {}
-    try { aprChart?.resize?.(); } catch {}
   }, 120);
 }
 
@@ -654,7 +597,6 @@ function exitFullscreenCard(){
     try { stakeChart?.resize?.(); } catch {}
     try { rewardChart?.resize?.(); } catch {}
     try { netWorthChart?.resize?.(); } catch {}
-    try { aprChart?.resize?.(); } catch {}
   }, 120);
 }
 
@@ -674,9 +616,6 @@ function bindExpandButtons(){
 
 /* ================= EVENTS SYSTEM ================= */
 let eventsAll = [];
-let eventsFilter = "all";
-let eventsPage = 1;
-const EVENTS_PER_PAGE = 25;
 
 function evStoreKey(addr){
   const a = (addr || "").trim();
@@ -703,19 +642,6 @@ function saveEvents(){
   try{
     localStorage.setItem(key, JSON.stringify({ v: EV_LOCAL_VER, t: Date.now(), events: eventsAll.slice(0, 1200) }));
   } catch {}
-}
-
-function updateEventsBadge(){
-  const badge = $("eventsBadge");
-  if (!badge) return;
-  
-  const newEvents = eventsAll.filter(e => e.status === "pending" || e.status === "new").length;
-  if (newEvents > 0) {
-    badge.textContent = newEvents;
-    badge.style.display = "grid";
-  } else {
-    badge.style.display = "none";
-  }
 }
 
 function showToast(ev){
@@ -753,53 +679,40 @@ function pushEvent(ev){
     title: ev.title || "Event",
     detail: ev.detail || "",
     amount: ev.amount ?? null,
-    dir: ev.dir || null,
-    status: ev.status || "new"
+    dir: ev.dir || null, // up|down|null
+    status: ev.status || "pending" // pending|ok|err
   };
   eventsAll.unshift(obj);
   eventsAll = eventsAll.slice(0, 1200);
   saveEvents();
   renderEvents();
   showToast(obj);
-  updateEventsBadge();
 
-  if (obj.status === "new" && obj.kind !== "price") {
+  // simulate “pending → ok” for tx-like events
+  if (obj.status === "pending" && obj.kind !== "price") {
     setTimeout(() => {
       const idx = eventsAll.findIndex(x => x.id === obj.id);
       if (idx >= 0) {
         eventsAll[idx].status = hasInternet() ? "ok" : "err";
         saveEvents();
         renderEvents();
-        updateEventsBadge();
       }
     }, 1500);
   }
 }
 
-function getFilteredEvents(){
-  if (eventsFilter === "all") return eventsAll;
-  return eventsAll.filter(e => e.kind === eventsFilter);
-}
-
 function renderEvents(){
-  const body = $("eventsTbody");
+  const body = $("eventsTableBody");
   const empty = $("eventsEmpty");
-  const pageInfo = $("pageInfo");
-  const prevBtn = $("prevPage");
-  const nextBtn = $("nextPage");
   if (!body) return;
 
   body.innerHTML = "";
-  const filtered = getFilteredEvents();
-  const totalPages = Math.max(1, Math.ceil(filtered.length / EVENTS_PER_PAGE));
-  const startIdx = (eventsPage - 1) * EVENTS_PER_PAGE;
-  const endIdx = Math.min(startIdx + EVENTS_PER_PAGE, filtered.length);
-  const pageEvents = filtered.slice(startIdx, endIdx);
+  const list = eventsAll || [];
 
-  if (empty) empty.style.display = pageEvents.length ? "none" : "block";
-  if (!pageEvents.length) return;
+  if (empty) empty.style.display = list.length ? "none" : "block";
+  if (!list.length) return;
 
-  for (const ev of pageEvents){
+  for (const ev of list){
     const tr = document.createElement("tr");
 
     const dt = new Date(ev.ts || Date.now());
@@ -816,47 +729,17 @@ function renderEvents(){
       <td>${ev.title || "Event"}</td>
       <td style="white-space:nowrap">${when}</td>
       <td>${arrow} ${ev.detail || ""}</td>
-      <td>${ev.status === "ok" ? "✅" : ev.status === "err" ? "❌" : "⏳"}</td>
     `;
     body.appendChild(tr);
   }
-
-  if (pageInfo) pageInfo.textContent = `Page ${eventsPage} of ${totalPages}`;
-  if (prevBtn) prevBtn.disabled = eventsPage <= 1;
-  if (nextBtn) nextBtn.disabled = eventsPage >= totalPages;
 }
 
-function initEventsPage(){
-  $("eventsFilter")?.addEventListener("change", (e) => {
-    eventsFilter = e.target.value;
-    eventsPage = 1;
-    renderEvents();
-  }, { passive: true });
-  
-  $("prevPage")?.addEventListener("click", () => {
-    if (eventsPage > 1) {
-      eventsPage--;
-      renderEvents();
-    }
-  }, { passive: true });
-  
-  $("nextPage")?.addEventListener("click", () => {
-    const filtered = getFilteredEvents();
-    const totalPages = Math.max(1, Math.ceil(filtered.length / EVENTS_PER_PAGE));
-    if (eventsPage < totalPages) {
-      eventsPage++;
-      renderEvents();
-    }
-  }, { passive: true });
-  
-  $("eventsClearBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    eventsAll = [];
-    saveEvents();
-    renderEvents();
-    updateEventsBadge();
-  }, { passive:false });
-}
+$("eventsClearBtn")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  eventsAll = [];
+  saveEvents();
+  renderEvents();
+}, { passive:false });
 
 /* ================= MODE SWITCH + PULL TO REFRESH ================= */
 let accountPollTimer = null;
@@ -911,9 +794,6 @@ function setMode(isLive){
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-  
-  const liveLabel = $("liveLabel");
-  if (liveLabel) liveLabel.textContent = liveMode ? "Live" : "Refresh";
 
   modeLoading = true;
   refreshConnUI();
@@ -952,7 +832,7 @@ liveToggle?.addEventListener("click", (e) => {
   setMode(!liveMode);
 }, { passive:false });
 
-/* Pull-to-refresh */
+/* ✅ Pull-to-refresh only in REFRESH mode */
 let ptr = { startY: 0, pulling: false, shown: false };
 let ptrEl = null;
 
@@ -992,7 +872,7 @@ function initPullToRefresh(){
   let touchId = null;
 
   window.addEventListener("touchstart", (e) => {
-    if (liveMode) return;
+    if (liveMode) return;                // ✅ only in refresh mode
     if (!hasInternet()) return;
     if (document.body.classList.contains("drawer-open")) return;
     if (document.body.classList.contains("card-expanded")) return;
@@ -1181,18 +1061,21 @@ function startKlineWS() {
   };
 }
 
-/* ================= ACCOUNT + VALIDATOR ================= */
+/* ================= ACCOUNT (Injective LCD) + VALIDATOR ================= */
 let validator = { addr: "", moniker: "", status: "unknown" };
 let validatorLoading = false;
 
 function setValidatorUI(state){
   const nameEl = $("validatorName");
+  const addrEl = $("validatorAddr");
   const dotEl  = $("validatorDot");
 
   if (nameEl) nameEl.textContent = validator.moniker || "Validator";
+  if (addrEl) addrEl.textContent = validator.addr ? shortAddr(validator.addr) : "—";
 
   if (!dotEl) return;
 
+  // ✅ request: dot yellow blinking at far right; also color based on state
   dotEl.classList.remove("ok","err");
   dotEl.style.background = "#f59e0b";
 
@@ -1242,6 +1125,7 @@ async function fetchValidatorInfo(valAddr){
   validator.addr = valAddr;
   validator.moniker = moniker;
 
+  // cosmos status values: BOND_STATUS_BONDED / etc
   if (jailed) validator.status = "jailed";
   else if (st.includes("bonded")) validator.status = "bonded";
   else if (st.includes("unbond")) validator.status = "unbonded";
@@ -1290,6 +1174,7 @@ async function loadAccount(isRefresh=false) {
 
   apr = safe(i.inflation) * 100;
 
+  // ✅ validator (first delegation)
   const valAddr = del?.[0]?.delegation?.validator_address || "";
   if (valAddr && valAddr !== validator.addr) {
     validator.addr = valAddr;
@@ -1301,16 +1186,17 @@ async function loadAccount(isRefresh=false) {
     setValidatorUI("ready");
   }
 
+  // series updates
   maybeAddStakePoint(stakeInj);
   maybeRecordRewardWithdrawal(rewardsInj);
+
+  // net worth point
   recordNetWorthPoint();
-  recordAprPoint(apr);
-  updateRewardEstimates();
 
   setUIReady(true);
 }
 
-/* ================= BINANCE REST ================= */
+/* ================= BINANCE REST: snapshot candele 1D/1W/1M ================= */
 async function loadCandleSnapshot(isRefresh=false) {
   if (!isRefresh && !liveMode) return;
   if (!hasInternet()) return;
@@ -1357,8 +1243,6 @@ let hoverActive = false;
 let hoverIndex = null;
 let pinnedIndex = null;
 let isPanning = false;
-let chartScale = "linear";
-let chartTf = "live";
 
 const verticalLinePlugin = {
   id: "verticalLinePlugin",
@@ -1518,7 +1402,6 @@ function initChartToday() {
       scales: {
         x: { display: false },
         y: {
-          type: chartScale === "log" ? "logarithmic" : "linear",
           ticks: { color: axisTickColor() },
           grid: { color: axisGridColor() }
         }
@@ -1549,7 +1432,6 @@ async function loadChartToday(isRefresh=false) {
   if (chart) {
     chart.data.labels = chartLabels;
     chart.data.datasets[0].data = chartData;
-    chart.options.scales.y.type = chartScale === "log" ? "logarithmic" : "linear";
     chart.update("none");
   }
 
@@ -1634,31 +1516,7 @@ function updateChartFrom1mKline(k) {
   chart.update("none");
 }
 
-function initChartControls(){
-  $("priceScaleToggle")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    chartScale = chartScale === "log" ? "linear" : "log";
-    const b = $("priceScaleToggle");
-    if (b) b.textContent = chartScale === "log" ? "LOG" : "LIN";
-    if (chart) {
-      chart.options.scales.y.type = chartScale === "log" ? "logarithmic" : "linear";
-      chart.update("none");
-    }
-  }, { passive: false });
-  
-  const chartTfBtns = document.querySelectorAll(".chart-timeframe .tf-btn");
-  chartTfBtns.forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      chartTf = btn.dataset.tf;
-      chartTfBtns.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      // Here you would implement timeframe switching logic
-    }, { passive: false });
-  });
-}
-
-/* ================= STAKE CHART ================= */
+/* ================= STAKE CHART (persist + cloud-ready labels) ================= */
 let stakeChart = null;
 let stakeLabels = [];
 let stakeData = [];
@@ -1666,9 +1524,6 @@ let stakeMoves = [];
 let stakeTypes = [];
 let lastStakeRecordedRounded = null;
 let stakeBaselineCaptured = false;
-let stakeScale = "linear";
-let stakeTf = "live";
-let stakeCustomRange = { min: 0, max: 1000 };
 
 function stakeStoreKey(addr) {
   const a = (addr || "").trim();
@@ -1687,8 +1542,7 @@ function saveStakeSeriesLocal() {
   try {
     localStorage.setItem(key, JSON.stringify({
       v: STAKE_LOCAL_VER, t: Date.now(),
-      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes,
-      scale: stakeScale, tf: stakeTf, customRange: stakeCustomRange
+      labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes
     }));
     cloudBumpLocal(1);
   } catch {}
@@ -1708,9 +1562,6 @@ function loadStakeSeriesLocal() {
     stakeData   = Array.isArray(obj.data)   ? obj.data   : [];
     stakeMoves  = Array.isArray(obj.moves)  ? obj.moves  : [];
     stakeTypes  = Array.isArray(obj.types)  ? obj.types  : [];
-    stakeScale  = obj.scale === "log" ? "log" : "linear";
-    stakeTf     = obj.tf || "live";
-    stakeCustomRange = obj.customRange || { min: 0, max: 1000 };
 
     const n = stakeData.length;
     stakeLabels = stakeLabels.slice(0, n);
@@ -1790,11 +1641,7 @@ function initStakeChart() {
           },
           grid: { color: axisGridColor() }
         },
-        y: {
-          type: stakeScale === "log" ? "logarithmic" : "linear",
-          ticks: { color: axisTickColor() },
-          grid: { color: axisGridColor() }
-        }
+        y: { ticks: { color: axisTickColor() }, grid: { color: axisGridColor() } }
       }
     }
   });
@@ -1805,7 +1652,6 @@ function drawStakeChart() {
   if (stakeChart) {
     stakeChart.data.labels = stakeLabels;
     stakeChart.data.datasets[0].data = stakeData;
-    stakeChart.options.scales.y.type = stakeScale === "log" ? "logarithmic" : "linear";
     stakeChart.update("none");
   }
 }
@@ -1841,41 +1687,16 @@ function maybeAddStakePoint(currentStake) {
   saveStakeSeriesLocal();
   drawStakeChart();
 
+  // ✅ event
   pushEvent({
     kind: "tx",
     title: delta > 0 ? "Stake increased" : "Stake decreased",
     detail: `${delta > 0 ? "+" : ""}${delta.toFixed(6)} INJ`,
-    status: "new"
+    status: "pending"
   });
 }
 
-function initStakeControls(){
-  $("stakeScaleToggle")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    stakeScale = stakeScale === "log" ? "linear" : "log";
-    const b = $("stakeScaleToggle");
-    if (b) b.textContent = stakeScale === "log" ? "LOG" : "LIN";
-    saveStakeSeriesLocal();
-    drawStakeChart();
-  }, { passive: false });
-  
-  $("stakeRangeConfig")?.addEventListener("click", () => {
-    openRangeModal("stake");
-  }, { passive: true });
-  
-  const stakeTfBtns = document.querySelectorAll(".stake-timeframe .tf-btn");
-  stakeTfBtns.forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      stakeTf = btn.dataset.tf;
-      stakeTfBtns.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      saveStakeSeriesLocal();
-    }, { passive: false });
-  });
-}
-
-/* ================= REWARD WITHDRAWALS ================= */
+/* ================= REWARD WITHDRAWALS (persist + cloud) ================= */
 let wdLabelsAll = [];
 let wdValuesAll = [];
 let wdTimesAll  = [];
@@ -1886,9 +1707,6 @@ let wdTimes  = [];
 
 let wdLastRewardsSeen = null;
 let wdMinFilter = 0;
-let rewardScale = "linear";
-let rewardTf = "live";
-let rewardCustomRange = { min: 0, max: 0.1 };
 
 function wdStoreKey(addr) {
   const a = (addr || "").trim();
@@ -1901,8 +1719,7 @@ function saveWdAllLocal() {
   try {
     localStorage.setItem(key, JSON.stringify({
       v: REWARD_WD_LOCAL_VER, t: Date.now(),
-      labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll,
-      scale: rewardScale, tf: rewardTf, customRange: rewardCustomRange
+      labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll
     }));
     cloudBumpLocal(1);
   } catch {}
@@ -1921,9 +1738,6 @@ function loadWdAllLocal() {
     wdLabelsAll = Array.isArray(obj.labels) ? obj.labels : [];
     wdValuesAll = Array.isArray(obj.values) ? obj.values : [];
     wdTimesAll  = Array.isArray(obj.times)  ? obj.times  : [];
-    rewardScale = obj.scale === "log" ? "log" : "linear";
-    rewardTf    = obj.tf || "live";
-    rewardCustomRange = obj.customRange || { min: 0, max: 0.1 };
 
     rebuildWdView();
     return true;
@@ -2057,7 +1871,6 @@ function initRewardWdChart() {
       scales: {
         x: { ticks: { color: axisTickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }, grid: { color: axisGridColor() } },
         y: {
-          type: rewardScale === "log" ? "logarithmic" : "linear",
           position: "right",
           ticks: { color: axisTickColor(), mirror: true, padding: 6, callback: (val) => fmtSmart(val) },
           grid: { color: axisGridColor() }
@@ -2073,7 +1886,6 @@ function drawRewardWdChart() {
   if (rewardChart) {
     rewardChart.data.labels = wdLabels;
     rewardChart.data.datasets[0].data = wdValues;
-    rewardChart.options.scales.y.type = rewardScale === "log" ? "logarithmic" : "linear";
     rewardChart.update("none");
   }
 }
@@ -2117,20 +1929,27 @@ function syncRewardTimelineUI(forceToEnd=false) {
   meta.textContent = n <= 1 ? `${to}` : `${from} → ${to}`;
 }
 
-function updateRewardEstimates() {
-  const daily = $("dailyEstimate");
-  const weekly = $("weeklyEstimate");
-  const monthly = $("monthlyEstimate");
-  
-  if (!daily || !weekly || !monthly) return;
-  
-  const dailyEst = rewardsInj * (apr / 100) / 365;
-  const weeklyEst = dailyEst * 7;
-  const monthlyEst = dailyEst * 30;
-  
-  daily.textContent = dailyEst.toFixed(6);
-  weekly.textContent = weeklyEst.toFixed(6);
-  monthly.textContent = monthlyEst.toFixed(6);
+function attachRewardTimelineHandlers() {
+  const slider = $("rewardTimeline");
+  slider?.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
+}
+function goRewardLive() {
+  const slider = $("rewardTimeline");
+  if (slider) slider.value = String(Math.max(0, wdValues.length - 1));
+  if (rewardChart?.resetZoom) rewardChart.resetZoom();
+  syncRewardTimelineUI(true);
+}
+function attachRewardLiveHandler() {
+  $("rewardLiveBtn")?.addEventListener("click", () => goRewardLive(), { passive: true });
+}
+function attachRewardFilterHandler() {
+  const sel = $("rewardFilter");
+  if (!sel) return;
+  sel.addEventListener("change", () => {
+    wdMinFilter = safe(sel.value);
+    rebuildWdView();
+    goRewardLive();
+  }, { passive: true });
 }
 
 function maybeRecordRewardWithdrawal(newRewards) {
@@ -2151,60 +1970,15 @@ function maybeRecordRewardWithdrawal(newRewards) {
       kind: "tx",
       title: "Rewards withdrawn",
       detail: `+${diff.toFixed(6)} INJ`,
-      status: "new"
+      status: "pending"
     });
   }
   wdLastRewardsSeen = r;
 }
 
-function attachRewardTimelineHandlers() {
-  const slider = $("rewardTimeline");
-  slider?.addEventListener("input", () => syncRewardTimelineUI(false), { passive: true });
-}
-function goRewardLive() {
-  const slider = $("rewardTimeline");
-  if (slider) slider.value = String(Math.max(0, wdValues.length - 1));
-  if (rewardChart?.resetZoom) rewardChart.resetZoom();
-  syncRewardTimelineUI(true);
-}
-function initRewardControls(){
-  $("rewardScaleToggle")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    rewardScale = rewardScale === "log" ? "linear" : "log";
-    const b = $("rewardScaleToggle");
-    if (b) b.textContent = rewardScale === "log" ? "LOG" : "LIN";
-    saveWdAllLocal();
-    drawRewardWdChart();
-  }, { passive: false });
-  
-  $("rewardRangeConfig")?.addEventListener("click", () => {
-    openRangeModal("reward");
-  }, { passive: true });
-  
-  const rewardTfBtns = document.querySelectorAll(".reward-timeframe .tf-btn");
-  rewardTfBtns.forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      rewardTf = btn.dataset.tf;
-      rewardTfBtns.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      saveWdAllLocal();
-    }, { passive: false });
-  });
-  
-  const filter = $("rewardFilter");
-  if (filter) {
-    filter.addEventListener("change", () => {
-      wdMinFilter = safe(filter.value);
-      rebuildWdView();
-      goRewardLive();
-    }, { passive: true });
-  }
-}
-
-/* ================= NET WORTH ================= */
-let nwTf = "1d";
-let nwScale = "linear";
+/* ================= NET WORTH (persist + chart) ================= */
+let nwTf = "1d";         // 1d | 1w | 1m | 1y | all | live
+let nwScale = "linear";  // linear | log
 let nwTAll = [];
 let nwUsdAll = [];
 let nwInjAll = [];
@@ -2274,7 +2048,7 @@ function nwWindowMs(tf){
   if (tf === "1w") return 7 * 24 * 60 * 60 * 1000;
   if (tf === "1m") return 30 * 24 * 60 * 60 * 1000;
   if (tf === "1y") return 365 * 24 * 60 * 60 * 1000;
-  if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000;
+  if (tf === "all") return 10 * 365 * 24 * 60 * 60 * 1000; // big
   return 24 * 60 * 60 * 1000;
 }
 
@@ -2285,6 +2059,7 @@ function nwHasSpan(tf){
   return span >= nwWindowMs(tf) * 0.8;
 }
 
+/* build view: always left->right, no scroll except live window */
 function nwBuildView(tf){
   const now = Date.now();
   const w = nwWindowMs(tf);
@@ -2299,11 +2074,12 @@ function nwBuildView(tf){
     const u = safe(nwUsdAll[i]);
     if (t >= minT && Number.isFinite(u) && u > 0) {
       times.push(t);
-      labels.push(tsLabel(t));
+      labels.push(tsLabel(t)); // store label as ts
       data.push(u);
     }
   }
 
+  // live: keep only last window (and this will "scroll" by filtering)
   if (tf === "live") {
     const liveMin = now - NW_LIVE_WINDOW_MS;
     const outL = [], outD = [], outT = [];
@@ -2480,10 +2256,13 @@ function drawNW(){
 
   netWorthChart.data.labels = view.labels;
   netWorthChart.data.datasets[0].data = view.data;
+
+  // update y scale type
   netWorthChart.options.scales.y.type = (nwScale === "log") ? "logarithmic" : "linear";
 
   netWorthChart.update("none");
 
+  // pnl
   const pnlEl = $("netWorthPnl");
   if (view.data.length >= 2){
     const first = safe(view.data[0]);
@@ -2517,6 +2296,7 @@ function updateNWTFButtons(){
   const btns = wrap.querySelectorAll(".tf-btn");
   btns.forEach(b => {
     const tf = b.dataset.tf || "";
+    // live always available
     const enabled = (tf === "live") ? true
       : (tf === "1d") ? true
       : (tf === "1w") ? nwHasSpan("1w")
@@ -2532,6 +2312,7 @@ function updateNWTFButtons(){
   });
 }
 
+/* hover interactions */
 function nwGetIndexFromEvent(evt){
   if (!netWorthChart) return null;
   const pts = netWorthChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false);
@@ -2588,7 +2369,7 @@ function attachNWInteractions(){
   canvas.addEventListener("touchcancel", onLeave, { passive: true });
 }
 
-function initNWControls(){
+function attachNWTFHandlers(){
   const wrap = $("nwTfSwitch");
   if (!wrap) return;
 
@@ -2604,16 +2385,29 @@ function initNWControls(){
     drawNW();
   }, { passive:true });
 
-  $("nwScaleToggle")?.addEventListener("click", (e) => {
+  // scale toggle
+  $("nwScaleBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     nwScale = (nwScale === "log") ? "linear" : "log";
-    const b = $("nwScaleToggle");
+    const b = $("nwScaleBtn");
     if (b) b.textContent = (nwScale === "log") ? "LOG" : "LIN";
+    saveNWLocal();
+    drawNW();
+  }, { passive:false });
+
+  // live toggle button
+  $("nwLiveBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    const b = $("nwLiveBtn");
+    const on = (nwTf === "live") ? false : true;
+    nwTf = on ? "live" : "1d";
+    if (b) b.classList.toggle("active", on);
     saveNWLocal();
     drawNW();
   }, { passive:false });
 }
 
+/* record points */
 function recordNetWorthPoint(){
   if (!address) return;
   const px = safe(targetPrice);
@@ -2625,11 +2419,12 @@ function recordNetWorthPoint(){
 
   const now = Date.now();
   const lastT = nwTAll.length ? safe(nwTAll[nwTAll.length - 1]) : 0;
-  const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwTAll.length - 1]) : 0;
+  const lastUsd = nwUsdAll.length ? safe(nwUsdAll[nwUsdAll.length - 1]) : 0;
 
   const dt = now - lastT;
   const dUsd = Math.abs(totalUsd - lastUsd);
 
+  // density control
   if (lastT && dt < 5_000 && dUsd < 0.25) return;
 
   nwTAll.push(now);
@@ -2640,190 +2435,7 @@ function recordNetWorthPoint(){
   drawNW();
 }
 
-function updateNetWorthMiniRows(){
-  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
-  const px = safe(displayed.price);
-
-  setText("nwInjQty", totalInj.toFixed(4));
-  setText("nwInjPx", `$${px.toFixed(2)}`);
-  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
-}
-
-/* ================= APR CHART SYSTEM ================= */
-let aprChart = null;
-let aprLabels = [];
-let aprData = [];
-let aprTimes = [];
-let aprScale = "linear";
-let aprTf = "live";
-
-function aprStoreKey(addr) {
-  const a = (addr || "").trim();
-  return a ? `inj_apr_series_v${APR_LOCAL_VER}_${a}` : null;
-}
-
-function saveAprSeriesLocal() {
-  const key = aprStoreKey(address);
-  if (!key) return;
-  try {
-    localStorage.setItem(key, JSON.stringify({
-      v: APR_LOCAL_VER,
-      t: Date.now(),
-      labels: aprLabels,
-      data: aprData,
-      times: aprTimes,
-      scale: aprScale,
-      tf: aprTf
-    }));
-  } catch {}
-}
-
-function loadAprSeriesLocal() {
-  const key = aprStoreKey(address);
-  if (!key) return false;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    const obj = JSON.parse(raw);
-    if (!obj || obj.v !== APR_LOCAL_VER) return false;
-    
-    aprLabels = Array.isArray(obj.labels) ? obj.labels : [];
-    aprData = Array.isArray(obj.data) ? obj.data : [];
-    aprTimes = Array.isArray(obj.times) ? obj.times : [];
-    aprScale = obj.scale === "log" ? "log" : "linear";
-    aprTf = obj.tf || "live";
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function initAprChart() {
-  const canvas = $("aprChart");
-  if (!canvas || !window.Chart) return;
-  
-  aprChart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: aprLabels,
-      datasets: [{
-        data: aprData,
-        borderColor: "#8b5cf6",
-        backgroundColor: "rgba(139, 92, 246, 0.12)",
-        borderWidth: 2,
-        fill: true,
-        tension: 0.3,
-        cubicInterpolationMode: "monotone",
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        pointBackgroundColor: "#8b5cf6",
-        pointBorderColor: "rgba(249,250,251,0.6)",
-        pointBorderWidth: 1
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          enabled: true,
-          displayColors: false,
-          callbacks: {
-            title: (items) => {
-              const idx = items[0]?.dataIndex ?? 0;
-              const ts = aprTimes[idx] || labelToTs(aprLabels[idx]);
-              return ts ? `${new Date(ts).toLocaleDateString()} ${fmtHHMMSS(ts)}` : "";
-            },
-            label: (item) => `${item.raw.toFixed(2)}% APR`
-          }
-        }
-      },
-      scales: {
-        x: { display: false },
-        y: {
-          type: aprScale === "log" ? "logarithmic" : "linear",
-          position: "right",
-          ticks: {
-            color: axisTickColor(),
-            callback: (v) => `${v.toFixed(2)}%`,
-            maxTicksLimit: 5
-          },
-          grid: { color: axisGridColor() }
-        }
-      }
-    }
-  });
-}
-
-function drawAprChart() {
-  if (!aprChart) initAprChart();
-  if (aprChart) {
-    aprChart.data.labels = aprLabels;
-    aprChart.data.datasets[0].data = aprData;
-    aprChart.options.scales.y.type = aprScale === "log" ? "logarithmic" : "linear";
-    aprChart.update("none");
-  }
-}
-
-function recordAprPoint(newApr) {
-  if (!address) return;
-  const a = safe(newApr);
-  if (!Number.isFinite(a) || a <= 0) return;
-  
-  const now = Date.now();
-  const lastA = aprData.length ? safe(aprData[aprData.length - 1]) : 0;
-  
-  if (aprData.length && Math.abs(a - lastA) < 0.01) return;
-  
-  aprTimes.push(now);
-  aprLabels.push(tsLabel(now));
-  aprData.push(a);
-  
-  if (aprData.length > 1000) {
-    aprTimes.shift();
-    aprLabels.shift();
-    aprData.shift();
-  }
-  
-  saveAprSeriesLocal();
-  drawAprChart();
-  
-  if (aprData.length >= 2 && Math.abs(a - lastA) >= 0.1) {
-    pushEvent({
-      kind: "apr",
-      title: "APR Changed",
-      detail: `${lastA.toFixed(2)}% → ${a.toFixed(2)}%`,
-      dir: a > lastA ? "up" : "down",
-      status: "ok"
-    });
-  }
-}
-
-function initAprControls(){
-  $("aprScaleToggle")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    aprScale = aprScale === "log" ? "linear" : "log";
-    const b = $("aprScaleToggle");
-    if (b) b.textContent = aprScale === "log" ? "LOG" : "LIN";
-    saveAprSeriesLocal();
-    drawAprChart();
-  }, { passive: false });
-  
-  const aprTfBtns = document.querySelectorAll(".apr-timeframe-btn");
-  aprTfBtns.forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      aprTf = btn.dataset.tf;
-      aprTfBtns.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      saveAprSeriesLocal();
-    }, { passive: false });
-  });
-}
-
-/* ================= CLOUD SYNC ================= */
+/* ================= CLOUD SYNC (REAL) ================= */
 const CLOUD_VER = 2;
 const CLOUD_KEY = `inj_cloudmeta_v${CLOUD_VER}`;
 let cloudPts = 0;
@@ -2853,6 +2465,7 @@ function cloudSetState(state){
 
   root.classList.remove("cloud-synced","cloud-saving","cloud-error");
 
+  // footer text
   if (state === "saving"){
     root.classList.add("cloud-saving");
     st.textContent = hasInternet() ? "Cloud: Saving" : "Cloud: Offline cache";
@@ -2864,6 +2477,7 @@ function cloudSetState(state){
     st.textContent = hasInternet() ? "Cloud: Synced" : "Cloud: Offline cache";
   }
 
+  // menu text + dot
   if (cloudDotMenu) {
     cloudDotMenu.classList.remove("ok","saving","err");
     if (state === "saving") cloudDotMenu.classList.add("saving");
@@ -2908,12 +2522,12 @@ function buildCloudPayload(){
     t: Date.now(),
     stake: { labels: stakeLabels, data: stakeData, moves: stakeMoves, types: stakeTypes },
     wd: { labels: wdLabelsAll, values: wdValuesAll, times: wdTimesAll },
-    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll },
-    apr: { labels: aprLabels, data: aprData, times: aprTimes }
+    nw: { times: nwTAll, usd: nwUsdAll, inj: nwInjAll }
   };
 }
 
 function mergeUniqueByTs(baseTimes, baseVals, addTimes, addVals){
+  // assumes times arrays contain ms timestamps
   const map = new Map();
   for (let i=0;i<baseTimes.length;i++){
     const t = safe(baseTimes[i]);
@@ -2937,6 +2551,7 @@ function mergeStakeByLabel(payloadStake){
   const pm = Array.isArray(payloadStake.moves) ? payloadStake.moves : [];
   const pt = Array.isArray(payloadStake.types) ? payloadStake.types : [];
 
+  // merge by timestamp label (we store numeric-label)
   const map = new Map();
   for (let i=0;i<stakeLabels.length;i++){
     const k = String(stakeLabels[i]);
@@ -2955,6 +2570,7 @@ function mergeStakeByLabel(payloadStake){
   stakeMoves = keys.map(k => map.get(k).m);
   stakeTypes = keys.map(k => map.get(k).t);
 
+  // clamp
   stakeLabels = clampArray(stakeLabels, 2400);
   stakeData   = clampArray(stakeData,   2400);
   stakeMoves  = clampArray(stakeMoves,  2400);
@@ -2970,6 +2586,7 @@ function mergeWd(payloadWd){
   const pv = Array.isArray(payloadWd.values) ? payloadWd.values : [];
   const pt = Array.isArray(payloadWd.times) ? payloadWd.times : [];
 
+  // merge by times (preferred)
   const map = new Map();
   for (let i=0;i<wdTimesAll.length;i++){
     const t = safe(wdTimesAll[i]) || labelToTs(wdLabelsAll[i]);
@@ -2987,6 +2604,7 @@ function mergeWd(payloadWd){
   wdValuesAll = times.map(t => map.get(t).v);
   wdLabelsAll = times.map(t => map.get(t).l);
 
+  // clamp
   wdTimesAll  = clampArray(wdTimesAll, 2400);
   wdValuesAll = clampArray(wdValuesAll, 2400);
   wdLabelsAll = clampArray(wdLabelsAll, 2400);
@@ -3008,36 +2626,6 @@ function mergeNW(payloadNw){
   clampNWArrays();
 }
 
-function mergeApr(payloadApr){
-  if (!payloadApr) return;
-  const pl = Array.isArray(payloadApr.labels) ? payloadApr.labels : [];
-  const pd = Array.isArray(payloadApr.data) ? payloadApr.data : [];
-  const pt = Array.isArray(payloadApr.times) ? payloadApr.times : [];
-
-  const map = new Map();
-  for (let i=0;i<aprTimes.length;i++){
-    const t = safe(aprTimes[i]) || labelToTs(aprLabels[i]);
-    if (!t) continue;
-    map.set(t, { d: safe(aprData[i]), l: String(aprLabels[i] || tsLabel(t)) });
-  }
-  for (let i=0;i<pt.length;i++){
-    const t = safe(pt[i]) || labelToTs(pl[i]);
-    if (!t) continue;
-    if (!map.has(t)) map.set(t, { d: safe(pd[i]), l: String(pl[i] || tsLabel(t)) });
-  }
-
-  const times = [...map.keys()].sort((a,b)=>a-b);
-  aprTimes = times;
-  aprData = times.map(t => map.get(t).d);
-  aprLabels = times.map(t => map.get(t).l);
-
-  if (aprData.length > 1000) {
-    aprTimes = aprTimes.slice(-1000);
-    aprData = aprData.slice(-1000);
-    aprLabels = aprLabels.slice(-1000);
-  }
-}
-
 async function cloudPull(){
   if (!address) return;
   if (!hasInternet()) { cloudSetState("synced"); return; }
@@ -3052,8 +2640,8 @@ async function cloudPull(){
     mergeStakeByLabel(data.stake);
     mergeWd(data.wd);
     mergeNW(data.nw);
-    mergeApr(data.apr);
 
+    // rebuild chart views
     saveStakeSeriesLocal();
     saveWdAllLocal();
     rebuildWdView();
@@ -3062,8 +2650,6 @@ async function cloudPull(){
     drawNW();
     drawStakeChart();
     drawRewardWdChart();
-    saveAprSeriesLocal();
-    drawAprChart();
 
     cloudLastSync = Date.now();
     cloudSaveMeta();
@@ -3100,10 +2686,23 @@ async function cloudPush(){
   cloudSetState("synced");
 }
 
-/* ================= PRICE EVENTS ================= */
+/* ================= NET WORTH UI rows ================= */
+function updateNetWorthMiniRows(){
+  const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
+  const px = safe(displayed.price);
+
+  setText("nwInjQty", totalInj.toFixed(4));
+  setText("nwInjPx", `$${px.toFixed(2)}`);
+
+  // also big total INJ label if present
+  setText("netWorthInj", `${totalInj.toFixed(4)} INJ`);
+}
+
+/* ================= IMPORTANT PRICE EVENTS (24h thresholds) ================= */
 let lastPriceStepUp = 0;
 let lastPriceStepDown = 0;
 function maybePriceEvent(pct24h){
+  // fire at each 5% step
   const step = 5;
   const upSteps = Math.floor(Math.max(0, pct24h) / step);
   const dnSteps = Math.floor(Math.max(0, -pct24h) / step);
@@ -3146,282 +2745,7 @@ function refreshChartsTheme(){
       netWorthChart.options.scales.x.ticks.color = axisTickColor();
       netWorthChart.update("none");
     }
-    if (aprChart) {
-      aprChart.options.scales.y.grid.color = axisGridColor();
-      aprChart.options.scales.y.ticks.color = axisTickColor();
-      aprChart.update("none");
-    }
   } catch {}
-}
-
-/* ================= RANGE MODAL ================= */
-let currentRangeType = null;
-const rangeModal = $("rangeModal");
-const rangeMin = $("rangeMin");
-const rangeMax = $("rangeMax");
-const rangeModalClose = $("rangeModalClose");
-const rangeCancel = $("rangeCancel");
-const rangeApply = $("rangeApply");
-
-function openRangeModal(type){
-  currentRangeType = type;
-  
-  if (type === "stake") {
-    rangeMin.value = stakeCustomRange.min;
-    rangeMax.value = stakeCustomRange.max;
-  } else if (type === "reward") {
-    rangeMin.value = rewardCustomRange.min;
-    rangeMax.value = rewardCustomRange.max;
-  }
-  
-  rangeModal.classList.add("show");
-  rangeModal.setAttribute("aria-hidden", "false");
-}
-
-function closeRangeModal(){
-  rangeModal.classList.remove("show");
-  rangeModal.setAttribute("aria-hidden", "true");
-  currentRangeType = null;
-}
-
-function applyRange(){
-  const min = safe(rangeMin.value);
-  const max = safe(rangeMax.value);
-  
-  if (min >= max) {
-    alert("Maximum must be greater than minimum");
-    return;
-  }
-  
-  if (currentRangeType === "stake") {
-    stakeCustomRange = { min, max };
-    saveStakeSeriesLocal();
-    // Update UI
-    const label = document.querySelector(".stake-scale-row .range-label");
-    if (label) label.textContent = `Range: ${min}-${max}`;
-  } else if (currentRangeType === "reward") {
-    rewardCustomRange = { min, max };
-    saveWdAllLocal();
-    const label = document.querySelector(".reward-scale-row .range-label");
-    if (label) label.textContent = `Range: ${min}-${max}`;
-  }
-  
-  closeRangeModal();
-}
-
-rangeModalClose?.addEventListener("click", closeRangeModal, { passive: true });
-rangeCancel?.addEventListener("click", closeRangeModal, { passive: true });
-rangeApply?.addEventListener("click", applyRange, { passive: true });
-
-rangeModal?.addEventListener("click", (e) => {
-  if (e.target === rangeModal) closeRangeModal();
-}, { passive: true });
-
-/* ================= TOOLS PAGE ================= */
-function initToolsPage(){
-  // Converter
-  const convertBtn = $("convertBtn");
-  const convertAmount = $("convertAmount");
-  const convertCurrency = $("convertCurrency");
-  const exchangeRate = $("exchangeRate");
-  
-  function updateConverter(){
-    const amount = safe(convertAmount.value);
-    const currency = convertCurrency.value;
-    const rate = safe(exchangeRate.value);
-    const injPrice = safe(targetPrice) || safe(displayed.price);
-    
-    let eur, usd, inj;
-    
-    if (currency === "EUR") {
-      eur = amount;
-      usd = amount * rate;
-    } else {
-      usd = amount;
-      eur = amount / rate;
-    }
-    
-    inj = usd / injPrice;
-    
-    $("resultEur").textContent = `€${eur.toFixed(2)}`;
-    $("resultUsd").textContent = `$${usd.toFixed(2)}`;
-    $("resultInj").textContent = `${inj.toFixed(6)} INJ`;
-    $("currentInjPrice").textContent = injPrice.toFixed(4);
-  }
-  
-  convertBtn?.addEventListener("click", updateConverter, { passive: true });
-  convertAmount?.addEventListener("input", updateConverter, { passive: true });
-  convertCurrency?.addEventListener("change", updateConverter, { passive: true });
-  exchangeRate?.addEventListener("input", updateConverter, { passive: true });
-  
-  // Market Cap Comparator
-  const compareBtn = $("compareBtn");
-  const compareCurrency = $("compareCurrency");
-  const formatBtns = document.querySelectorAll(".format-btn");
-  
-  const marketCaps = {
-    BTC: 1_200_000_000_000,
-    ETH: 450_000_000_000,
-    SOL: 80_000_000_000,
-    ATOM: 4_500_000_000,
-    DOT: 12_000_000_000,
-    INJ: 3_500_000_000
-  };
-  
-  let currentFormat = "billions";
-  
-  function formatNumber(num, format){
-    if (format === "thousands") return `$${(num / 1_000).toFixed(1)}K`;
-    if (format === "millions") return `$${(num / 1_000_000).toFixed(1)}M`;
-    if (format === "billions") return `$${(num / 1_000_000_000).toFixed(2)}B`;
-    if (format === "trillions") return `$${(num / 1_000_000_000_000).toFixed(3)}T`;
-    return `$${num.toFixed(0)}`;
-  }
-  
-  function updateMarketCap(){
-    const selected = compareCurrency.value;
-    const injCap = marketCaps.INJ;
-    const compareCap = marketCaps[selected];
-    const ratio = (injCap / compareCap) * 100;
-    
-    $("injCap").textContent = formatNumber(injCap, currentFormat);
-    $("compareCoinName").textContent = selected;
-    $("compareCap").textContent = formatNumber(compareCap, currentFormat);
-    $("capRatio").textContent = `${ratio.toFixed(2)}%`;
-    
-    const injBar = $("injBar");
-    const compareBar = $("compareBar");
-    
-    if (injBar && compareBar) {
-      const maxCap = Math.max(injCap, compareCap);
-      injBar.style.width = `${(injCap / maxCap) * 100}%`;
-      compareBar.style.width = `${(compareCap / maxCap) * 100}%`;
-    }
-  }
-  
-  compareBtn?.addEventListener("click", updateMarketCap, { passive: true });
-  compareCurrency?.addEventListener("change", updateMarketCap, { passive: true });
-  
-  formatBtns.forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      formatBtns.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentFormat = btn.dataset.format;
-      updateMarketCap();
-    }, { passive: false });
-  });
-  
-  // Initial updates
-  updateConverter();
-  updateMarketCap();
-}
-
-/* ================= SETTINGS PAGE ================= */
-function initSettingsPage(){
-  const defaultMode = $("defaultMode");
-  const defaultTheme = $("defaultTheme");
-  const resetSelect = $("resetSelect");
-  const resetConfirm = $("resetConfirm");
-  const resetCancel = $("resetCancel");
-  const resetExecute = $("resetExecute");
-  const settingsSave = $("settingsSave");
-  
-  // Load current settings
-  if (defaultMode) defaultMode.value = liveMode ? "live" : "refresh";
-  if (defaultTheme) defaultTheme.value = theme;
-  
-  // Reset selector
-  resetSelect?.addEventListener("change", (e) => {
-    if (e.target.value) {
-      resetConfirm.style.display = "block";
-    } else {
-      resetConfirm.style.display = "none";
-    }
-  }, { passive: true });
-  
-  resetCancel?.addEventListener("click", () => {
-    resetSelect.value = "";
-    resetConfirm.style.display = "none";
-  }, { passive: true });
-  
-  resetExecute?.addEventListener("click", () => {
-    const type = resetSelect.value;
-    if (!type) return;
-    
-    if (type === "stake" || type === "all") {
-      stakeLabels = [];
-      stakeData = [];
-      stakeMoves = [];
-      stakeTypes = [];
-      stakeBaselineCaptured = false;
-      lastStakeRecordedRounded = null;
-      saveStakeSeriesLocal();
-      drawStakeChart();
-    }
-    
-    if (type === "rewards" || type === "all") {
-      wdLabelsAll = [];
-      wdValuesAll = [];
-      wdTimesAll = [];
-      wdLastRewardsSeen = null;
-      saveWdAllLocal();
-      rebuildWdView();
-    }
-    
-    if (type === "networth" || type === "all") {
-      nwTAll = [];
-      nwUsdAll = [];
-      nwInjAll = [];
-      saveNWLocal();
-      drawNW();
-    }
-    
-    if (type === "apr" || type === "all") {
-      aprLabels = [];
-      aprData = [];
-      aprTimes = [];
-      saveAprSeriesLocal();
-      drawAprChart();
-    }
-    
-    pushEvent({
-      kind: "info",
-      title: "Chart Data Reset",
-      detail: `${type === "all" ? "All charts" : type + " chart"} data has been reset.`,
-      status: "ok"
-    });
-    
-    resetSelect.value = "";
-    resetConfirm.style.display = "none";
-  }, { passive: true });
-  
-  // Save settings
-  settingsSave?.addEventListener("click", () => {
-    if (defaultMode) {
-      const newMode = defaultMode.value === "live";
-      if (newMode !== liveMode) {
-        setMode(newMode);
-      }
-    }
-    
-    if (defaultTheme) {
-      const newTheme = defaultTheme.value;
-      if (newTheme !== theme) {
-        applyTheme(newTheme);
-      }
-    }
-    
-    pushEvent({
-      kind: "info",
-      title: "Settings Saved",
-      detail: "Your preferences have been updated.",
-      status: "ok"
-    });
-    
-    showPage("dashboard");
-    setActivePage("dashboard");
-  }, { passive: true });
 }
 
 /* ================= ADDRESS COMMIT ================= */
@@ -3435,9 +2759,11 @@ async function commitAddress(newAddr) {
   setAddressDisplay(address);
   settleStart = Date.now();
 
+  // reset runtime
   availableInj = 0; stakeInj = 0; rewardsInj = 0; apr = 0;
   displayed.available = 0; displayed.stake = 0; displayed.rewards = 0; displayed.netWorthUsd = 0; displayed.apr = 0;
 
+  // load local series
   loadStakeSeriesLocal();
   drawStakeChart();
 
@@ -3448,19 +2774,18 @@ async function commitAddress(newAddr) {
   goRewardLive();
 
   loadNWLocal();
-  const scaleBtn = $("nwScaleToggle");
+  const scaleBtn = $("nwScaleBtn");
   if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
-  initNWControls();
+  const liveBtn = $("nwLiveBtn");
+  if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
+  attachNWTFHandlers();
   drawNW();
 
-  loadAprSeriesLocal();
-  initAprControls();
-  drawAprChart();
-
+  // events
   loadEvents();
   renderEvents();
-  updateEventsBadge();
 
+  // cloud pull
   cloudSetState("saving");
   await cloudPull();
 
@@ -3475,7 +2800,7 @@ async function commitAddress(newAddr) {
   }
 }
 
-/* ================= ONLINE / OFFLINE ================= */
+/* ================= ONLINE / OFFLINE listeners ================= */
 window.addEventListener("online", () => {
   refreshConnUI();
   setValidatorUI("ready");
@@ -3504,10 +2829,11 @@ window.addEventListener("offline", () => {
 
 /* ================= BOOT ================= */
 (async function boot() {
+  // theme + zoom
   applyTheme(theme);
-  applyPrivacyMode(privacyMode);
   ZOOM_OK = tryRegisterZoom();
 
+  // ui
   cloudLoadMeta();
   cloudRenderMeta();
   cloudSetState("synced");
@@ -3515,42 +2841,40 @@ window.addEventListener("offline", () => {
   setTimeout(() => setUIReady(true), 2600);
 
   attachRewardTimelineHandlers();
-  initRewardControls();
-  initStakeControls();
-  initChartControls();
-  initAprControls();
-  initEventsPage();
-  setupCopyAddress();
+  attachRewardLiveHandler();
+  attachRewardFilterHandler();
 
   if (liveIcon) liveIcon.textContent = liveMode ? "📡" : "⟳";
   if (modeHint) modeHint.textContent = `Mode: ${liveMode ? "LIVE" : "REFRESH"}`;
-  
-  const liveLabel = $("liveLabel");
-  if (liveLabel) liveLabel.textContent = liveMode ? "Live" : "Refresh";
 
+  // bind expand
   bindExpandButtons();
+
+  // pull-to-refresh
   initPullToRefresh();
+
+  // address display
   setAddressDisplay(address);
 
+  // initial data for last saved address
   wdMinFilter = safe($("rewardFilter")?.value || 0);
 
   if (address) {
+    // local loads first
     loadStakeSeriesLocal(); drawStakeChart();
     loadWdAllLocal(); rebuildWdView(); goRewardLive();
     loadNWLocal();
-    const scaleBtn = $("nwScaleToggle");
+    const scaleBtn = $("nwScaleBtn");
     if (scaleBtn) scaleBtn.textContent = (nwScale === "log") ? "LOG" : "LIN";
-    initNWControls();
+    const liveBtn = $("nwLiveBtn");
+    if (liveBtn) liveBtn.classList.toggle("active", nwTf === "live");
+    attachNWTFHandlers();
     drawNW();
-    
-    loadAprSeriesLocal();
-    initAprControls();
-    drawAprChart();
 
     loadEvents();
     renderEvents();
-    updateEventsBadge();
 
+    // cloud merge
     await cloudPull();
   }
 
@@ -3575,7 +2899,7 @@ window.addEventListener("offline", () => {
   }
 })();
 
-/* ================= ANIMATION LOOP ================= */
+/* ================= LOOP ================= */
 function animate() {
   // PRICE
   const op = displayed.price;
@@ -3591,8 +2915,10 @@ function animate() {
   updatePerf("arrowWeek", "pctWeek", pW);
   updatePerf("arrowMonth", "pctMonth", pM);
 
+  // price event thresholds (24h)
   if (tfReady.d) maybePriceEvent(pD);
 
+  // Chart sign color
   const sign = pD > 0 ? "up" : (pD < 0 ? "down" : "flat");
   applyChartColorBySign(sign);
 
@@ -3609,6 +2935,7 @@ function animate() {
   renderBar($("weekBar"),  $("weekLine"),  targetPrice, candle.w.open, candle.w.low, candle.w.high, wUp, wDown);
   renderBar($("monthBar"), $("monthLine"), targetPrice, candle.m.open, candle.m.low, candle.m.high, mUp, mDown);
 
+  // Values + flash extremes
   const pMinEl = $("priceMin"), pMaxEl = $("priceMax");
   const wMinEl = $("weekMin"),  wMaxEl = $("weekMax");
   const mMinEl = $("monthMin"), mMaxEl = $("monthMax");
@@ -3661,7 +2988,7 @@ function animate() {
   colorNumber($("stake"), displayed.stake, os, 4);
   setText("stakeUsd", `≈ $${(displayed.stake * displayed.price).toFixed(2)}`);
 
-  const stakePct = clamp((displayed.stake / stakeCustomRange.max) * 100, 0, 100);
+  const stakePct = clamp((displayed.stake / STAKE_TARGET_MAX) * 100, 0, 100);
   const stakeBar = $("stakeBar");
   const stakeLine = $("stakeLine");
   if (stakeBar) {
@@ -3670,8 +2997,8 @@ function animate() {
   }
   if (stakeLine) stakeLine.style.left = stakePct + "%";
   setText("stakePercent", stakePct.toFixed(1) + "%");
-  setText("stakeMin", stakeCustomRange.min.toString());
-  setText("stakeMax", stakeCustomRange.max.toString());
+  setText("stakeMin", "0");
+  setText("stakeMax", String(STAKE_TARGET_MAX));
 
   // REWARDS
   const or = displayed.rewards;
@@ -3679,7 +3006,7 @@ function animate() {
   colorNumber($("rewards"), displayed.rewards, or, 7);
   setText("rewardsUsd", `≈ $${(displayed.rewards * displayed.price).toFixed(2)}`);
 
-  const maxR = Math.max(rewardCustomRange.max, Math.ceil(displayed.rewards * 10) / 10);
+  const maxR = Math.max(0.1, Math.ceil(displayed.rewards * 10) / 10);
   const rp = clamp((displayed.rewards / maxR) * 100, 0, 100);
 
   const rewardBar = $("rewardBar");
@@ -3690,18 +3017,18 @@ function animate() {
   }
   if (rewardLine) rewardLine.style.left = rp + "%";
   setText("rewardPercent", rp.toFixed(1) + "%");
-  setText("rewardMin", rewardCustomRange.min.toString());
+  setText("rewardMin", "0");
   setText("rewardMax", maxR.toFixed(1));
 
-  // APR
+  // APR (animated like price)
   const oapr = displayed.apr;
   displayed.apr = tick(displayed.apr, apr);
   colorNumber($("apr"), displayed.apr, oapr, 2);
 
-  // Last update
+  // Last update at bottom
   setText("updated", "Last update: " + nowLabel());
 
-  // NET WORTH
+  /* ================= NET WORTH UI ================= */
   const totalInj = safe(availableInj) + safe(stakeInj) + safe(rewardsInj);
   const totalUsd = totalInj * safe(displayed.price);
 
@@ -3709,43 +3036,35 @@ function animate() {
     const onw = displayed.netWorthUsd;
     displayed.netWorthUsd = tick(displayed.netWorthUsd, totalUsd);
     colorMoney($("netWorthUsd"), displayed.netWorthUsd, onw, 2);
+
+    // keep pnl & chart updated (live view filters window)
     drawNW();
   }
 
   updateNetWorthMiniRows();
-  updateRewardEstimates();
 
-  if (address && liveMode) {
-    recordNetWorthPoint();
-    recordAprPoint(apr);
-  }
+  // densità: registra spesso (solo live + address)
+  if (address && liveMode) recordNetWorthPoint();
 
+  // cloud push if dirty (debounced)
   if (cloudDirty && hasInternet()) scheduleCloudPush();
 
   refreshConnUI();
   setValidatorUI("ready");
 
+  // keep dot fluid
   if (netWorthChart) netWorthChart.draw();
 
   requestAnimationFrame(animate);
 }
 animate();
 
-/* ================= v2.1.0 CHANGELOG =================
-✅ Added APR chart with log/linear scaling and timeframe buttons
-✅ Added Settings page with Advanced reset options
-✅ Enhanced Events page with pagination, filters, and badge counter
-✅ Added Privacy Mode toggle (eye icon in menu)
-✅ Added Copy Address button next to wallet display
-✅ Improved all charts with consistent scale toggles
-✅ Added Range Configuration modal for stake/reward charts
-✅ Added Reward Estimates (daily/weekly/monthly)
-✅ Enhanced Tools page with Converter and Market Cap Comparator
-✅ Fixed all chart label positions and improved mobile responsiveness
-✅ Added blinking dots on live charts
-✅ Improved timeframe labels on price bars
-✅ All data now properly scoped to individual addresses
-✅ Enhanced cloud sync with APR data support
-✅ Fixed expand button positions
-✅ Added proper event filtering and pagination
-=================================================== */
+/* ================= WHAT WAS ADDED (this file) =================
+✅ FIX: Coming soon close works always (button + background + ESC)
+✅ Menu: Event opens dedicated Events page; other items open coming soon overlay
+✅ Validator card: single card, Injective validator fetched (if delegations exist), status dot yellow/green/red
+✅ Cloud Sync: real GET/POST to /api/point with Saving/Synced/Error reflected in menu + footer
+✅ Address search: wallet stays displayed, input clears after commit
+✅ Events: toast slide-down + persistence + events table rendering; stake/reward/price events added
+✅ Pull-to-refresh: enabled only in REFRESH mode (mobile), shows spinner and refreshes data
+=============================================================== */
